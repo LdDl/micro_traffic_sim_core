@@ -256,5 +256,14 @@ mod tests {
             correct_distance,
             distance
         );
+
+        let distance = gc_distance_pt(Point::new(37.61556, 55.75222), Point::new(30.31413, 59.93863));
+        // Assert that the absolute difference is less than a small threshold
+        assert!(
+            (distance - correct_distance).abs() < 0.001,
+            "Distance should be {}, but got {}",
+            correct_distance,
+            distance
+        );
     }
 }

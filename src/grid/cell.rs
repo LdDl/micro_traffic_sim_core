@@ -1,0 +1,269 @@
+use std::fmt;
+use crate::geom::Point;
+use crate::geom::gc_distance_pt;
+use crate::grid::zones::ZoneType;
+
+/// Represents different possible states of a cell.
+///
+/// `CellState` indicates the current condition of a cell, such as whether it is free or banned.
+#[derive(Debug, Clone, Copy)]
+pub enum CellState {
+    /// The cell is free and available for use.
+    Free = 0,
+    /// The cell is banned and cannot be used by agents.
+    Banned,
+}
+
+impl fmt::Display for CellState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CellState::Free => write!(f, "free"),
+            CellState::Banned => write!(f, "banned"),
+        }
+    }
+}
+
+pub type CellID = i64; // Alias for CellID
+
+/// Represents a single cell in the road network.
+///
+/// A `Cell` represents a location within the road network and contains properties like its ID, position, type, 
+/// speed limit, neighboring cells, and its current state.
+#[derive(Debug)]
+pub struct Cell {
+    /// Unique identifier for the cell.
+    id: CellID,
+    /// Coordinates of the cell in the road network.
+    point: Point,
+    /// The zone type to which the cell belongs (e.g., Birth, Death, etc.).
+    type_zone: ZoneType,
+    /// The speed limit for vehicles moving through the cell. Since cell is cellular automata entity it should be integer rather that decimal
+    speed_limit: i32,
+    /// Identifier for the left neighboring cell.
+    left_cell: CellID,
+    /// Identifier for the forward neighboring cell.
+    forward_cell: CellID,
+    /// Identifier for the right neighboring cell.
+    right_cell: CellID,
+    /// Identifier linking the cell to a mesoscopic graph (if applicable).
+    meso_link_id: i64,
+    /// Current state of the cell (e.g., free, banned).
+    state: CellState,
+}
+
+impl Cell {
+    /// Constructs a new `CellBuilder` for building a `Cell` object.
+    ///
+    /// # Arguments
+    /// * `id` - A unique identifier for the cell.
+    ///
+    /// # Returns
+    /// A `CellBuilder` struct which is used to configure and build the `Cell` object.
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::geom::Point;
+    /// use micro_traffic_sim_core::grid::zones::ZoneType;
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let cell = Cell::new(1)
+    ///     .with_point(Point::new(10.0, 20.0))
+    ///     .with_zone_type(ZoneType::Birth)
+    ///     .build();
+    /// ```
+    pub fn new(id: CellID) -> CellBuilder {
+        CellBuilder {
+            cell: Cell {
+                id,
+                point: Point { x: -1.0, y: -1.0 },
+                type_zone: ZoneType::Undefined,
+                speed_limit: -1,
+                left_cell: -1,
+                forward_cell: -1,
+                right_cell: -1,
+                meso_link_id: -1,
+                state: CellState::Free,
+            },
+        }
+    }
+
+    /// Calculates the Euclidean distance to another cell.
+    ///
+    /// # Arguments
+    /// * `other` - Another `Cell` object to which the distance is computed.
+    ///
+    /// # Returns
+    /// A floating-point value representing the distance between the two cells in the road network.
+    ///
+    /// # Example
+    /// 
+    /// ```
+    /// use micro_traffic_sim_core::geom::Point;
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let cell1 = Cell::new(1)
+    ///     .with_point(Point::new(37.61556, 55.75222))
+    ///     .build();
+    /// let cell2 = Cell::new(2)
+    ///     .with_point(Point::new(30.31413, 59.93863))
+    ///     .build();
+    /// let distance = cell1.distance_to(&cell2);
+    /// println!("Distance: {}", distance);
+    /// ```
+    pub fn distance_to(&self, other: &Cell) -> f64 {
+        gc_distance_pt(self.point, other.point)
+    }
+
+    /// Sets a new state for the cell.
+    ///
+    /// # Arguments
+    /// * `new_state` - The new `CellState` to set for the cell.
+    pub fn set_state(&mut self, new_state: CellState) {
+        self.state = new_state;
+    }
+
+    /// Returns the current state of the cell.
+    ///
+    /// # Returns
+    /// The current `CellState` of the cell.
+    pub fn get_state(&self) -> CellState {
+        self.state
+    }
+
+    /// Returns the unique identifier (ID) of the cell.
+    ///
+    /// # Returns
+    /// The `CellID` of the cell.
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let cell = Cell::new(1).build();
+    /// println!("Cell ID: {}", cell.get_id());
+    /// ```
+    pub fn get_id(&self) -> CellID {
+        self.id
+    }
+}
+
+/// A builder pattern implementation for constructing `Cell` objects.
+///
+/// `CellBuilder` allows for optional configuration of `Cell` fields before building the final `Cell` object.
+pub struct CellBuilder {
+    cell: Cell,
+}
+
+impl CellBuilder {
+    /// Sets the point (coordinates) for the cell.
+    ///
+    /// # Arguments
+    /// * `point` - The `Point` struct containing the cell's coordinates.
+    ///
+    /// # Returns
+    /// A `CellBuilder` instance for further method chaining.
+    pub fn with_point(mut self, point: Point) -> Self {
+        self.cell.point = point;
+        self
+    }
+
+    /// Sets the zone type for the cell.
+    ///
+    /// # Arguments
+    /// * `zone_type` - The `ZoneType` to assign to the cell.
+    ///
+    /// # Returns
+    /// A `CellBuilder` instance for further method chaining.
+    pub fn with_zone_type(mut self, zone_type: ZoneType) -> Self {
+        self.cell.type_zone = zone_type;
+        self
+    }
+
+    /// Sets the speed limit for the cell.
+    ///
+    /// # Arguments
+    /// * `speed_limit` - An integer value representing the speed limit in the cell.
+    ///
+    /// # Returns
+    /// A `CellBuilder` instance for further method chaining.
+    pub fn with_speed_limit(mut self, speed_limit: i32) -> Self {
+        self.cell.speed_limit = speed_limit;
+        self
+    }
+
+    /// Sets the identifier for the forward (neighboring) cell.
+    ///
+    /// # Arguments
+    /// * `forward_cell` - The `CellID` representing the forward neighbor.
+    ///
+    /// # Returns
+    /// A `CellBuilder` instance for further method chaining.
+    pub fn with_forward_node(mut self, forward_cell: CellID) -> Self {
+        self.cell.forward_cell = forward_cell;
+        self
+    }
+
+    /// Sets the identifier for the left (neighboring) cell.
+    ///
+    /// # Arguments
+    /// * `left_cell` - The `CellID` representing the left neighbor.
+    ///
+    /// # Returns
+    /// A `CellBuilder` instance for further method chaining.
+    pub fn with_left_node(mut self, left_cell: CellID) -> Self {
+        self.cell.left_cell = left_cell;
+        self
+    }
+
+    /// Sets the identifier for the right (neighboring) cell.
+    ///
+    /// # Arguments
+    /// * `right_cell` - The `CellID` representing the right neighbor.
+    ///
+    /// # Returns
+    /// A `CellBuilder` instance for further method chaining.
+    pub fn with_right_node(mut self, right_cell: CellID) -> Self {
+        self.cell.right_cell = right_cell;
+        self
+    }
+
+    /// Sets the mesoscopic link identifier for the cell.
+    ///
+    /// # Arguments
+    /// * `meso_link_id` - The integer value representing the mesoscopic link.
+    ///
+    /// # Returns
+    /// A `CellBuilder` instance for further method chaining.
+    pub fn with_meso_link(mut self, meso_link_id: i64) -> Self {
+        self.cell.meso_link_id = meso_link_id;
+        self
+    }
+
+    /// Builds the final `Cell` object with the configured properties.
+    ///
+    /// # Returns
+    /// The fully constructed `Cell` object.
+    pub fn build(self) -> Cell {
+        self.cell
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_cells_gc_distance() {
+        let correct_distance = 634430.92026;
+        let cell1 = Cell::new(1)
+            .with_point(Point::new(37.61556, 55.75222))
+            .build();
+        let cell2 = Cell::new(2)
+            .with_point(Point::new(30.31413, 59.93863))
+            .build();
+        let distance = cell1.distance_to(&cell2);
+        // Assert that the absolute difference is less than a small threshold
+        assert!(
+            (distance - correct_distance).abs() < 0.001,
+            "Distance should be {}, but got {}",
+            correct_distance,
+            distance
+        );
+    }
+}
