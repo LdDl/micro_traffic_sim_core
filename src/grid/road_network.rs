@@ -1,35 +1,35 @@
 use std::collections::HashMap;
 use crate::grid::cell::{CellID, Cell};
 
-/// `Grid` is a struct representing a 2D grid of cells of the road network.
+/// `GridRoads` is a struct representing a 2D grid of cells of the road network.
 /// It holds a collection of cells identified by unique `CellID`s.
 ///
 /// This struct is used to store, retrieve, and manipulate individual cells
 ///
 #[derive(Debug)]
-pub struct Grid {
+pub struct GridRoads {
     // A `HashMap` mapping each `CellID` to its corresponding `Cell` object.
     cells: HashMap<CellID, Cell>,
 }
 
-impl Grid {
-    /// Creates a new, empty `Grid`.
+impl GridRoads {
+    /// Creates a new, empty `GridRoads`.
     ///
     /// # Returns
-    /// A new instance of `Grid` with an empty `cells` collection.
+    /// A new instance of `GridRoads` with an empty `cells` collection.
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::grid::road_network::Grid;
-    /// let grid = Grid::new();
+    /// use micro_traffic_sim_core::grid::road_network::GridRoads;
+    /// let grid = GridRoads::new();
     /// ```
     pub fn new() -> Self {
-        Grid {
+        GridRoads {
             cells: HashMap::new(),
         }
     }
 
-    /// Adds a `Cell` to the grid.
+    /// Adds a `GridRoads` to the grid.
     ///
     /// This method inserts the `Cell` into the `cells` collection,
     /// using its `CellID` as the key. If a cell with the same ID already exists,
@@ -41,8 +41,8 @@ impl Grid {
     /// # Example
     /// ```
     /// use micro_traffic_sim_core::grid::cell::Cell;
-    /// use micro_traffic_sim_core::grid::road_network::Grid;
-    /// let mut grid = Grid::new();
+    /// use micro_traffic_sim_core::grid::road_network::GridRoads;
+    /// let mut grid = GridRoads::new();
     /// let cell = Cell::new(1).build();
     /// grid.add_cell(cell);
     /// ```
@@ -65,8 +65,8 @@ impl Grid {
     /// # Example
     /// ```
     /// use micro_traffic_sim_core::grid::cell::Cell;
-    /// use micro_traffic_sim_core::grid::road_network::Grid;
-    /// let mut grid = Grid::new();
+    /// use micro_traffic_sim_core::grid::road_network::GridRoads;
+    /// let mut grid = GridRoads::new();
     /// let cell = Cell::new(1).build();
     /// grid.add_cell(cell);
     ///
