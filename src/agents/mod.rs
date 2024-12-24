@@ -1,4 +1,4 @@
-//! Export contents of `geom` folder
+//! Export contents of `agents` folder
 mod agents;
 mod behaviour;
 
