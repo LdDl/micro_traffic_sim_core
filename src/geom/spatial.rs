@@ -127,7 +127,8 @@ pub fn convert_epsg3857_to_4326(lat: f64, lng: f64) -> (f64, f64) {
 /// println!("Great-circle distance: {} km", distance);
 /// ```
 pub fn gc_distance_pt(src: Point, dst: Point) -> f64 {
-    gc_distance(src.x, src.y, dst.x, dst.y)
+    ((src.x-dst.x)*(src.x - dst.x) + (src.y-dst.y)*(src.y-dst.y)).sqrt()
+    // gc_distance(src.x, src.y, dst.x, dst.y)
 }
 
 /// gc_distance

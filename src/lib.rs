@@ -5,4 +5,4 @@ pub mod geom;
 pub mod grid;
 pub mod shortest_path;
 pub mod traffic_lights;
-
+pub mod utils;

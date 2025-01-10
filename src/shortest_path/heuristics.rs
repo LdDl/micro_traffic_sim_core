@@ -1,13 +1,15 @@
 use crate::grid::cell::Cell;
 
-/// Calculates the heuristic distance (Euclidean) between two cells.
+/// Calculates the heuristic parameter between two cells.
 ///
 /// # Arguments
 /// * `start` - The starting cell.
 /// * `end` - The target cell.
 ///
 /// # Returns
-/// A floating-point value representing the heuristic distance.
+/// A floating-point value representing the heuristic value. In current implmentation it is
+/// shortcut to calling .distance_to for two given cells basically.
+///
 /// # Example
 ///
 /// ```
@@ -20,7 +22,8 @@ use crate::grid::cell::Cell;
 /// let cell2 = Cell::new(2)
 ///     .with_point(Point::new(30.31413, 59.93863))
 ///     .build();
-/// println!("heuristics value: {}", heuristic(&cell1, &cell2));
+/// let heuristic_val = heuristic(&cell1, &cell2);
+/// println!("Heuristic: {}", heuristic_val);
 /// ```
 pub fn heuristic(start: &Cell, end: &Cell) -> f64 {
     start.distance_to(end)
@@ -30,22 +33,26 @@ pub fn heuristic(start: &Cell, end: &Cell) -> f64 {
 mod tests {
     use super::*;
     use crate::geom::Point;
+    use crate::grid::cell::Cell;
+
     #[test]
     fn test_heuristic() {
-        let correct_distance = 634430.92026;
         let cell1 = Cell::new(1)
-            .with_point(Point::new(37.61556, 55.75222))
+            .with_point(Point::new(37.61556, 55.75222)) // Moscow
             .build();
         let cell2 = Cell::new(2)
-            .with_point(Point::new(30.31413, 59.93863))
+            .with_point(Point::new(30.31413, 59.93863)) // Saint Petersburg
             .build();
+
         let distance = heuristic(&cell1, &cell2);
-        // Assert that the absolute difference is less than a small threshold
+        let correct_distance = 634430.92026;
+
         assert!(
             (distance - correct_distance).abs() < 0.001,
-            "Distance should be {}, but got {}",
+            "Heuristic value should be {}, but got {}",
             correct_distance,
             distance
         );
     }
 }
+

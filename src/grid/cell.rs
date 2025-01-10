@@ -1,7 +1,7 @@
-use std::fmt;
-use crate::geom::Point;
 use crate::geom::gc_distance_pt;
+use crate::geom::Point;
 use crate::grid::zones::ZoneType;
+use std::fmt;
 
 /// Represents different possible states of a cell.
 ///
@@ -27,9 +27,9 @@ pub type CellID = i64; // Alias for CellID
 
 /// Represents a single cell in the road network.
 ///
-/// A `Cell` represents a location within the road network and contains properties like its ID, position, type, 
+/// A `Cell` represents a location within the road network and contains properties like its ID, position, type,
 /// speed limit, neighboring cells, and its current state.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cell {
     /// Unique identifier for the cell.
     id: CellID,
@@ -95,7 +95,7 @@ impl Cell {
     /// A floating-point value representing the distance between the two cells in the road network.
     ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// use micro_traffic_sim_core::geom::Point;
     /// use micro_traffic_sim_core::grid::cell::Cell;
@@ -141,6 +141,99 @@ impl Cell {
     /// ```
     pub fn get_id(&self) -> CellID {
         self.id
+    }
+
+    /// Returns the unique identifier (ID) of the cell in front of the current cell.
+    ///
+    /// # Returns
+    /// The `CellID` of the cell. It could be "-1" if ID has not been set
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let cell = Cell::new(1).with_forward_node(2).build();
+    /// println!("Cell ID in front: {}", cell.get_forward_id());
+    /// ```
+    pub fn get_forward_id(&self) -> CellID {
+        self.forward_cell
+    }
+
+    /// Sets the unique identifier (ID) of the cell in front of the current cell.
+    ///
+    /// # Parameters
+    /// * `id` - The `CellID` of the cell in front.
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let mut cell = Cell::new(1).build();
+    /// cell.set_forward_id(2);
+    /// println!("Forward Cell ID: {}", cell.get_forward_id());
+    /// ```
+    pub fn set_forward_id(&mut self, id: CellID) {
+        self.forward_cell = id;
+    }
+
+    /// Returns the unique identifier (ID) of the cell to the left from the current cell.
+    ///
+    /// # Returns
+    /// The `CellID` of the cell. It could be "-1" if ID has not been set
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let cell = Cell::new(1).with_left_node(3).build();
+    /// println!("Cell ID: {} to the left", cell.get_left_id());
+    /// ```
+    pub fn get_left_id(&self) -> CellID {
+        self.left_cell
+    }
+
+    /// Sets the unique identifier (ID) of the cell to the left of the current cell.
+    ///
+    /// # Parameters
+    /// * `id` - The `CellID` of the cell to the left.
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let mut cell = Cell::new(1).build();
+    /// cell.set_left_id(3);
+    /// println!("Left Cell ID: {}", cell.get_left_id());
+    /// ```
+    pub fn set_left_id(&mut self, id: CellID) {
+        self.left_cell = id;
+    }
+
+    /// Returns the unique identifier (ID) of the cell to the right from the current cell.
+    ///
+    /// # Returns
+    /// The `CellID` of the cell. It could be "-1" if ID has not been set
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let cell = Cell::new(1).with_left_node(4).build();
+    /// println!("Cell ID: {} to the right", cell.get_right_id());
+    /// ```
+    pub fn get_right_id(&self) -> CellID {
+        self.right_cell
+    }
+
+    /// Sets the unique identifier (ID) of the cell to the right of the current cell.
+    ///
+    /// # Parameters
+    /// * `id` - The `CellID` of the cell to the right.
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let mut cell = Cell::new(1).build();
+    /// cell.set_right_id(4);
+    /// println!("Right Cell ID: {}", cell.get_right_id());
+    /// ```
+    pub fn set_right_id(&mut self, id: CellID) {
+        self.right_cell = id;
     }
 }
 
