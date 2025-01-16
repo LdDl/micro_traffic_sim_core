@@ -29,8 +29,8 @@ pub type TripID = i64; // Alias for TripID
 /// Represents a trip with vehicles generator
 #[derive(Debug, Clone)]
 pub struct Trip {
-    // Stops for only public transport for the time
-    pub pt_transits: Vec<CellID>,
+    // Cells which must be traversed in exact given order by the agent
+    pub transit_cells: Vec<CellID>,
     // Initial speed which generated vehicle would have after appearing on the road network
     pub initial_speed: i32,
     // Probability with which vehicles are generated if trip type is TripType::Random
@@ -52,7 +52,7 @@ pub struct Trip {
     // End time (second) for the trip. After that no vehicles will be generated. Default:: i32::MAX
     pub end_time: i32,
     // Relaxation time in the transit cells
-    pub time_relax: i32,
+    pub relax_time: i32,
     // Size of tail of the vehicle. By default every vehicle in cellular automata has size 1 itself and tail 0. When it
     // is needed to make larger vehicles (e.g. limousine) it could be handy to know extra size for
     // modeling heterogeneous road traffic flow instead of homogeneous one.
@@ -91,7 +91,7 @@ impl Trip {
     pub fn new(from_node: CellID, to_node: CellID, trip_type: TripType) -> TripBuilder {
         TripBuilder {
             trip: Trip {
-                pt_transits: Vec::new(),
+                transit_cells: Vec::new(),
                 initial_speed: 0,
                 probability: 0.5,
                 from_node,
@@ -102,7 +102,7 @@ impl Trip {
                 time: -1,
                 start_time: 0,
                 end_time: i32::MAX,
-                time_relax: -1,
+                relax_time: -1,
                 vehicle_tail_size: 0,
             },
         }
@@ -110,25 +110,25 @@ impl Trip {
 }
 
 impl TripBuilder {
-    /// Sets the public transit stops and relaxation time for the trip.
+    /// Sets the cells IDs list in which each cell must be traversed in exact given order by the agent and relaxation time for the trip.
     ///
     /// # Arguments
     ///
-    /// * `pt_transits` - A vector of `CellID` representing the transit stops.
-    /// * `time_relax` - Time (in seconds) spent at each transit stop.
+    /// * `cells` - A list of IDs of cells
+    /// * `t` - The time (in time units) should be spent at each transit stop.
     ///
     /// # Example
     ///
     /// ```
     /// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
     /// let trip = Trip::new(1, 10, TripType::Constant)
-    ///     .with_pt_transits(vec![2, 3, 4], 10)
+    ///     .with_transits_cells(vec![2, 3, 4], 10)
     ///     .build();
     /// println!("{:?}", trip);
     /// ```
-    pub fn with_pt_transits(mut self, pt_transits: Vec<CellID>, time_relax: i32) -> Self {
-        self.trip.pt_transits = pt_transits;
-        self.trip.time_relax = time_relax;
+    pub fn with_transits_cells(mut self, cells: Vec<CellID>, t: i32) -> Self {
+        self.trip.transit_cells = cells;
+        self.trip.relax_time = t;
         self
     }
 
