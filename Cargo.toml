@@ -13,3 +13,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "shortest_path_benchmark"
 harness = false
+
+[lib]
+name = "micro_traffic_sim_core"
+path = "src/lib.rs"
