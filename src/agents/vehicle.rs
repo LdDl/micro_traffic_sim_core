@@ -823,3 +823,44 @@ impl VehicleBuilder {
         self.vehicle
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_relaxation_countdown() {
+        let relax_time = 9;
+        let sim_steps = 3;
+        let mut vehicle = Vehicle::new(1)
+            .with_cell(3)
+            .with_destination(100)
+            .with_type(AgentType::Car)
+            .with_transit_cells(vec![3, 8])
+            .with_relax_time(relax_time)
+            .build();
+        for _ in 0..sim_steps {
+            vehicle.relax_countdown_dec();
+        }
+        assert_eq!(
+            relax_time - sim_steps,
+            vehicle.get_relax_countdown(),
+            "Incorrect countdown after specified number of steps"
+        );
+        vehicle.relax_countdown_reset();
+        assert_eq!(
+            relax_time,
+            vehicle.get_relax_countdown(),
+            "Incorrect countdown after reset"
+        );
+    }
+    #[test]
+    fn test_cooperative_level() {
+        let coop_level = 0.75;
+        let aggr_level = 1.0 - coop_level;
+        let vehicle = Vehicle::new(1).with_aggressive_level(aggr_level).build();
+        assert_eq!(
+            coop_level, vehicle.cooperativity,
+            "Incorrect cooperativity level"
+        )
+    }
+}
