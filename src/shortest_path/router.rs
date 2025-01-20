@@ -7,11 +7,11 @@ use crate::shortest_path::{heuristics::heuristic, path::Path};
 use std::{
     cell::RefCell,
     cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
+    collections::BinaryHeap,
     fmt,
     rc::Rc,
 };
-
+use indexmap::IndexMap;
 // Define custom error types
 #[derive(Debug)]
 pub enum AStarError {
@@ -116,8 +116,8 @@ pub fn shortest_path<'a>(
 
     open_set.push(start_node);
 
-    let mut came_from = HashMap::new();
-    let mut g_score = HashMap::new();
+    let mut came_from = IndexMap::new();
+    let mut g_score = IndexMap::new();
     g_score.insert(start.get_id(), 0.0);
 
     let mut research_vertices = 0;
@@ -192,11 +192,11 @@ fn process_neighbor<'a>(
     current_node: Rc<RefCell<AStarNode<'a>>>,
     neighbor_cell: &'a Cell,
     neighbor_maneuver: LaneChangeType,
-    g_score: &mut HashMap<i64, f64>, // CellID type
+    g_score: &mut IndexMap<i64, f64>, // CellID type
     // open_set: &mut BinaryHeap<AStarNode<'a>>,
     // came_from: &mut HashMap<i64, AStarNode<'a>>,
     open_set: &mut BinaryHeap<Rc<RefCell<AStarNode<'a>>>>,
-    came_from: &mut HashMap<i64, Rc<RefCell<AStarNode<'a>>>>,
+    came_from: &mut IndexMap<i64, Rc<RefCell<AStarNode<'a>>>>,
 ) {
     let tentative_g_score =
         current_node.borrow().g_cost + heuristic(current_node.borrow().cell, neighbor_cell);
