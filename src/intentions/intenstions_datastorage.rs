@@ -151,8 +151,8 @@ impl<'a> Intentions<'a> {
                 }
                 self.push_intention(*int_occupied_cell_id, vehicle, IntentionType::Tail);
             }
-            // @todo: This should be used is Golang's "defer" alternative
-            self.push_intention(cell_id, vehicle, intention_type);
         }
+        // @todo: This should be used is Golang's "defer" alternative
+        self.push_intention(cell_id, vehicle, intention_type);
     }
 }
