@@ -156,3 +156,114 @@ impl<'a> Intentions<'a> {
         self.push_intention(cell_id, vehicle, intention_type);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_add_to_empty_intentions() {
+        let mut intentions = Intentions::new();
+        let mut vehicle = Vehicle::new(1)
+            .with_type(AgentType::Car)
+            .build();
+            
+        intentions.add_intention(1, &mut vehicle, IntentionType::Target);
+        
+        // Validate
+        assert_eq!(intentions.intentions.len(), 1);
+        assert_eq!(intentions.intentions.get(&1).unwrap().len(), 1);
+        assert_eq!(intentions.intentions.get(&1).unwrap()[0].get_vehicle().unwrap().id, 1);
+        assert_eq!(intentions.intentions.get(&1).unwrap()[0].int_type, IntentionType::Target);
+    }
+
+    #[test]
+    fn test_add_multiple_to_same_cell() {
+        let mut intentions = Intentions::new();
+        
+        // Add first vehicle
+        let mut vehicle1 = Vehicle::new(1)
+            .with_type(AgentType::Car)
+            .build();
+        intentions.add_intention(1, &mut vehicle1, IntentionType::Target);
+        
+        // Add second vehicle
+        let mut vehicle2 = Vehicle::new(2)
+            .with_type(AgentType::Car)
+            .build();
+        intentions.add_intention(1, &mut vehicle2, IntentionType::Transit);
+        
+        // Validate
+        assert_eq!(intentions.intentions.len(), 1);
+        assert_eq!(intentions.intentions.get(&1).unwrap().len(), 2);
+        assert_eq!(intentions.intentions.get(&1).unwrap()[0].get_vehicle().unwrap().id, 1);
+        assert_eq!(intentions.intentions.get(&1).unwrap()[0].int_type, IntentionType::Target);
+        assert_eq!(intentions.intentions.get(&1).unwrap()[1].get_vehicle().unwrap().id, 2);
+        assert_eq!(intentions.intentions.get(&1).unwrap()[1].int_type, IntentionType::Transit);
+    }
+
+    #[test]
+    fn test_add_to_different_cells() {
+        let mut intentions = Intentions::new();
+        
+        // Add to first cell
+        let mut vehicle1 = Vehicle::new(1)
+            .with_type(AgentType::Car)
+            .build();
+        intentions.add_intention(1, &mut vehicle1, IntentionType::Target);
+        
+        // Add to second cell
+        let mut vehicle2 = Vehicle::new(2)
+            .with_type(AgentType::Car)
+            .build();
+        intentions.add_intention(2, &mut vehicle2, IntentionType::Target);
+        
+        // Validate
+        assert_eq!(intentions.intentions.len(), 2);
+        assert_eq!(intentions.intentions.get(&1).unwrap().len(), 1);
+        assert_eq!(intentions.intentions.get(&2).unwrap().len(), 1);
+        assert_eq!(intentions.intentions.get(&1).unwrap()[0].get_vehicle().unwrap().id, 1);
+        assert_eq!(intentions.intentions.get(&1).unwrap()[0].int_type, IntentionType::Target);
+        assert_eq!(intentions.intentions.get(&2).unwrap()[0].get_vehicle().unwrap().id, 2);
+        assert_eq!(intentions.intentions.get(&2).unwrap()[0].int_type, IntentionType::Target);
+    }
+
+    #[test]
+    fn test_add_multiple_to_same_cell_tail() {
+        let mut intentions = Intentions::new();
+        
+        // Setup first vehicle with tail
+        let mut vehicle1 = Vehicle::new(1)
+            .with_cell(10)
+            .with_tail_size(2, vec![8, 9])
+            .with_intention_tail(vec![9, 10])
+            .build();
+        intentions.add_intention(11, &mut vehicle1, IntentionType::Target);
+        
+        // Add second vehicle
+        let mut vehicle2 = Vehicle::new(2)
+            .with_type(AgentType::Car)
+            .build();
+        intentions.add_intention(10, &mut vehicle2, IntentionType::Target);
+        
+        // Validate
+        assert_eq!(intentions.intentions.len(), 3); // Cells 11, 10, 9
+        assert!(!intentions.intentions.contains_key(&8)); // Cell 8 should not be included
+        assert_eq!(intentions.intentions.get(&9).unwrap().len(), 1); // Tail end
+        assert_eq!(intentions.intentions.get(&10).unwrap().len(), 2); // Tail start + vehicle 2
+        assert_eq!(intentions.intentions.get(&11).unwrap().len(), 1); // Vehicle 1 head
+        
+        // Check vehicle 1 tail and intentions
+        assert_eq!(intentions.intentions.get(&9).unwrap()[0].get_vehicle().unwrap().id, 1);
+        assert_eq!(intentions.intentions.get(&9).unwrap()[0].int_type, IntentionType::Tail);
+        assert_eq!(intentions.intentions.get(&10).unwrap()[0].get_vehicle().unwrap().id, 1);
+        assert_eq!(intentions.intentions.get(&10).unwrap()[0].int_type, IntentionType::Tail);
+        
+        // Check vehicle 2
+        assert_eq!(intentions.intentions.get(&10).unwrap()[1].get_vehicle().unwrap().id, 2);
+        assert_eq!(intentions.intentions.get(&10).unwrap()[1].int_type, IntentionType::Target);
+        
+        // Check vehicle 1 head
+        assert_eq!(intentions.intentions.get(&11).unwrap()[0].get_vehicle().unwrap().id, 1);
+        assert_eq!(intentions.intentions.get(&11).unwrap()[0].int_type, IntentionType::Target);
+    }
+}
