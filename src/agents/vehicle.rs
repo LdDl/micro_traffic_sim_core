@@ -383,14 +383,21 @@ impl VehicleBuilder {
     /// ```rust
     /// use micro_traffic_sim_core::agents::Vehicle;
     /// let vehicle = Vehicle::new(1)
-    ///     .with_intention_occupied(vec![15, 25, 35])
+    ///     .with_intention_tail(vec![15, 25, 35])
     ///     .build();
     /// println!("Vehicle: {:?}", vehicle);
     /// ```
     pub fn with_intention_tail(mut self, cells: Vec<CellID>) -> Self {
-        if !cells.is_empty() {
-            self.vehicle.tail_intention_cells.copy_from_slice(&cells);
+        if cells.is_empty() {
+            return self;
         }
+        if self.vehicle.tail_intention_cells.is_empty() {
+            self.vehicle.tail_intention_cells = vec![0; cells.len()];
+        }
+        if self.vehicle.tail_intention_cells.len() != cells.len() {
+            self.vehicle.tail_intention_cells.resize(cells.len(), 0);
+        }
+        self.vehicle.tail_intention_cells.copy_from_slice(&cells);
         self
     }
 
@@ -560,7 +567,7 @@ impl VehicleBuilder {
     /// use micro_traffic_sim_core::agents::Vehicle;
     /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
     /// let vehicle = Vehicle::new(1)
-    ///     .with_tail_maneuver(10, 20, LaneChangeType::ChangeRight)
+    ///     .with_tail_intention_maneuver(10, 20, LaneChangeType::ChangeRight)
     ///     .build();
     /// println!("Vehicle: {:?}", vehicle);
     /// ```
@@ -630,7 +637,7 @@ impl VehicleBuilder {
     /// ```rust
     /// use micro_traffic_sim_core::agents::Vehicle;
     /// let vehicle = Vehicle::new(1)
-    ///     .with_transit_cell(vec![3, 50, 77])
+    ///     .with_transit_cells(vec![3, 50, 77])
     ///     .build();
     /// println!("Vehicle: {:?}", vehicle);
     /// ```

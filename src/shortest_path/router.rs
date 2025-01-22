@@ -249,7 +249,7 @@ fn reconstruct_path<'a>(current_node: &Rc<RefCell<AStarNode<'a>>>) -> Path<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::Point;
+    use crate::geom::new_point;
     use crate::grid::zones::ZoneType;
     use crate::utils::generators::generate_one_lane_cells;
 
@@ -325,6 +325,7 @@ mod tests {
             "Incorrect path cost"
         );
     }
+    
     #[test]
     fn test_big_router() {
         let cells_data = generate_one_lane_cells(5000.0, 4.5, 2);
@@ -354,7 +355,7 @@ mod tests {
         let mut grid = GridRoads::new();
         grid.add_cell(
             Cell::new(1)
-                .with_point(Point::new(0.0, 1.0))
+                .with_point(new_point(0.0, 1.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -365,7 +366,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(2)
-                .with_point(Point::new(1.0, 1.0))
+                .with_point(new_point(1.0, 1.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -376,7 +377,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(3)
-                .with_point(Point::new(2.0, 1.0))
+                .with_point(new_point(2.0, 1.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -387,7 +388,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(4)
-                .with_point(Point::new(3.0, 1.0))
+                .with_point(new_point(3.0, 1.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -398,7 +399,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(5)
-                .with_point(Point::new(4.0, 1.0))
+                .with_point(new_point(4.0, 1.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -409,7 +410,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(6)
-                .with_point(Point::new(5.0, 1.0))
+                .with_point(new_point(5.0, 1.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -420,7 +421,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(7)
-                .with_point(Point::new(0.0, 0.0))
+                .with_point(new_point(0.0, 0.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(2)
@@ -431,7 +432,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(8)
-                .with_point(Point::new(1.0, 0.0))
+                .with_point(new_point(1.0, 0.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(3)
@@ -442,7 +443,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(9)
-                .with_point(Point::new(2.0, 0.0))
+                .with_point(new_point(2.0, 0.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(4)
@@ -453,7 +454,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(10)
-                .with_point(Point::new(3.0, 0.0))
+                .with_point(new_point(3.0, 0.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(5)
@@ -464,7 +465,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(11)
-                .with_point(Point::new(4.0, 0.0))
+                .with_point(new_point(4.0, 0.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(6)
@@ -475,7 +476,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(12)
-                .with_point(Point::new(5.0, 0.0))
+                .with_point(new_point(5.0, 0.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(13)
@@ -487,7 +488,7 @@ mod tests {
 
         grid.add_cell(
             Cell::new(17)
-                .with_point(Point::new(12.0, -1.0))
+                .with_point(new_point(12.0, -1.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(14)
@@ -498,7 +499,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(18)
-                .with_point(Point::new(12.0, -2.0))
+                .with_point(new_point(12.0, -2.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(15)
@@ -509,7 +510,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(19)
-                .with_point(Point::new(12.0, -3.0))
+                .with_point(new_point(12.0, -3.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(16)
@@ -520,7 +521,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(20)
-                .with_point(Point::new(12.0, -4.0))
+                .with_point(new_point(12.0, -4.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -532,7 +533,7 @@ mod tests {
 
         grid.add_cell(
             Cell::new(13)
-                .with_point(Point::new(13.0, -1.0))
+                .with_point(new_point(13.0, -1.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -543,7 +544,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(14)
-                .with_point(Point::new(13.0, -2.0))
+                .with_point(new_point(13.0, -2.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -554,7 +555,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(15)
-                .with_point(Point::new(13.0, -3.0))
+                .with_point(new_point(13.0, -3.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)
@@ -565,7 +566,7 @@ mod tests {
         );
         grid.add_cell(
             Cell::new(16)
-                .with_point(Point::new(13.0, -4.0))
+                .with_point(new_point(13.0, -4.0, None))
                 .with_zone_type(ZoneType::Common)
                 .with_speed_limit(1)
                 .with_left_node(-1)

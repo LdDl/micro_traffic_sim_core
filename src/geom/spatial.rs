@@ -4,6 +4,8 @@
 
 use crate::geom::Point;
 use std::f64::consts::PI;
+
+use super::PointType;
 const EARTH_RADIUS_METERS: f64 = 6371000.0;
 const EQUATOR_HALF: f64 = 20037508.34; // Half-length of the equator, (PI * 6378137) basically
 
@@ -14,8 +16,8 @@ const EQUATOR_HALF: f64 = 20037508.34; // Half-length of the equator, (PI * 6378
 ///
 /// # Arguments
 ///
-/// * `pt1` - The first point (longitude and latitude in degrees).
-/// * `pt2` - The second point (longitude and latitude in degrees).
+/// * `pt1` - The first point (longitude and latitude in degrees for WGS84).
+/// * `pt2` - The second point (longitude and latitude in degrees for WGS84).
 ///
 /// # Returns
 ///
@@ -24,17 +26,16 @@ const EQUATOR_HALF: f64 = 20037508.34; // Half-length of the equator, (PI * 6378
 /// # Example
 ///
 /// ```
-/// use micro_traffic_sim_core::geom::Point;
-/// use micro_traffic_sim_core::geom::get_bearing;
-/// let pt1 = Point::new(35.90434, 56.89028);
-/// let pt2 = Point::new(35.90430, 56.89033);
-/// let bearing = get_bearing(pt1, pt2);
+/// use micro_traffic_sim_core::geom::{new_point, get_bearing, SRID};
+/// let pt1 = new_point(35.90434, 56.89028, Some(SRID::WGS84));
+/// let pt2 = new_point(35.90430, 56.89033, Some(SRID::WGS84));
+/// let bearing = get_bearing(&pt1, &pt2);
 /// ```
-pub fn get_bearing(pt1: Point, pt2: Point) -> f64 {
-    let lon1 = pt1.x;
-    let lat1 = pt1.y;
-    let lon2 = pt2.x;
-    let lat2 = pt2.y;
+pub fn get_bearing(pt1: &PointType, pt2: &PointType) -> f64 {
+    let lon1 = pt1.x();
+    let lat1 = pt1.y();
+    let lon2 = pt2.x();
+    let lat2 = pt2.y();
 
     let λ1 = lon1 * PI / 180.0;
     let φ1 = lat1 * PI / 180.0;
@@ -119,16 +120,14 @@ pub fn convert_epsg3857_to_4326(lat: f64, lng: f64) -> (f64, f64) {
 ///
 /// # Example
 /// ```
-/// use micro_traffic_sim_core::geom::Point;
-/// use micro_traffic_sim_core::geom::gc_distance_pt;
-/// let src = Point::new(35.90434, 56.89028);
-/// let dst = Point::new(35.90434, 56.89028);
-/// let distance = gc_distance_pt(src, dst);
+/// use micro_traffic_sim_core::geom::{new_point, SRID, gc_distance_pt};
+/// let src = new_point(35.90434, 56.89028, Some(SRID::WGS84));
+/// let dst = new_point(35.90434, 56.89028, Some(SRID::WGS84));
+/// let distance = gc_distance_pt(&src, &dst);
 /// println!("Great-circle distance: {} km", distance);
 /// ```
-pub fn gc_distance_pt(src: Point, dst: Point) -> f64 {
-    ((src.x-dst.x)*(src.x - dst.x) + (src.y-dst.y)*(src.y-dst.y)).sqrt()
-    // gc_distance(src.x, src.y, dst.x, dst.y)
+pub fn gc_distance_pt(src: &PointType, dst: &PointType) -> f64 {
+    gc_distance(src.x(), src.y(), dst.x(), dst.y())
 }
 
 /// gc_distance
@@ -158,7 +157,7 @@ pub fn gc_distance_pt(src: Point, dst: Point) -> f64 {
 /// println!("Great-circle distance: {} km", distance);
 /// ```
 pub fn gc_distance(src_lon: f64, src_lat: f64, dst_lon: f64, dst_lat: f64) -> f64 {
-    let lat1 = src_lat.to_radians();
+    let lat1: f64 = src_lat.to_radians();
 	let lat2 = dst_lat.to_radians();
     let diff_lat = (dst_lat - src_lat).to_radians();
 	let diff_lon = (dst_lon - src_lon).to_radians();
@@ -169,12 +168,14 @@ pub fn gc_distance(src_lon: f64, src_lat: f64, dst_lon: f64, dst_lat: f64) -> f6
 
 #[cfg(test)]
 mod tests {
+    use crate::geom::{new_point, SRID};
+
     use super::*;
     #[test]
     fn test_get_bearing() {
-        let pt_from = Point::new(35.90434, 56.89028);
-        let pt_to = Point::new(35.90430, 56.89033);
-        let bearing = get_bearing(pt_from, pt_to);
+        let pt_from = new_point(35.90434, 56.89028, Some(SRID::WGS84));
+        let pt_to = new_point(35.90430, 56.89033, Some(SRID::WGS84));
+        let bearing = get_bearing(&pt_from, &pt_to);
         let correct_bearing = -23.605068777443574;
 
         // Assert that the absolute difference is less than a small threshold
@@ -190,60 +191,60 @@ mod tests {
         let precision = 10e-5;
 
         // Test point conversion from EPSG:4326 to EPSG:3857 and back
-        let given_point_4326 = Point::new(37.61655751319856, 55.75163877328629);
-        let expected_point_3857 = Point::new(4187456.027182254, 7509131.996742569);
+        let given_point_4326 = new_point(37.61655751319856, 55.75163877328629, Some(SRID::WGS84));
+        let expected_point_3857 = new_point(4187456.027182254, 7509131.996742569, None);
         
         // Convert the point from EPSG:4326 to EPSG:3857
-        let ans_point_3857 = convert_epsg4326_to_3857(given_point_4326.x, given_point_4326.y);
+        let ans_point_3857 = convert_epsg4326_to_3857(given_point_4326.x(), given_point_4326.y());
         
         // Check if the conversion to EPSG:3857 is correct
-        assert!((expected_point_3857.x - ans_point_3857.0).abs() < precision, "Wrong X (longitude) in EPSG:3857. Should: {}. Got: {}", expected_point_3857.x, ans_point_3857.0);
-        assert!((expected_point_3857.y - ans_point_3857.1).abs() < precision, "Wrong Y (latitude) in EPSG:3857. Should: {}. Got: {}", expected_point_3857.y, ans_point_3857.1);
+        assert!((expected_point_3857.x() - ans_point_3857.0).abs() < precision, "Wrong X (longitude) in EPSG:3857. Should: {}. Got: {}", expected_point_3857.x(), ans_point_3857.0);
+        assert!((expected_point_3857.y() - ans_point_3857.1).abs() < precision, "Wrong Y (latitude) in EPSG:3857. Should: {}. Got: {}", expected_point_3857.y(), ans_point_3857.1);
 
         // // Reverse the conversion back to EPSG:4326
         let ans_reversed_point_4326 = convert_epsg3857_to_4326(ans_point_3857.0, ans_point_3857.1);
         
         // Check if the reverse conversion to EPSG:4326 is correct
-        assert!((given_point_4326.x - ans_reversed_point_4326.0).abs() < precision, "Wrong X (longitude) in EPSG:3857. Should: {}. Got: {}", given_point_4326.x, ans_reversed_point_4326.0);
-        assert!((given_point_4326.y - ans_reversed_point_4326.1).abs() < precision, "Wrong Y (latitude) in EPSG:3857. Should: {}. Got: {}", given_point_4326.y, ans_reversed_point_4326.1);
+        assert!((given_point_4326.x() - ans_reversed_point_4326.0).abs() < precision, "Wrong X (longitude) in EPSG:3857. Should: {}. Got: {}", given_point_4326.x(), ans_reversed_point_4326.0);
+        assert!((given_point_4326.y() - ans_reversed_point_4326.1).abs() < precision, "Wrong Y (latitude) in EPSG:3857. Should: {}. Got: {}", given_point_4326.y(), ans_reversed_point_4326.1);
 
         // Test line conversion from EPSG:4326 to EPSG:3857 and back
         let given_line_4326 = vec![
-            Point::new(37.61655751319856, 55.75163877328629),
-            Point::new(37.61617406590727, 55.751456041561624),
+            new_point(37.61655751319856, 55.75163877328629, Some(SRID::WGS84)),
+            new_point(37.61617406590727, 55.751456041561624, Some(SRID::WGS84)),
         ];
 
         let expected_line_3857 = vec![
-            Point::new(4187456.027182254, 7509131.996742569),
-            Point::new(4187413.342025048, 7509095.852052931),
+            new_point(4187456.027182254, 7509131.996742569, None),
+            new_point(4187413.342025048, 7509095.852052931, None),
         ];
 
         // Convert the line from EPSG:4326 to EPSG:3857
-        let ans_line_3857: Vec<Point> = given_line_4326.iter().map(|pt| {
-            let (x, y) = convert_epsg4326_to_3857(pt.x, pt.y);
-            Point::new(x, y)
+        let ans_line_3857: Vec<PointType> = given_line_4326.iter().map(|pt| {
+            let (x, y) = convert_epsg4326_to_3857(pt.x(), pt.y());
+            new_point(x, y, None)
         }).collect();
 
         // Check if the conversion for each point in the line is correct
         for (i, pt) in ans_line_3857.iter().enumerate() {
-            assert!((expected_line_3857[i].x - pt.x).abs() < precision, 
-                    "Wrong X (longitude) in EPSG:3857 at pos #{}. Should: {}. Got: {}", i, expected_line_3857[i].x, pt.x);
-            assert!((expected_line_3857[i].y - pt.y).abs() < precision, 
-                    "Wrong Y (latitude) in EPSG:3857 at pos #{}. Should: {}. Got: {}", i, expected_line_3857[i].y, pt.y);
+            assert!((expected_line_3857[i].x() - pt.x()).abs() < precision, 
+                    "Wrong X (longitude) in EPSG:3857 at pos #{}. Should: {}. Got: {}", i, expected_line_3857[i].x(), pt.x());
+            assert!((expected_line_3857[i].y() - pt.y()).abs() < precision, 
+                    "Wrong Y (latitude) in EPSG:3857 at pos #{}. Should: {}. Got: {}", i, expected_line_3857[i].y(), pt.y());
         }
 
         // Reverse the line conversion from EPSG:3857 to EPSG:4326
-        let ans_reversed_line_4326: Vec<Point> = ans_line_3857.iter().map(|pt| {
-            let (x, y) = convert_epsg3857_to_4326(pt.x, pt.y);
-            Point::new(x, y)
+        let ans_reversed_line_4326: Vec<PointType> = ans_line_3857.iter().map(|pt| {
+            let (x, y) = convert_epsg3857_to_4326(pt.x(), pt.y());
+            new_point(x, y, None)
         }).collect();
 
         // Check if the reverse conversion for each point in the line is correct
         for (i, pt) in ans_reversed_line_4326.iter().enumerate() {
-            assert!((given_line_4326[i].x - pt.x).abs() < precision, 
-                    "Wrong X (longitude) in EPSG:3857 at pos #{}. Should: {}. Got: {}", i, given_line_4326[i].x, pt.x);
-            assert!((given_line_4326[i].y - pt.y).abs() < precision, 
-                    "Wrong Y (latitude) in EPSG:3857 at pos #{}. Should: {}. Got: {}", i, given_line_4326[i].y, pt.y);
+            assert!((given_line_4326[i].x() - pt.x()).abs() < precision, 
+                    "Wrong X (longitude) in EPSG:3857 at pos #{}. Should: {}. Got: {}", i, given_line_4326[i].x(), pt.x());
+            assert!((given_line_4326[i].y() - pt.y()).abs() < precision, 
+                    "Wrong Y (latitude) in EPSG:3857 at pos #{}. Should: {}. Got: {}", i, given_line_4326[i].y(), pt.y());
         }
     }
     #[test]
@@ -258,7 +259,7 @@ mod tests {
             distance
         );
 
-        let distance = gc_distance_pt(Point::new(37.61556, 55.75222), Point::new(30.31413, 59.93863));
+        let distance = gc_distance_pt(&new_point(37.61556, 55.75222, Some(SRID::WGS84)), &new_point(30.31413, 59.93863, Some(SRID::WGS84)));
         // Assert that the absolute difference is less than a small threshold
         assert!(
             (distance - correct_distance).abs() < 0.001,

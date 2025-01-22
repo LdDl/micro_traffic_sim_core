@@ -1,4 +1,4 @@
-use crate::geom::Point;
+use crate::geom::{new_point};
 use crate::grid::cell::Cell;
 use crate::grid::zones::ZoneType;
 
@@ -7,7 +7,7 @@ pub fn generate_one_lane_cells(length_meters: f64, step: f64, lanes_num: usize) 
     let mut cells_counter: i64 = 1;
     let mut lanes_counter: i64 = 1;
     let mut last_added_lane: Vec<Cell> = Vec::new();
-    let mut all_lanes_cells = Vec::with_capacity(lanes_num * single_lane_cells_num);
+    let mut all_lanes_cells: Vec<Cell> = Vec::with_capacity(lanes_num * single_lane_cells_num);
 
     for j in 0..lanes_num {
         let mut lane_cells = Vec::with_capacity(single_lane_cells_num);
@@ -15,7 +15,7 @@ pub fn generate_one_lane_cells(length_meters: f64, step: f64, lanes_num: usize) 
         // First cell in the lane
         lane_cells.push(
             Cell::new(cells_counter)
-                .with_point(Point::new(0.0, lanes_counter as f64))
+                .with_point(new_point(0.0, lanes_counter as f64, None))
                 .with_zone_type(ZoneType::Birth)
                 .with_speed_limit(3)
                 .with_left_node(-1)
@@ -30,7 +30,7 @@ pub fn generate_one_lane_cells(length_meters: f64, step: f64, lanes_num: usize) 
         for i in 1..single_lane_cells_num - 1 {
             lane_cells.push(
                 Cell::new(cells_counter)
-                    .with_point(Point::new(i as f64, lanes_counter as f64))
+                    .with_point(new_point(i as f64, lanes_counter as f64, None))
                     .with_zone_type(ZoneType::Common)
                     .with_speed_limit(3)
                     .with_left_node(-1)
@@ -45,9 +45,10 @@ pub fn generate_one_lane_cells(length_meters: f64, step: f64, lanes_num: usize) 
         // Last cell in the lane
         lane_cells.push(
             Cell::new(cells_counter)
-                .with_point(Point::new(
+                .with_point(new_point(
                     (single_lane_cells_num - 1) as f64,
                     lanes_counter as f64,
+                    None
                 ))
                 .with_zone_type(ZoneType::Death)
                 .with_speed_limit(3)

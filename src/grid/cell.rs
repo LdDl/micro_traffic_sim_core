@@ -1,5 +1,4 @@
-use crate::geom::gc_distance_pt;
-use crate::geom::Point;
+use crate::geom::{PointType, Point, new_point};
 use crate::grid::zones::ZoneType;
 use std::fmt;
 
@@ -34,7 +33,7 @@ pub struct Cell {
     /// Unique identifier for the cell.
     id: CellID,
     /// Coordinates of the cell in the road network.
-    point: Point,
+    point: PointType,
     /// The zone type to which the cell belongs (e.g., Birth, Death, etc.).
     type_zone: ZoneType,
     /// The speed limit for vehicles moving through the cell. Since cell is cellular automata entity it should be integer rather that decimal
@@ -62,11 +61,11 @@ impl Cell {
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::geom::Point;
+    /// use micro_traffic_sim_core::geom::{new_point};
     /// use micro_traffic_sim_core::grid::zones::ZoneType;
     /// use micro_traffic_sim_core::grid::cell::Cell;
     /// let cell = Cell::new(1)
-    ///     .with_point(Point::new(10.0, 20.0))
+    ///     .with_point(new_point(10.0, 20.0, None))
     ///     .with_zone_type(ZoneType::Birth)
     ///     .build();
     /// ```
@@ -74,7 +73,7 @@ impl Cell {
         CellBuilder {
             cell: Cell {
                 id,
-                point: Point { x: -1.0, y: -1.0 },
+                point: new_point(-1.0, -1.0, None),
                 type_zone: ZoneType::Undefined,
                 speed_limit: -1,
                 left_cell: -1,
@@ -97,19 +96,19 @@ impl Cell {
     /// # Example
     ///
     /// ```
-    /// use micro_traffic_sim_core::geom::Point;
+    /// use micro_traffic_sim_core::geom::{new_point, SRID};
     /// use micro_traffic_sim_core::grid::cell::Cell;
     /// let cell1 = Cell::new(1)
-    ///     .with_point(Point::new(37.61556, 55.75222))
+    ///     .with_point(new_point(37.61556, 55.75222, Some(SRID::WGS84)))
     ///     .build();
     /// let cell2 = Cell::new(2)
-    ///     .with_point(Point::new(30.31413, 59.93863))
+    ///     .with_point(new_point(30.31413, 59.93863, Some(SRID::WGS84)))
     ///     .build();
     /// let distance = cell1.distance_to(&cell2);
     /// println!("Distance: {}", distance);
     /// ```
     pub fn distance_to(&self, other: &Cell) -> f64 {
-        gc_distance_pt(self.point, other.point)
+        self.point.distance_to(&other.point)
     }
 
     /// Sets a new state for the cell.
@@ -252,7 +251,7 @@ impl CellBuilder {
     ///
     /// # Returns
     /// A `CellBuilder` instance for further method chaining.
-    pub fn with_point(mut self, point: Point) -> Self {
+    pub fn with_point(mut self, point: PointType) -> Self {
         self.cell.point = point;
         self
     }
@@ -341,14 +340,15 @@ impl CellBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::SRID;
     #[test]
     fn test_cells_gc_distance() {
         let correct_distance = 634430.92026;
         let cell1 = Cell::new(1)
-            .with_point(Point::new(37.61556, 55.75222))
+            .with_point(new_point(37.61556, 55.75222, Some(SRID::WGS84)))
             .build();
         let cell2 = Cell::new(2)
-            .with_point(Point::new(30.31413, 59.93863))
+            .with_point(new_point(30.31413, 59.93863, Some(SRID::WGS84)))
             .build();
         let distance = cell1.distance_to(&cell2);
         // Assert that the absolute difference is less than a small threshold

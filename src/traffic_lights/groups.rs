@@ -1,4 +1,4 @@
-use crate::geom::Point;
+use crate::geom::{Point, PointType};
 use crate::grid::cell::CellID;
 use crate::traffic_lights::signals::SignalType;
 
@@ -9,7 +9,7 @@ use crate::traffic_lights::signals::SignalType;
 #[derive(Debug, Clone)]
 pub struct TrafficLightGroup {
     /// Geometry representing the spatial location of the group.
-    geometry: Vec<Point>,
+    geometry: Vec<PointType>,
     /// List of controlled cell IDs.
     cells_ids: Vec<CellID>,
     /// User-defined label for the group.
@@ -31,14 +31,14 @@ impl TrafficLightGroup {
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::geom::Point;
+    /// use micro_traffic_sim_core::geom::new_point;
     /// use micro_traffic_sim_core::grid::cell::CellID;
     /// use micro_traffic_sim_core::traffic_lights::signals::SignalType;
     /// use micro_traffic_sim_core::traffic_lights::groups::TrafficLightGroup;
     /// 
     /// let group = TrafficLightGroup::new(1)
     ///     .with_label("new signal group".to_string())
-    ///     .with_geometry(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)])
+    ///     .with_geometry(vec![new_point(0.0, 0.0, None), new_point(1.0, 1.0, None)])
     ///     .with_cells_ids(vec![20])
     ///     .with_signal(vec![SignalType::Red, SignalType::Yellow, SignalType::Green])
     ///     .build();
@@ -85,7 +85,7 @@ impl TrafficLightGroupBuilder {
     ///
     /// # Returns
     /// A `TrafficLightGroupBuilder` instance for method chaining.
-    pub fn with_geometry(mut self, geometry: Vec<Point>) -> Self {
+    pub fn with_geometry(mut self, geometry: Vec<PointType>) -> Self {
         self.group.geometry = geometry;
         self
     }

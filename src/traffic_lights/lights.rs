@@ -1,4 +1,4 @@
-use crate::geom::Point;
+use crate::geom::{PointType, new_point};
 use crate::traffic_lights::groups::TrafficLightGroup;
 use std::fmt;
 
@@ -31,7 +31,7 @@ pub struct TrafficLight {
     /// Times for each signal phase.
     times: Vec<i32>,
     /// Coordinates (longitude/latitude).
-    coordinates: Point,
+    coordinates: PointType,
     /// Traffic light identifier.
     id: TrafficLightID,
     /// Internal timer.
@@ -53,7 +53,7 @@ impl TrafficLight {
             traffic_light: TrafficLight {
                 groups: Vec::new(),
                 times: Vec::new(),
-                coordinates: Point::new(-1.0, -1.0),
+                coordinates: new_point(-1.0, -1.0, None),
                 id,
                 timer: 0,
                 active_phase_idx: 0,
@@ -98,7 +98,7 @@ pub struct TrafficLightBuilder {
 
 impl TrafficLightBuilder {
     /// Sets the coordinates for the traffic light.
-    pub fn with_coordinates(mut self, point: Point) -> Self {
+    pub fn with_coordinates(mut self, point: PointType) -> Self {
         self.traffic_light.coordinates = point;
         self
     }

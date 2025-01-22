@@ -13,14 +13,14 @@ use crate::grid::cell::Cell;
 /// # Example
 ///
 /// ```
-/// use micro_traffic_sim_core::geom::Point;
+/// use micro_traffic_sim_core::geom::{new_point, SRID};
 /// use micro_traffic_sim_core::grid::cell::Cell;
 /// use micro_traffic_sim_core::shortest_path::heuristics::heuristic;
 /// let cell1 = Cell::new(1)
-///     .with_point(Point::new(37.61556, 55.75222))
+///     .with_point(new_point(37.61556, 55.75222, Some(SRID::WGS84)))
 ///     .build();
 /// let cell2 = Cell::new(2)
-///     .with_point(Point::new(30.31413, 59.93863))
+///     .with_point(new_point(30.31413, 59.93863, Some(SRID::WGS84)))
 ///     .build();
 /// let heuristic_val = heuristic(&cell1, &cell2);
 /// println!("Heuristic: {}", heuristic_val);
@@ -32,16 +32,16 @@ pub fn heuristic(start: &Cell, end: &Cell) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geom::Point;
+    use crate::geom::{new_point, SRID};
     use crate::grid::cell::Cell;
 
     #[test]
     fn test_heuristic() {
         let cell1 = Cell::new(1)
-            .with_point(Point::new(37.61556, 55.75222)) // Moscow
+            .with_point(new_point(37.61556, 55.75222, Some(SRID::WGS84))) // Moscow
             .build();
         let cell2 = Cell::new(2)
-            .with_point(Point::new(30.31413, 59.93863)) // Saint Petersburg
+            .with_point(new_point(30.31413, 59.93863, Some(SRID::WGS84))) // Saint Petersburg
             .build();
 
         let distance = heuristic(&cell1, &cell2);
