@@ -64,6 +64,16 @@ impl<'a> Path<'a> {
         &self.maneuvers
     }
 
+    /// Returns a mutable reference to the vertices in the path.
+    pub fn vertices_mut(&mut self) -> &mut Vec<&'a Cell> {
+        &mut self.vertices
+    }
+
+    /// Returns a mutable reference to the maneuvers in the path.
+    pub fn maneuvers_mut(&mut self) -> &mut Vec<LaneChangeType> {
+        &mut self.maneuvers
+    }
+    
     /// Returns the total cost of the path.
     pub fn cost(&self) -> f64 {
         self.cost

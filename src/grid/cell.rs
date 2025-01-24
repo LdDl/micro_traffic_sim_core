@@ -5,7 +5,7 @@ use std::fmt;
 /// Represents different possible states of a cell.
 ///
 /// `CellState` indicates the current condition of a cell, such as whether it is free or banned.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CellState {
     /// The cell is free and available for use.
     Free = 0,
@@ -233,6 +233,21 @@ impl Cell {
     /// ```
     pub fn set_right_id(&mut self, id: CellID) {
         self.right_cell = id;
+    }
+
+    /// Returns speed limit in the cell.
+    /// 
+    /// # Returns
+    /// The speed limit in the cell.
+    /// 
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let cell = Cell::new(1).with_speed_limit(60).build();
+    /// println!("Speed limit: {}", cell.get_speed_limit());
+    /// ```
+    pub fn get_speed_limit(&self) -> i32 {
+        self.speed_limit
     }
 }
 
