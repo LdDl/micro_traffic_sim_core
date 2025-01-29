@@ -19,6 +19,12 @@ pub enum IntentionError {
     RightPathFind(CellID),
 }
 
+struct IntentionInfo<'a> {
+    cell_id: CellID,
+    vehicle: &'a mut Vehicle,
+    intention_type: IntentionType,
+}
+
 impl fmt::Display for IntentionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -41,13 +47,14 @@ impl fmt::Display for IntentionError {
 const undefined_maneuver: LaneChangeType = LaneChangeType::ChangeRight;
 
 pub fn find_alternate_intention<'a>(
-    intentions: &mut Intentions<'a>,
     net: &'a GridRoads,
     current_state: &IndexMap<CellID, VehicleID>,
     vehicle: &'a mut Vehicle,
-) -> Result<(), IntentionError> {
+) -> Result<Vec<IntentionInfo<'a>>, IntentionError> {
     let source_cell_id = vehicle.cell_id;
     let target_cell_id = vehicle.destination;
+    
+    let mut collected_intentions: Vec<IntentionInfo> = Vec::new();
 
     let source_cell = net
         .get_cell(&source_cell_id)
@@ -154,14 +161,26 @@ pub fn find_alternate_intention<'a>(
     // Apply the chosen maneuver
     if min_cell > 0 {
         vehicle.speed = 1;
-        intentions.add_intention(min_cell, vehicle, IntentionType::Target);
+        // Old code: borrowing issues
+        // intentions.add_intention(min_cell, vehicle, IntentionType::Target);
+        collected_intentions.push(IntentionInfo {
+            cell_id: min_cell,
+            vehicle: vehicle,
+            intention_type: IntentionType::Target,
+        });
     } else {
         vehicle.intention_maneuver = LaneChangeType::Block;
         vehicle.speed = 0;
-        intentions.add_intention(source_cell_id, vehicle, IntentionType::Target);
+        // Old code: borrowing issues
+        // intentions.add_intention(source_cell_id, vehicle, IntentionType::Target);
+        collected_intentions.push(IntentionInfo {
+            cell_id: source_cell_id,
+            vehicle: vehicle,
+            intention_type: IntentionType::Target,
+        });
     }
 
-    Ok(())
+    Ok(collected_intentions)
 }
 
 #[cfg(test)]
@@ -284,8 +303,11 @@ mod tests {
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
         let mut intentions = Intentions::new();
-        let result = find_alternate_intention(&mut intentions, &net, &current_state, &mut vehicle);
-        assert!(result.is_ok());
+        let collected_intentions = find_alternate_intention(&net, &current_state, &mut vehicle);
+        assert!(collected_intentions.is_ok());
+        for intention in collected_intentions.unwrap() {
+            intentions.add_intention(intention.cell_id, intention.vehicle, intention.intention_type);
+        }
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
         let correct_speed = 1;
@@ -383,8 +405,11 @@ mod tests {
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
         let mut intentions = Intentions::new();
-        let result = find_alternate_intention(&mut intentions, &net, &current_state, &mut vehicle);
-        assert!(result.is_ok());
+        let collected_intentions = find_alternate_intention(&net, &current_state, &mut vehicle);
+        assert!(collected_intentions.is_ok());
+        for intention in collected_intentions.unwrap() {
+            intentions.add_intention(intention.cell_id, intention.vehicle, intention.intention_type);
+        }
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
         let correct_speed = 1;
@@ -487,8 +512,11 @@ mod tests {
         current_state.insert(source_cell.get_right_id(), blocking_vehicle2.id);
 
         let mut intentions = Intentions::new();
-        let result = find_alternate_intention(&mut intentions, &net, &current_state, &mut vehicle);
-        assert!(result.is_ok());
+        let collected_intentions = find_alternate_intention(&net, &current_state, &mut vehicle);
+        assert!(collected_intentions.is_ok());
+        for intention in collected_intentions.unwrap() {
+            intentions.add_intention(intention.cell_id, intention.vehicle, intention.intention_type);
+        }
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
         let correct_speed = 0; // Vehicle could not move either forward or right
