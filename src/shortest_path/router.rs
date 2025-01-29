@@ -13,7 +13,7 @@ use std::{
 };
 use indexmap::IndexMap;
 // Define custom error types
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AStarError {
     BadData,
     NoPathFound { start_id: CellID, end_id: CellID },
@@ -101,7 +101,7 @@ pub fn shortest_path<'a>(
     goal: &'a Cell,
     net: &'a GridRoads,
     maneuver_allowed: bool,
-    max_depth_opt: Option<usize>,
+    max_depth_opt: Option<i32>,
 ) -> Result<Path<'a>, AStarError> {
     let max_depth = max_depth_opt.unwrap_or(0);
     let mut open_set = BinaryHeap::new();

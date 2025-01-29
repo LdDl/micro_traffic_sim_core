@@ -23,6 +23,7 @@ pub struct Vehicle {
     pub intention_cell_id: CellID,
 
     /// Currently occupied cells by tail (in case when vehicle has size more that one cell)
+    /// E.g. grid [1->2->3->4->5], vehicle's head in cell 4, size is 2. Then the tail cells are [2, 3]
     pub tail_cells: Vec<CellID>,
     /// Cells which vehicle's tail wants to occupy (in case when vehicle has size more that one cell)
     pub tail_intention_cells: Vec<CellID>,
