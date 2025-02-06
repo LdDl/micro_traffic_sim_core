@@ -4,25 +4,19 @@ use crate::grid::{
     road_network::GridRoads,
 };
 use crate::shortest_path::{heuristics::heuristic, path::Path};
-use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    collections::BinaryHeap,
-    fmt,
-    rc::Rc,
-};
 use indexmap::IndexMap;
+use std::{cell::RefCell, cmp::Ordering, collections::BinaryHeap, fmt, rc::Rc};
 // Define custom error types
 #[derive(Debug, PartialEq)]
 pub enum AStarError {
-    BadData,
+    BadData { cell_id: CellID },
     NoPathFound { start_id: CellID, end_id: CellID },
 }
 
 impl fmt::Display for AStarError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AStarError::BadData => write!(f, "Bad data"),
+            AStarError::BadData { cell_id } => write!(f, "Bad data for cell {}", cell_id),
             AStarError::NoPathFound { start_id, end_id } => {
                 write!(
                     f,
@@ -136,47 +130,63 @@ pub fn shortest_path<'a>(
             return Ok(reconstruct_path(&current_node));
         }
 
+        let forward_id = current_cell.get_forward_id();
         // Scan straightforward direction
-        if let Some(fcell) = net.get_cell(&current_cell.get_forward_id()) {
-            process_neighbor(
-                goal,
-                current_node.clone(),
-                fcell,
-                LaneChangeType::NoChange,
-                &mut g_score,
-                &mut open_set,
-                &mut came_from,
-            );
+        if forward_id > -1 {
+            if let Some(fcell) = net.get_cell(&forward_id) {
+                process_neighbor(
+                    goal,
+                    current_node.clone(),
+                    fcell,
+                    LaneChangeType::NoChange,
+                    &mut g_score,
+                    &mut open_set,
+                    &mut came_from,
+                );
+            } else {
+                return Err(AStarError::BadData {
+                    cell_id: forward_id,
+                });
+            }
         }
-
         if !maneuver_allowed {
             continue;
         }
 
         // Scan left maneuver
-        if let Some(lcell) = net.get_cell(&current_cell.get_left_id()) {
-            process_neighbor(
-                goal,
-                current_node.clone(),
-                lcell,
-                LaneChangeType::ChangeLeft,
-                &mut g_score,
-                &mut open_set,
-                &mut came_from,
-            );
+        let left_id = current_cell.get_left_id();
+        if left_id > -1 {
+            if let Some(lcell) = net.get_cell(&left_id) {
+                process_neighbor(
+                    goal,
+                    current_node.clone(),
+                    lcell,
+                    LaneChangeType::ChangeLeft,
+                    &mut g_score,
+                    &mut open_set,
+                    &mut came_from,
+                );
+            } else {
+                return Err(AStarError::BadData { cell_id: left_id });
+            }
         }
 
         // Scan right maneuver
-        if let Some(rcell) = net.get_cell(&current_cell.get_right_id()) {
-            process_neighbor(
-                goal,
-                current_node.clone(),
-                rcell,
-                LaneChangeType::ChangeRight,
-                &mut g_score,
-                &mut open_set,
-                &mut came_from,
-            );
+        let right_id = current_cell.get_right_id();
+        if right_id > -1 {
+            if let Some(rcell) = net.get_cell(&right_id) {
+                process_neighbor(
+                    goal,
+                    current_node.clone(),
+                    rcell,
+                    LaneChangeType::ChangeRight,
+                    &mut g_score,
+                    &mut open_set,
+                    &mut came_from,
+                );
+            } else {
+                return Err(AStarError::BadData { cell_id: right_id });
+            }
         }
     }
 
@@ -325,7 +335,7 @@ mod tests {
             "Incorrect path cost"
         );
     }
-    
+
     #[test]
     fn test_big_router() {
         let cells_data = generate_one_lane_cells(5000.0, 4.5, 2);

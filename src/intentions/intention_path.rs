@@ -1,5 +1,9 @@
 use crate::{
-    grid::{cell::{Cell, CellID, CellState}, lane_change_type::LaneChangeType},
+    agents::VehicleID,
+    grid::{
+        cell::{Cell, CellID, CellState},
+        lane_change_type::LaneChangeType,
+    },
     shortest_path::path::Path,
 };
 use std::collections::HashMap;
@@ -26,9 +30,9 @@ pub struct ObservablePath<'a> {
 ///
 /// # Returns
 /// Returns ObservablePath containing movement analysis
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// use micro_traffic_sim_core::{
 ///    grid::{cell::{Cell, CellState}, lane_change_type::LaneChangeType},
@@ -40,10 +44,10 @@ pub struct ObservablePath<'a> {
 /// let cell2 = Cell::new(2).with_speed_limit(2).build();
 /// let cell3 = Cell::new(3).with_speed_limit(2).build();
 /// let cell4 = Cell::new(4).with_speed_limit(2).build();
-/// 
+///
 /// let mut path = Path::new(
 ///     vec![&cell1, &cell2, &cell3, &cell4],
-///     vec![LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::ChangeLeft], 
+///     vec![LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::ChangeLeft],
 ///     10.0
 /// );
 ///
@@ -51,20 +55,20 @@ pub struct ObservablePath<'a> {
 /// let observable_path = process_path(&mut path, 2, &current_state);
 ///
 /// println!("Observable path without obstacles: {:?}", observable_path); // Should print 3 cells forward
-/// 
+///
 /// current_state.insert(cell3.get_id(), 1);
 /// let observable_path = process_path(&mut path, 2, &current_state);
-/// 
+///
 /// println!("Observable path with obstacles: {:?}", observable_path); // Should print 1 cell forward
 /// ```
 pub fn process_path<'a>(
     shortest_path: &'a mut Path,
     speed_possible: i32,
-    current_state: &HashMap<CellID, i32>,
+    current_state: &HashMap<CellID, VehicleID>,
 ) -> ObservablePath<'a> {
     // Remove first cell from path since it's vehicle's position
     shortest_path.vertices_mut().remove(0);
-    
+
     // Remove last cell if path has more than 1 cell
     if shortest_path.vertices().len() > 1 {
         shortest_path.vertices_mut().pop();
@@ -75,10 +79,10 @@ pub fn process_path<'a>(
     let vertices = shortest_path.vertices();
     let mut wanted_maneuver = LaneChangeType::NoChange;
     let mut last_cell_state = CellState::Free;
-    
+
     // Find max number of cells vehicle can move forward
     let mut success_forward_movement = 0;
-    
+
     for (i, cell) in vertices.iter().enumerate() {
         let maneuver = maneuvers[i];
         if maneuver != LaneChangeType::NoChange {
@@ -87,25 +91,25 @@ pub fn process_path<'a>(
             }
             break;
         }
-        
+
         // Check if cell is occupied by another vehicle
         if let Some(&vehicle_id) = current_state.get(&cell.get_id()) {
             if vehicle_id > 0 {
                 break;
             }
         }
-        
+
         // Check traffic light state
         if cell.get_state() != CellState::Free {
             last_cell_state = cell.get_state();
             break;
         }
-        
+
         // Check speed limit
         if speed_possible > cell.get_speed_limit() {
             break;
         }
-        
+
         success_forward_movement += 1;
         if success_forward_movement >= speed_possible {
             break;
@@ -129,18 +133,23 @@ mod tests {
         let cell1 = Cell::new(1).with_speed_limit(speed_limit).build();
         let cell2 = Cell::new(2).with_speed_limit(speed_limit).build();
         let mut cell3 = Cell::new(3).with_speed_limit(speed_limit).build();
-        let cell4 = Cell::new(4).with_speed_limit(speed_limit).build(); 
-        let cell5 = Cell::new(5).with_speed_limit(speed_limit).build(); 
+        let cell4 = Cell::new(4).with_speed_limit(speed_limit).build();
+        let cell5 = Cell::new(5).with_speed_limit(speed_limit).build();
 
         let mut path = Path::new(
             vec![&cell1, &cell2, &cell3, &cell4, &cell5],
-            vec![LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::ChangeLeft], 
-            10.0
+            vec![
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::ChangeLeft,
+            ],
+            10.0,
         );
-        
+
         let mut current_state = HashMap::new();
         let observable_path = process_path(&mut path, speed_limit, &current_state);
-        
+
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
@@ -149,20 +158,17 @@ mod tests {
         };
 
         assert_eq!(
-            observable_path.wanted_maneuver,
-            correct_path.wanted_maneuver,
+            observable_path.wanted_maneuver, correct_path.wanted_maneuver,
             "Incorrect maneuver for observable path"
         );
-        
+
         assert_eq!(
-            observable_path.last_cell_state,
-            correct_path.last_cell_state,
+            observable_path.last_cell_state, correct_path.last_cell_state,
             "Incorrect last cell state for observable path"
         );
-        
+
         assert_eq!(
-            observable_path.success_forward_movement,
-            correct_path.success_forward_movement,
+            observable_path.success_forward_movement, correct_path.success_forward_movement,
             "Incorrect number of cells vehicle can move forward"
         );
 
@@ -185,8 +191,13 @@ mod tests {
         // Update path since it has been mutated in process_path function
         path = Path::new(
             vec![&cell1, &cell2, &cell3, &cell4, &cell5],
-            vec![LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::ChangeLeft], 
-            10.0
+            vec![
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::ChangeLeft,
+            ],
+            10.0,
         );
         let observable_path = process_path(&mut path, speed_limit, &current_state);
 
@@ -198,20 +209,17 @@ mod tests {
         };
 
         assert_eq!(
-            observable_path.wanted_maneuver,
-            correct_path.wanted_maneuver,
+            observable_path.wanted_maneuver, correct_path.wanted_maneuver,
             "Incorrect maneuver for observable path"
         );
 
         assert_eq!(
-            observable_path.last_cell_state,
-            correct_path.last_cell_state,
+            observable_path.last_cell_state, correct_path.last_cell_state,
             "Incorrect last cell state for observable path"
         );
 
         assert_eq!(
-            observable_path.success_forward_movement,
-            correct_path.success_forward_movement,
+            observable_path.success_forward_movement, correct_path.success_forward_movement,
             "Incorrect number of cells vehicle can move forward"
         );
 
@@ -235,8 +243,13 @@ mod tests {
         // Add maneuver in the middle of the path
         path = Path::new(
             vec![&cell1, &cell2, &cell3, &cell4, &cell5],
-            vec![LaneChangeType::NoChange, LaneChangeType::ChangeLeft, LaneChangeType::NoChange, LaneChangeType::NoChange], 
-            10.0
+            vec![
+                LaneChangeType::NoChange,
+                LaneChangeType::ChangeLeft,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+            ],
+            10.0,
         );
         let observable_path = process_path(&mut path, speed_limit, &current_state);
 
@@ -248,20 +261,17 @@ mod tests {
         };
 
         assert_eq!(
-            observable_path.wanted_maneuver,
-            correct_path.wanted_maneuver,
+            observable_path.wanted_maneuver, correct_path.wanted_maneuver,
             "Incorrect maneuver for observable path"
         );
 
         assert_eq!(
-            observable_path.last_cell_state,
-            correct_path.last_cell_state,
+            observable_path.last_cell_state, correct_path.last_cell_state,
             "Incorrect last cell state for observable path"
         );
 
         assert_eq!(
-            observable_path.success_forward_movement,
-            correct_path.success_forward_movement,
+            observable_path.success_forward_movement, correct_path.success_forward_movement,
             "Incorrect number of cells vehicle can move forward"
         );
 
@@ -283,8 +293,13 @@ mod tests {
         // Add manuever to the start of the path
         path = Path::new(
             vec![&cell1, &cell2, &cell3, &cell4, &cell5],
-            vec![LaneChangeType::ChangeLeft, LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::NoChange], 
-            10.0
+            vec![
+                LaneChangeType::ChangeLeft,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+            ],
+            10.0,
         );
         let observable_path = process_path(&mut path, speed_limit, &current_state);
 
@@ -296,20 +311,17 @@ mod tests {
         };
 
         assert_eq!(
-            observable_path.wanted_maneuver,
-            correct_path.wanted_maneuver,
+            observable_path.wanted_maneuver, correct_path.wanted_maneuver,
             "Incorrect maneuver for observable path"
         );
 
         assert_eq!(
-            observable_path.last_cell_state,
-            correct_path.last_cell_state,
+            observable_path.last_cell_state, correct_path.last_cell_state,
             "Incorrect last cell state for observable path"
         );
 
         assert_eq!(
-            observable_path.success_forward_movement,
-            correct_path.success_forward_movement,
+            observable_path.success_forward_movement, correct_path.success_forward_movement,
             "Incorrect number of cells vehicle can move forward"
         );
 
@@ -332,8 +344,13 @@ mod tests {
         let vehicle_speed = 1;
         path = Path::new(
             vec![&cell1, &cell2, &cell3, &cell4, &cell5],
-            vec![LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::NoChange], 
-            10.0
+            vec![
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+            ],
+            10.0,
         );
         let observable_path = process_path(&mut path, vehicle_speed, &current_state);
 
@@ -345,20 +362,17 @@ mod tests {
         };
 
         assert_eq!(
-            observable_path.wanted_maneuver,
-            correct_path.wanted_maneuver,
+            observable_path.wanted_maneuver, correct_path.wanted_maneuver,
             "Incorrect maneuver for observable path"
         );
 
         assert_eq!(
-            observable_path.last_cell_state,
-            correct_path.last_cell_state,
+            observable_path.last_cell_state, correct_path.last_cell_state,
             "Incorrect last cell state for observable path"
         );
 
         assert_eq!(
-            observable_path.success_forward_movement,
-            correct_path.success_forward_movement,
+            observable_path.success_forward_movement, correct_path.success_forward_movement,
             "Incorrect number of cells vehicle can move forward"
         );
 
@@ -381,8 +395,13 @@ mod tests {
         cell3.set_state(CellState::Banned);
         path = Path::new(
             vec![&cell1, &cell2, &cell3, &cell4, &cell5],
-            vec![LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::NoChange, LaneChangeType::NoChange], 
-            10.0
+            vec![
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+                LaneChangeType::NoChange,
+            ],
+            10.0,
         );
         let observable_path = process_path(&mut path, speed_limit, &current_state);
 
@@ -394,20 +413,17 @@ mod tests {
         };
 
         assert_eq!(
-            observable_path.wanted_maneuver,
-            correct_path.wanted_maneuver,
+            observable_path.wanted_maneuver, correct_path.wanted_maneuver,
             "Incorrect maneuver for observable path"
         );
 
         assert_eq!(
-            observable_path.last_cell_state,
-            correct_path.last_cell_state,
+            observable_path.last_cell_state, correct_path.last_cell_state,
             "Incorrect last cell state for observable path"
         );
 
         assert_eq!(
-            observable_path.success_forward_movement,
-            correct_path.success_forward_movement,
+            observable_path.success_forward_movement, correct_path.success_forward_movement,
             "Incorrect number of cells vehicle can move forward"
         );
 
@@ -427,3 +443,4 @@ mod tests {
         }
     }
 }
+

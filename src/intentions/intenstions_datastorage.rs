@@ -1,12 +1,12 @@
-use crate::agents::{AgentType, Vehicle};
+use crate::agents::Vehicle;
 use crate::grid::cell::CellID;
 use crate::intentions::{CellIntention, IntentionType};
 use std::collections::HashMap;
 
-/// Storage for cell intentions, mapping CellID to a vector of intentions
+/// Storage for cell intentions, mapping CellID to a vector of intentions and storing vehicle intentions.
 #[derive(Debug, Default)]
 pub struct Intentions<'a> {
-    intentions: HashMap<CellID, Vec<CellIntention<'a>>>,
+    cells_intentions: HashMap<CellID, Vec<CellIntention<'a>>>,
 }
 
 impl<'a> Intentions<'a> {
@@ -17,17 +17,12 @@ impl<'a> Intentions<'a> {
     /// # Examples
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, AgentType};
-    /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
-    /// let vehicle = Vehicle::new(1)
-    ///     .with_type(AgentType::Car)
-    ///     .build();
-    /// let cell_intention = CellIntention::new(Some(&vehicle), IntentionType::Target);
+    /// use micro_traffic_sim_core::intentions::{Intentions};
     /// let intentions = Intentions::new();
     /// ```
     pub fn new() -> Self {
         Self {
-            intentions: HashMap::new(),
+            cells_intentions: HashMap::new(),
         }
     }
 
@@ -38,21 +33,43 @@ impl<'a> Intentions<'a> {
     ///
     /// # Examples
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, AgentType};
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///    .with_type(AgentType::Car)
     ///    .build();
+    /// let mut intention1 = VehicleIntention::default();
+    /// intention1.intention_cell_id = 15;
+    /// vehicle1.set_intention(intention1);
     /// let mut vehicle2 = Vehicle::new(2)
     ///    .with_type(AgentType::Car)
     ///    .build();
+    /// let mut intention2 = VehicleIntention::default();
+    /// intention2.intention_cell_id = 16;
+    /// vehicle2.set_intention(intention2);
     /// let mut intentions = Intentions::new();
-    /// intentions.add_intention(15, &mut vehicle1, IntentionType::Target);
-    /// intentions.add_intention(16, &mut vehicle2, IntentionType::Target);
+    /// intentions.add_intention(&mut vehicle1, IntentionType::Target);
+    /// intentions.add_intention(&mut vehicle2, IntentionType::Target);
     /// println!("Number of intentions: {}", intentions.len());
     /// ```
     pub fn len(&self) -> usize {
-        self.intentions.len()
+        self.cells_intentions.len()
+    }
+
+    /// Returns true if the storage is empty.
+    ///
+    /// # Returns
+    /// True if the storage is empty, false otherwise
+    ///
+    /// # Examples
+    /// ```
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
+    /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
+    /// let mut intentions = Intentions::new();
+    /// println!("Intentions storage is empty: {}", intentions.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.cells_intentions.is_empty()
     }
 
     /// Returns iterable reference to the intentions storage.
@@ -62,51 +79,63 @@ impl<'a> Intentions<'a> {
     ///
     /// # Examples
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, AgentType};
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///   .with_type(AgentType::Car)
     ///   .build();
+    /// let mut intention1 = VehicleIntention::default();
+    /// intention1.intention_cell_id = 15;
+    /// vehicle1.set_intention(intention1);
     /// let mut vehicle2 = Vehicle::new(2)
     ///   .with_type(AgentType::Car)
     ///   .build();
+    /// let mut intention2 = VehicleIntention::default();
+    /// intention2.intention_cell_id = 16;
+    /// vehicle2.set_intention(intention2);
     /// let mut intentions = Intentions::new();
-    /// intentions.add_intention(15, &mut vehicle1, IntentionType::Target);
-    /// intentions.add_intention(16, &mut vehicle2, IntentionType::Target);
+    /// intentions.add_intention(&mut vehicle1, IntentionType::Target);
+    /// intentions.add_intention(&mut vehicle2, IntentionType::Target);
     /// for (cell_id, ints) in intentions.iter() {
     ///     println!("Cell {} has {} intentions", cell_id, ints.len());
     /// }
     /// ```
     pub fn iter(&self) -> std::collections::hash_map::Iter<CellID, Vec<CellIntention<'a>>> {
-        self.intentions.iter()
+        self.cells_intentions.iter()
     }
 
     /// Returns cell intentions for the given cell ID.
-    /// 
+    ///
     /// # Parameters
     /// * `cell_id` - The ID of the cell to get intentions for
-    /// 
+    ///
     /// # Returns
     /// Returns a reference to the vector of intentions for the given cell ID, or None if the cell ID is not found.
-    /// 
+    ///
     /// # Examples
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, AgentType};
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
-    ///    .with_type(AgentType::Car)
+    ///   .with_type(AgentType::Car)
     ///   .build();
+    /// let mut intention1 = VehicleIntention::default();
+    /// intention1.intention_cell_id = 15;
+    /// vehicle1.set_intention(intention1);
     /// let mut vehicle2 = Vehicle::new(2)
     ///   .with_type(AgentType::Car)
     ///   .build();
+    /// let mut intention2 = VehicleIntention::default();
+    /// intention2.intention_cell_id = 16;
+    /// vehicle2.set_intention(intention2);
     /// let mut intentions = Intentions::new();
-    /// intentions.add_intention(15, &mut vehicle1, IntentionType::Target);
-    /// intentions.add_intention(16, &mut vehicle2, IntentionType::Target);
+    /// intentions.add_intention(&mut vehicle1, IntentionType::Target);
+    /// intentions.add_intention(&mut vehicle2, IntentionType::Target);
     /// let cell_intentions = intentions.get(&15);
     /// println!("Cell 15 has {} intentions", cell_intentions.unwrap().len());
     /// ```
     pub fn get(&self, cell_id: &CellID) -> Option<&Vec<CellIntention<'a>>> {
-        self.intentions.get(&cell_id)
+        self.cells_intentions.get(&cell_id)
     }
 
     /// Private method for pushing a new intention to the storage for the given cell ID.
@@ -124,12 +153,11 @@ impl<'a> Intentions<'a> {
         cell_id: CellID,
         vehicle: &'a Vehicle,
         intention_type: IntentionType,
-    ) -> &mut Self {
-        self.intentions
+    ) {
+        self.cells_intentions
             .entry(cell_id)
             .or_insert_with(Vec::new)
             .push(CellIntention::new(Some(vehicle), intention_type));
-        self
     }
 
     /// Adds a new intention to the storage for the given cell ID.
@@ -148,115 +176,116 @@ impl<'a> Intentions<'a> {
     /// # Examples
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, AgentType};
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///     .with_type(AgentType::Car)
     ///     .with_cell(10)
     ///     .build();
+    /// let mut intention1 = VehicleIntention::default();
+    /// intention1.intention_cell_id = 15;
+    /// vehicle1.set_intention(intention1);
     /// let mut vehicle2 = Vehicle::new(2)
     ///     .with_type(AgentType::Car)
     ///     .with_cell(20)
     ///     .build();
+    /// let mut intention2 = VehicleIntention::default();
+    /// intention2.intention_cell_id = 15;
+    /// vehicle2.set_intention(intention2);
     /// let mut intentions = Intentions::new();
-    /// intentions.add_intention(15, &mut vehicle1, IntentionType::Target);
-    /// intentions.add_intention(15, &mut vehicle2, IntentionType::Target);
+    /// intentions.add_intention(&mut vehicle1, IntentionType::Target);
+    /// intentions.add_intention(&mut vehicle2, IntentionType::Target);
     /// ```
-    pub fn add_intention(
-        &mut self,
-        cell_id: CellID,
-        vehicle: &'a mut Vehicle,
-        intention_type: IntentionType,
-    ) {
-        self.intentions.entry(cell_id).or_insert_with(Vec::new);
-
-        // Just doing transit
-        if intention_type == IntentionType::Transit {
-            vehicle.intermediate_cells.push(cell_id);
-            // @todo: This should be used is Golang's "defer" alternative
-            self.push_intention(cell_id, vehicle, intention_type);
-            return;
+    pub fn add_intention(&mut self, vehicle: &'a mut Vehicle, intention_type: IntentionType) {
+        let extracted_tail = Self::extract_tail_intention(vehicle);
+        vehicle.intention.tail_intention_cells = extracted_tail.clone();
+        for i in vehicle.intention.intermediate_cells.clone() {
+            // Clone because of borrow checker
+            // Just doing transit ("jump")
+            self.push_intention(i, vehicle, IntentionType::Transit);
         }
-        vehicle.intention_cell_id = cell_id;
+        for int_occupied_cell_id in extracted_tail.iter() {
+            if *int_occupied_cell_id < 1 {
+                continue;
+            }
+            self.push_intention(*int_occupied_cell_id, vehicle, IntentionType::Tail);
+        }
+        self.push_intention(vehicle.intention.intention_cell_id, vehicle, intention_type);
+    }
+
+    fn extract_tail_intention(vehicle: &Vehicle) -> Vec<CellID> {
         let tail_size = vehicle.tail_cells.len();
-        if tail_size > 0 {
-            if vehicle.intention_cell_id == vehicle.cell_id {
-                for i in 0..tail_size - 1 {
-                    vehicle.tail_cells[i] = vehicle.tail_cells[i + 1];
-                }
-                vehicle.tail_cells[tail_size - 1] = vehicle.cell_id;
-                for int_occupied_cell_id in vehicle.tail_cells.iter() {
-                    if *int_occupied_cell_id < 1 {
-                        continue;
-                    }
-                    self.push_intention(*int_occupied_cell_id, vehicle, IntentionType::Tail);
-                }
-                // @todo: This should be used is Golang's "defer" alternative
-                self.push_intention(cell_id, vehicle, intention_type);
-                return;
+        if tail_size == 0 {
+            return vec![];
+        }
+        let mut intention_tail = vec![-1; tail_size];
+        // Vehicle does not intend to move
+        if vehicle.intention.intention_cell_id == vehicle.cell_id {
+            for i in 0..tail_size - 1 {
+                intention_tail[i] = vehicle.tail_cells[i + 1];
             }
+            intention_tail[tail_size - 1] = vehicle.cell_id;
+            return intention_tail;
+        }
 
-            let skip_size = vehicle.intermediate_cells.len();
-            match skip_size {
-                // Moving with acceleration, but it is not greater than vehicle's size
-                skip_size if skip_size > 0 && skip_size < tail_size => {
-                    // If there are fewer intermediate cells than the vehicle's size, offset vehicle tail
-                    vehicle.tail_intention_cells[0..(tail_size - skip_size - 1)]
-                        .copy_from_slice(&vehicle.tail_cells[(skip_size + 1)..]);
-                    vehicle.tail_intention_cells[tail_size - skip_size - 1] = vehicle.cell_id;
-                    vehicle.tail_intention_cells[(tail_size - skip_size)..]
-                        .copy_from_slice(&vehicle.intermediate_cells);
-                }
-                // Moving with acceleration and it is greater or equal to vehicle's size
-                skip_size if skip_size > 0 && skip_size >= tail_size => {
-                    // If there are more intermediate cells than the vehicle's size,
-                    // return the last N intermediate cells
-                    vehicle
-                        .tail_cells
-                        .copy_from_slice(&vehicle.intermediate_cells[skip_size - tail_size..]);
-                }
-                // Otherwise
-                _ => {
-                    for i in 0..tail_size - 1 {
-                        vehicle.tail_cells[i] = vehicle.tail_cells[i + 1];
-                    }
-                    vehicle.tail_cells[tail_size - 1] = vehicle.cell_id;
-                }
+        let skip_size = vehicle.intention.intermediate_cells.len();
+        match skip_size {
+            // Moving with acceleration, but it is not greater than vehicle's size
+            skip_size if skip_size > 0 && skip_size < tail_size => {
+                // If there are fewer intermediate cells than the vehicle's size, offset vehicle tail
+                intention_tail[0..(tail_size - skip_size - 1)]
+                    .copy_from_slice(&vehicle.tail_cells[(skip_size + 1)..]);
+                intention_tail[tail_size - skip_size - 1] = vehicle.cell_id;
+                intention_tail[(tail_size - skip_size)..]
+                    .copy_from_slice(&vehicle.intention.intermediate_cells);
             }
-            for int_occupied_cell_id in vehicle.tail_cells.iter() {
-                if *int_occupied_cell_id < 1 {
-                    continue;
+            // Moving with acceleration and it is greater or equal to vehicle's size
+            skip_size if skip_size > 0 && skip_size >= tail_size => {
+                // If there are more intermediate cells than the vehicle's size,
+                // return the last N intermediate cells
+                intention_tail.copy_from_slice(
+                    &vehicle.intention.intermediate_cells[skip_size - tail_size..],
+                );
+            }
+            // Otherwise
+            _ => {
+                for i in 0..tail_size - 1 {
+                    intention_tail[i] = vehicle.tail_cells[i + 1];
                 }
-                self.push_intention(*int_occupied_cell_id, vehicle, IntentionType::Tail);
+                intention_tail[tail_size - 1] = vehicle.cell_id;
             }
         }
-        // @todo: This should be used is Golang's "defer" alternative
-        self.push_intention(cell_id, vehicle, intention_type);
+        intention_tail
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::{AgentType, VehicleIntention};
     #[test]
     fn test_add_to_empty_intentions() {
         let mut intentions = Intentions::new();
         let mut vehicle = Vehicle::new(1).with_type(AgentType::Car).build();
-
-        intentions.add_intention(1, &mut vehicle, IntentionType::Target);
+        let intention = VehicleIntention {
+            intention_cell_id: 1,
+            ..Default::default()
+        };
+        vehicle.set_intention(intention);
+        intentions.add_intention(&mut vehicle, IntentionType::Target);
 
         // Validate
-        assert_eq!(intentions.intentions.len(), 1);
-        assert_eq!(intentions.intentions.get(&1).unwrap().len(), 1);
+        assert_eq!(intentions.cells_intentions.len(), 1);
+        assert_eq!(intentions.cells_intentions.get(&1).unwrap().len(), 1);
         assert_eq!(
-            intentions.intentions.get(&1).unwrap()[0]
+            intentions.cells_intentions.get(&1).unwrap()[0]
                 .get_vehicle()
                 .unwrap()
                 .id,
             1
         );
         assert_eq!(
-            intentions.intentions.get(&1).unwrap()[0].int_type,
+            intentions.cells_intentions.get(&1).unwrap()[0].int_type,
             IntentionType::Target
         );
     }
@@ -267,35 +296,45 @@ mod tests {
 
         // Add first vehicle
         let mut vehicle1 = Vehicle::new(1).with_type(AgentType::Car).build();
-        intentions.add_intention(1, &mut vehicle1, IntentionType::Target);
+        let intention1 = VehicleIntention {
+            intention_cell_id: 1,
+            ..Default::default()
+        };
+        vehicle1.set_intention(intention1);
+        intentions.add_intention(&mut vehicle1, IntentionType::Target);
 
         // Add second vehicle
         let mut vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build();
-        intentions.add_intention(1, &mut vehicle2, IntentionType::Transit);
+        let intention2 = VehicleIntention {
+            intention_cell_id: 1,
+            ..Default::default()
+        };
+        vehicle2.set_intention(intention2);
+        intentions.add_intention(&mut vehicle2, IntentionType::Transit);
 
         // Validate
-        assert_eq!(intentions.intentions.len(), 1);
-        assert_eq!(intentions.intentions.get(&1).unwrap().len(), 2);
+        assert_eq!(intentions.cells_intentions.len(), 1);
+        assert_eq!(intentions.cells_intentions.get(&1).unwrap().len(), 2);
         assert_eq!(
-            intentions.intentions.get(&1).unwrap()[0]
+            intentions.cells_intentions.get(&1).unwrap()[0]
                 .get_vehicle()
                 .unwrap()
                 .id,
             1
         );
         assert_eq!(
-            intentions.intentions.get(&1).unwrap()[0].int_type,
+            intentions.cells_intentions.get(&1).unwrap()[0].int_type,
             IntentionType::Target
         );
         assert_eq!(
-            intentions.intentions.get(&1).unwrap()[1]
+            intentions.cells_intentions.get(&1).unwrap()[1]
                 .get_vehicle()
                 .unwrap()
                 .id,
             2
         );
         assert_eq!(
-            intentions.intentions.get(&1).unwrap()[1].int_type,
+            intentions.cells_intentions.get(&1).unwrap()[1].int_type,
             IntentionType::Transit
         );
     }
@@ -306,36 +345,46 @@ mod tests {
 
         // Add to first cell
         let mut vehicle1 = Vehicle::new(1).with_type(AgentType::Car).build();
-        intentions.add_intention(1, &mut vehicle1, IntentionType::Target);
+        let intention1 = VehicleIntention {
+            intention_cell_id: 1,
+            ..Default::default()
+        };
+        vehicle1.set_intention(intention1);
+        intentions.add_intention(&mut vehicle1, IntentionType::Target);
 
         // Add to second cell
         let mut vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build();
-        intentions.add_intention(2, &mut vehicle2, IntentionType::Target);
+        let intention2 = VehicleIntention {
+            intention_cell_id: 2,
+            ..Default::default()
+        };
+        vehicle2.set_intention(intention2);
+        intentions.add_intention(&mut vehicle2, IntentionType::Target);
 
         // Validate
-        assert_eq!(intentions.intentions.len(), 2);
-        assert_eq!(intentions.intentions.get(&1).unwrap().len(), 1);
-        assert_eq!(intentions.intentions.get(&2).unwrap().len(), 1);
+        assert_eq!(intentions.cells_intentions.len(), 2);
+        assert_eq!(intentions.cells_intentions.get(&1).unwrap().len(), 1);
+        assert_eq!(intentions.cells_intentions.get(&2).unwrap().len(), 1);
         assert_eq!(
-            intentions.intentions.get(&1).unwrap()[0]
+            intentions.cells_intentions.get(&1).unwrap()[0]
                 .get_vehicle()
                 .unwrap()
                 .id,
             1
         );
         assert_eq!(
-            intentions.intentions.get(&1).unwrap()[0].int_type,
+            intentions.cells_intentions.get(&1).unwrap()[0].int_type,
             IntentionType::Target
         );
         assert_eq!(
-            intentions.intentions.get(&2).unwrap()[0]
+            intentions.cells_intentions.get(&2).unwrap()[0]
                 .get_vehicle()
                 .unwrap()
                 .id,
             2
         );
         assert_eq!(
-            intentions.intentions.get(&2).unwrap()[0].int_type,
+            intentions.cells_intentions.get(&2).unwrap()[0].int_type,
             IntentionType::Target
         );
     }
@@ -348,68 +397,77 @@ mod tests {
         let mut vehicle1 = Vehicle::new(1)
             .with_cell(10)
             .with_tail_size(2, vec![8, 9])
-            .with_intention_tail(vec![9, 10])
             .build();
-        intentions.add_intention(11, &mut vehicle1, IntentionType::Target);
+        let intention1 = VehicleIntention {
+            intention_cell_id: 11,
+            ..Default::default()
+        };
+        vehicle1.set_intention(intention1);
+        intentions.add_intention(&mut vehicle1, IntentionType::Target);
 
         // Add second vehicle
         let mut vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build();
-        intentions.add_intention(10, &mut vehicle2, IntentionType::Target);
+        let intention2 = VehicleIntention {
+            intention_cell_id: 10,
+            ..Default::default()
+        };
+        vehicle2.set_intention(intention2);
+        intentions.add_intention(&mut vehicle2, IntentionType::Target);
 
         // Validate
-        assert_eq!(intentions.intentions.len(), 3); // Cells 11, 10, 9
-        assert!(!intentions.intentions.contains_key(&8)); // Cell 8 should not be included
-        assert_eq!(intentions.intentions.get(&9).unwrap().len(), 1); // Tail end
-        assert_eq!(intentions.intentions.get(&10).unwrap().len(), 2); // Tail start + vehicle 2
-        assert_eq!(intentions.intentions.get(&11).unwrap().len(), 1); // Vehicle 1 head
+        assert_eq!(intentions.cells_intentions.len(), 3); // Cells 11, 10, 9
+        assert!(!intentions.cells_intentions.contains_key(&8)); // Cell 8 should not be included
+        assert_eq!(intentions.cells_intentions.get(&9).unwrap().len(), 1); // Tail end
+        assert_eq!(intentions.cells_intentions.get(&10).unwrap().len(), 2); // Tail start + vehicle 2
+        assert_eq!(intentions.cells_intentions.get(&11).unwrap().len(), 1); // Vehicle 1 head
 
         // Check vehicle 1 tail and intentions
         assert_eq!(
-            intentions.intentions.get(&9).unwrap()[0]
+            intentions.cells_intentions.get(&9).unwrap()[0]
                 .get_vehicle()
                 .unwrap()
                 .id,
             1
         );
         assert_eq!(
-            intentions.intentions.get(&9).unwrap()[0].int_type,
+            intentions.cells_intentions.get(&9).unwrap()[0].int_type,
             IntentionType::Tail
         );
         assert_eq!(
-            intentions.intentions.get(&10).unwrap()[0]
+            intentions.cells_intentions.get(&10).unwrap()[0]
                 .get_vehicle()
                 .unwrap()
                 .id,
             1
         );
         assert_eq!(
-            intentions.intentions.get(&10).unwrap()[0].int_type,
+            intentions.cells_intentions.get(&10).unwrap()[0].int_type,
             IntentionType::Tail
         );
 
         // Check vehicle 2
         assert_eq!(
-            intentions.intentions.get(&10).unwrap()[1]
+            intentions.cells_intentions.get(&10).unwrap()[1]
                 .get_vehicle()
                 .unwrap()
                 .id,
             2
         );
         assert_eq!(
-            intentions.intentions.get(&10).unwrap()[1].int_type,
+            intentions.cells_intentions.get(&10).unwrap()[1].int_type,
             IntentionType::Target
         );
 
         // Check vehicle 1 head
         assert_eq!(
-            intentions.intentions.get(&11).unwrap()[0]
+            intentions.cells_intentions.get(&11).unwrap()[0]
                 .get_vehicle()
                 .unwrap()
                 .id,
             1
         );
         assert_eq!(
-            intentions.intentions.get(&11).unwrap()[0].int_type,
+            intentions.cells_intentions.get(&11).unwrap()[0].int_type,
             IntentionType::Target
         );
     }

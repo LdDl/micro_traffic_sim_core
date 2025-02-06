@@ -1,9 +1,40 @@
 use crate::agents::{AgentType, BehaviourType};
 use crate::grid::cell::CellID;
 use crate::grid::lane_change_type::LaneChangeType;
+use crate::grid::road_network::GridRoads;
 use crate::trips::trip::TripID;
-use rand::Rng;
-use std::collections::HashMap;
+use std::fmt;
+
+#[derive(Debug)]
+pub enum VehicleError {
+    TailCellNotFound {
+        cell_id: CellID,
+        position: usize,
+        vehicle_id: VehicleID,
+    },
+    InvalidCell(CellID),
+}
+
+impl fmt::Display for VehicleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VehicleError::TailCellNotFound {
+                cell_id,
+                position,
+                vehicle_id,
+            } => {
+                write!(
+                    f,
+                    "Can't find tail cell with ID '{}' at position '{}' for vehicle '{}'",
+                    cell_id, position, vehicle_id
+                )
+            }
+            VehicleError::InvalidCell(cell_id) => {
+                write!(f, "Invalid cell ID '{}'", cell_id)
+            }
+        }
+    }
+}
 
 pub type VehicleID = u64; // Alias for VehicleID
 
@@ -19,17 +50,10 @@ pub struct Vehicle {
 
     /// Currently occupied cell
     pub cell_id: CellID,
-    /// Cell which vehicle wants to occupy
-    pub intention_cell_id: CellID,
 
     /// Currently occupied cells by tail (in case when vehicle has size more that one cell)
     /// E.g. grid [1->2->3->4->5], vehicle's head in cell 4, size is 2. Then the tail cells are [2, 3]
     pub tail_cells: Vec<CellID>,
-    /// Cells which vehicle's tail wants to occupy (in case when vehicle has size more that one cell)
-    pub tail_intention_cells: Vec<CellID>,
-
-    // Intention occupied cells in case when vehicle moving with speed more than one cell per time unit.
-    pub intermediate_cells: Vec<CellID>,
 
     /// Current speed
     pub speed: i32,
@@ -42,16 +66,7 @@ pub struct Vehicle {
     pub min_safe_distance: i32,
     /// Final cell for the vehicle's trip
     pub destination: CellID,
-    /// Flag to repesent vehicle intentions to perform maneuver. See the ref. at `LaneChangeType`
-    /// If the vehicle makes a maneuver, then it has no explicit advantage in possible conflicts
-    pub intention_maneuver: LaneChangeType,
 
-    /// This field is for establishing source cell of maneuver for the vehicle's tail (in case when vehicle has size more that one cell)
-    pub tail_source_cell_maneuver: CellID,
-    /// This field is for establishing target cell of maneuver for the vehicle's tail (in case when vehicle has size more that one cell)
-    pub tail_target_cell_maneuver: CellID,
-    /// Flag to repesent vehicle's tail intentions to perform maneuver (in case when vehicle has size more that one cell). See the ref. at `LaneChangeType`
-    pub tail_intention_maneuver: LaneChangeType,
     /// A boolean indicating if the vehicle is a confclict participant
     pub is_conflict_participant: bool,
     /// Corresponding trip identifier
@@ -82,8 +97,59 @@ pub struct Vehicle {
 
     /// Travel time (in time units) which vehicle has been in movement state.
     pub travel_time: i64,
+
     /// @todo: for further research and development needs
     pub confusion: bool,
+
+    /// Vehicle's intention to perform maneuver and other actions
+    pub intention: VehicleIntention,
+}
+
+/// Represents vehicle's tail intention
+#[derive(Debug, Clone)]
+pub struct TailIntentionManeuver {
+    /// This field is for establishing source cell of maneuver for the vehicle's tail (in case when vehicle has size more that one cell)
+    pub source_cell_maneuver: CellID,
+    /// This field is for establishing target cell of maneuver for the vehicle's tail (in case when vehicle has size more that one cell)
+    pub target_cell_maneuver: CellID,
+    /// Flag to repesent vehicle's tail intentions to perform maneuver (in case when vehicle has size more that one cell). See the ref. at `LaneChangeType`
+    pub intention_maneuver: LaneChangeType,
+}
+
+impl Default for TailIntentionManeuver {
+    fn default() -> TailIntentionManeuver {
+        TailIntentionManeuver {
+            source_cell_maneuver: -1,
+            target_cell_maneuver: -1,
+            intention_maneuver: LaneChangeType::Undefined,
+        }
+    }
+}
+
+/// Represents vehicle's intention to perform maneuver and other actions
+#[derive(Debug, Default, Clone)]
+pub struct VehicleIntention {
+    /// Flag to repesent vehicle intentions to perform maneuver. See the ref. at `LaneChangeType`
+    /// If the vehicle makes a maneuver, then it has no explicit advantage in possible conflicts
+    pub intention_maneuver: LaneChangeType,
+    /// Possible speed
+    pub intention_speed: i32,
+    /// Final cell for the vehicle's trip. It it only used when vehicle
+    /// has no other choice other than to change destination.
+    pub destination: Option<CellID>,
+    /// @todo: for further research and development needs
+    pub confusion: Option<bool>,
+    // pub cells: Vec<(CellID, IntentionType)>,
+    /// Cell which vehicle wants to occupy
+    pub intention_cell_id: CellID, // IntentionType::Target
+    /// Cells which vehicle's tail wants to occupy (in case when vehicle has size more that one cell)
+    pub tail_intention_cells: Vec<CellID>,
+    /// Intention occupied cells in case when vehicle moving with speed more than one cell per time unit.
+    pub intermediate_cells: Vec<CellID>, // IntentionType::Transit
+    /// Tail's intention. See the ref. at `IntentionTailManeuever`
+    pub tail_maneuver: TailIntentionManeuver,
+    /// Flag to stop vehicle
+    pub should_stop: bool,
 }
 
 impl Vehicle {
@@ -112,19 +178,12 @@ impl Vehicle {
                 vehicle_type: AgentType::Car,
                 strategy_type: BehaviourType::Aggressive,
                 cell_id: -1,
-                intention_cell_id: -1,
                 tail_cells: Vec::new(),
-                tail_intention_cells: Vec::new(),
-                intermediate_cells: Vec::new(),
                 speed: 1,
                 speed_limit: 4,
                 bearing: 0.0,
                 min_safe_distance: 0,
                 destination: -1,
-                intention_maneuver: LaneChangeType::Undefined,
-                tail_source_cell_maneuver: -1,
-                tail_target_cell_maneuver: -1,
-                tail_intention_maneuver: LaneChangeType::Undefined,
                 is_conflict_participant: false,
                 trip: -1,
                 transits_made: 0,
@@ -138,6 +197,7 @@ impl Vehicle {
                 relax_countdown: 0,
                 travel_time: 0,
                 confusion: false,
+                intention: VehicleIntention::default(),
             },
         }
     }
@@ -250,6 +310,132 @@ impl Vehicle {
     pub fn get_relax_countdown(&self) -> u64 {
         self.relax_countdown
     }
+
+    /// Sets the vehicle's intention
+    ///
+    /// # Arguments
+    /// * `intention` - The vehicle's intention. See the ref. at `VehicleIntention`
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle, VehicleIntention};
+    /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
+    /// let mut vehicle = Vehicle::new(1)
+    ///   .with_cell(3)
+    ///   .with_destination(100)
+    ///   .with_type(AgentType::Car)
+    ///   .build();
+    /// let mut intention = VehicleIntention::default();
+    /// intention.intention_maneuver = LaneChangeType::ChangeRight;
+    /// intention.intention_cell_id = 10;
+    /// vehicle.set_intention(intention);
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn set_intention(&mut self, intention: VehicleIntention) {
+        self.intention = intention;
+    }
+
+    /// Updates the vehicle's tail maneuver by scanning occupied cells and determining if vehicle is in lane changing process
+    ///
+    /// # Arguments
+    /// * `net` - The road network grid
+    ///
+    /// # Returns
+    /// Updated lane change type and potential error
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// use micro_traffic_sim_core::grid::road_network::GridRoads;
+    ///
+    /// let net = GridRoads::new();
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(10)
+    ///     .with_tail_size(2, vec![8, 9])
+    ///     .build();
+    /// let tail_maneuver = vehicle.scan_tail_maneuver(&net);
+    /// println!("Tail maneuver: {:?}", tail_maneuver);
+    /// ```
+    pub fn scan_tail_maneuver(
+        &self,
+        net: &GridRoads,
+    ) -> Result<TailIntentionManeuver, VehicleError> {
+        if self.tail_cells.is_empty() {
+            return Ok(TailIntentionManeuver::default());
+        }
+
+        // Scan sequential cells
+        for (idx, window) in self.tail_cells.windows(2).enumerate() {
+            let [from_id, to_id] = window else { continue };
+
+            if *from_id < 1 {
+                continue;
+            }
+
+            let from_cell = net
+                .get_cell(from_id)
+                .ok_or(VehicleError::TailCellNotFound {
+                    cell_id: *from_id,
+                    position: idx,
+                    vehicle_id: self.id,
+                })?;
+
+            match (*to_id, from_cell) {
+                (id, _) if id == from_cell.get_forward_id() => continue,
+                (id, _) if id == from_cell.get_right_id() => {
+                    return Ok(TailIntentionManeuver {
+                        source_cell_maneuver: *from_id,
+                        target_cell_maneuver: *to_id,
+                        intention_maneuver: LaneChangeType::ChangeRight,
+                    })
+                }
+                (id, _) if id == from_cell.get_left_id() => {
+                    return Ok(TailIntentionManeuver {
+                        source_cell_maneuver: *from_id,
+                        target_cell_maneuver: *to_id,
+                        intention_maneuver: LaneChangeType::ChangeLeft,
+                    })
+                }
+                _ => continue,
+            }
+        }
+
+        // Check final cell
+        let last_id = self.tail_cells[self.tail_cells.len() - 1];
+        if last_id > 0 {
+            let last_cell = net
+                .get_cell(&last_id)
+                .ok_or(VehicleError::TailCellNotFound {
+                    cell_id: last_id,
+                    position: self.tail_cells.len() - 1,
+                    vehicle_id: self.id,
+                })?;
+
+            if self.cell_id == last_cell.get_right_id() {
+                return Ok(TailIntentionManeuver {
+                    source_cell_maneuver: last_id,
+                    target_cell_maneuver: self.cell_id,
+                    intention_maneuver: LaneChangeType::ChangeRight,
+                });
+            }
+            if self.cell_id == last_cell.get_left_id() {
+                return Ok(TailIntentionManeuver {
+                    source_cell_maneuver: last_id,
+                    target_cell_maneuver: self.cell_id,
+                    intention_maneuver: LaneChangeType::ChangeLeft,
+                });
+            }
+        }
+        Ok(TailIntentionManeuver {
+            source_cell_maneuver: self.cell_id,
+            target_cell_maneuver: if self.intention.intention_cell_id < 1 {
+                self.cell_id
+            } else {
+                self.intention.intention_cell_id
+            },
+            intention_maneuver: self.intention.intention_maneuver,
+        })
+    }
 }
 
 /// A builder pattern implementation for constructing `Vehicle` objects.
@@ -323,28 +509,6 @@ impl VehicleBuilder {
         self
     }
 
-    /// Sets the cell which vehicle wants to occupy
-    ///
-    /// # Arguments
-    /// * `cell_id` - The ID of the cell
-    ///
-    /// # Returns
-    /// A `VehicleBuilder` instance for further method chaining.
-    ///
-    /// # Example
-    /// ```rust
-    /// use micro_traffic_sim_core::agents::Vehicle;
-    /// let vehicle = Vehicle::new(1)
-    ///     .with_cell(1)
-    ///     .with_intention_cell(2)
-    ///     .build();
-    /// println!("Vehicle: {:?}", vehicle);
-    /// ```
-    pub fn with_intention_cell(mut self, cell_id: CellID) -> Self {
-        self.vehicle.intention_cell_id = cell_id;
-        self
-    }
-
     /// Sets currently occupied cells by tail (in case when vehicle has size more that one cell)
     ///
     /// # Arguments
@@ -364,64 +528,8 @@ impl VehicleBuilder {
     /// ```
     pub fn with_tail_size(mut self, size: usize, cells: Vec<CellID>) -> Self {
         self.vehicle.tail_cells = vec![0; size];
-        self.vehicle.tail_intention_cells = vec![0; size];
-        self.vehicle.intermediate_cells = Vec::new();
         if !cells.is_empty() {
             self.vehicle.tail_cells.copy_from_slice(&cells);
-        }
-        self
-    }
-
-    /// Sets cells which vehicle's tail wants to occupy (in case when vehicle has size more that one cell)
-    ///
-    /// # Arguments
-    /// * `cells` - A list of cells
-    ///
-    /// # Returns
-    /// A `VehicleBuilder` instance for further method chaining.
-    ///
-    /// # Example
-    /// ```rust
-    /// use micro_traffic_sim_core::agents::Vehicle;
-    /// let vehicle = Vehicle::new(1)
-    ///     .with_intention_tail(vec![15, 25, 35])
-    ///     .build();
-    /// println!("Vehicle: {:?}", vehicle);
-    /// ```
-    pub fn with_intention_tail(mut self, cells: Vec<CellID>) -> Self {
-        if cells.is_empty() {
-            return self;
-        }
-        if self.vehicle.tail_intention_cells.is_empty() {
-            self.vehicle.tail_intention_cells = vec![0; cells.len()];
-        }
-        if self.vehicle.tail_intention_cells.len() != cells.len() {
-            self.vehicle.tail_intention_cells.resize(cells.len(), 0);
-        }
-        self.vehicle.tail_intention_cells.copy_from_slice(&cells);
-        self
-    }
-
-    /// Sets the intermediate cells for the vehicle. During simulation the vehicle should "jump
-    /// over" the given intermediate cells
-    ///
-    /// # Arguments
-    /// * `cells` - A list of `CellID`s
-    ///
-    /// # Returns
-    /// A `VehicleBuilder` instance for further method chaining.
-    ///
-    /// # Example
-    /// ```rust
-    /// use micro_traffic_sim_core::agents::Vehicle;
-    /// let vehicle = Vehicle::new(1)
-    ///     .with_intermediate(vec![3, 4, 5])
-    ///     .build();
-    /// println!("Vehicle: {:?}", vehicle);
-    /// ```
-    pub fn with_intermediate(mut self, cells: Vec<CellID>) -> Self {
-        if !cells.is_empty() {
-            self.vehicle.intermediate_cells = cells;
         }
         self
     }
@@ -531,28 +639,6 @@ impl VehicleBuilder {
         self
     }
 
-    /// Sets maneuver which vehicle wants to do.
-    ///
-    /// # Arguments
-    /// * `maneuver` - The type of lane change the vehicle is performing. This can be `Left`, `Right`, or `None`. Should not be 'Undefined' (except initialization). See the ref. at `LaneChangeType`
-    ///
-    /// # Returns
-    /// A `VehicleBuilder` instance for further method chaining.
-    ///
-    /// # Example
-    /// ```rust
-    /// use micro_traffic_sim_core::agents::Vehicle;
-    /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
-    /// let vehicle = Vehicle::new(1)
-    ///     .with_intention_maneuver(LaneChangeType::ChangeRight)
-    ///     .build();
-    /// println!("Vehicle: {:?}", vehicle);
-    /// ```
-    pub fn with_intention_maneuver(mut self, maneuver: LaneChangeType) -> Self {
-        self.vehicle.intention_maneuver = maneuver;
-        self
-    }
-
     /// Establishes source and target cells of maneuver for the vehicle's tail and vehicle's tail intention maneuver (in case when vehicle has size more that one cell)
     ///
     /// # Arguments
@@ -578,9 +664,9 @@ impl VehicleBuilder {
         target_cell: CellID,
         maneuver: LaneChangeType,
     ) -> Self {
-        self.vehicle.tail_source_cell_maneuver = source_cell;
-        self.vehicle.tail_target_cell_maneuver = target_cell;
-        self.vehicle.tail_intention_maneuver = maneuver;
+        self.vehicle.intention.tail_maneuver.source_cell_maneuver = source_cell;
+        self.vehicle.intention.tail_maneuver.target_cell_maneuver = target_cell;
+        self.vehicle.intention.tail_maneuver.intention_maneuver = maneuver;
         self
     }
 
@@ -650,8 +736,7 @@ impl VehicleBuilder {
     /// Sets the probability of the vehicle slowing down randomly.
     ///
     /// # Arguments
-    /// * `p` - A value in (0; 1].
-    /// 0 - never slowdowns, 1 - slowdowns every time unit
+    /// * `p` - A value in (0; 1]. 0 - never slowdowns, 1 - slowdowns every time unit
     ///
     /// # Returns
     /// A `VehicleBuilder` instance for further method chaining.

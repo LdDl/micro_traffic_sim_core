@@ -1,11 +1,17 @@
-use crate::agents::{Vehicle, VehicleID};
+use super::{process_no_route_found, process_path, NoRouteError};
+use crate::agents::{
+    BehaviourType, TailIntentionManeuver, Vehicle, VehicleError, VehicleID, VehicleIntention,
+};
 use crate::grid::cell::CellState;
 use crate::grid::lane_change_type::LaneChangeType;
 use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
 use crate::shortest_path::router::shortest_path;
+use crate::shortest_path::router::AStarError;
 use indexmap::IndexMap;
+use rand::random;
+use std::collections::HashMap;
 use std::f64::INFINITY;
 use std::fmt;
 
@@ -17,12 +23,9 @@ pub enum IntentionError {
     NoRightCell(CellID),
     LeftPathFind(CellID),
     RightPathFind(CellID),
-}
-
-struct IntentionInfo<'a> {
-    cell_id: CellID,
-    vehicle: &'a mut Vehicle,
-    intention_type: IntentionType,
+    VehicleError(VehicleError),
+    NoPathFound(AStarError),
+    NoPathForNoRoute(NoRouteError),
 }
 
 impl fmt::Display for IntentionError {
@@ -38,23 +41,216 @@ impl fmt::Display for IntentionError {
             Self::RightPathFind(msg) => {
                 write!(f, "Can't find alternative path via right cell: {}", msg)
             }
+            Self::VehicleError(e) => write!(f, "Vehicle error: {}", e),
+            Self::NoPathFound(e) => write!(f, "No path found: {}", e),
+            Self::NoPathForNoRoute(e) => write!(f, "No path found for no route case: {}", e),
         }
     }
 }
 
+pub fn prepare_intentions<'a, 'b>(
+    net: &'a GridRoads,
+    current_state: &HashMap<CellID, VehicleID>,
+    vehicles: &'b mut IndexMap<VehicleID, Vehicle>,
+) -> Result<Intentions<'b>, IntentionError> {
+    let mut intentions = Intentions::new();
+    for (_, vehicle) in vehicles.iter_mut() {
+        let possible_intention = find_intention(net, current_state, vehicle)?;
+        if possible_intention.should_stop {
+            let alternate_possible_intention =
+                find_alternate_intention(net, current_state, vehicle)?;
+            vehicle.set_intention(alternate_possible_intention);
+            intentions.add_intention(vehicle, IntentionType::Target);
+            continue;
+        }
+        vehicle.set_intention(possible_intention);
+        intentions.add_intention(vehicle, IntentionType::Target);
+    }
+    Ok(intentions)
+}
+
+pub fn find_intention<'a>(
+    net: &'a GridRoads,
+    current_state: &HashMap<CellID, VehicleID>,
+    vehicle: &'a Vehicle,
+) -> Result<VehicleIntention, IntentionError> {
+    if vehicle.strategy_type == BehaviourType::Block {
+        let result = VehicleIntention {
+            intention_maneuver: LaneChangeType::Block,
+            intention_speed: 0,
+            destination: None,
+            confusion: None,
+            intention_cell_id: vehicle.cell_id,
+            tail_intention_cells: vec![],
+            intermediate_cells: Vec::with_capacity(0),
+            tail_maneuver: TailIntentionManeuver::default(),
+            should_stop: false,
+        };
+        return Ok(result);
+    }
+
+    let tail_maneuver = match vehicle.scan_tail_maneuver(net) {
+        Ok(maneuver) => maneuver,
+        Err(e) => return Err(IntentionError::VehicleError(e)),
+    };
+
+    let source_cell = net
+        .get_cell(&vehicle.cell_id)
+        .ok_or(IntentionError::NoSourceCell(vehicle.cell_id))?;
+    let target_cell = net
+        .get_cell(&vehicle.destination)
+        .ok_or(IntentionError::NoTargetCell(vehicle.destination))?;
+
+    let speed_limit = source_cell.get_speed_limit().min(vehicle.speed_limit);
+
+    if speed_limit <= 0 {
+        let result = VehicleIntention {
+            intention_maneuver: LaneChangeType::Block,
+            intention_speed: 0,
+            destination: None,
+            confusion: None,
+            intention_cell_id: vehicle.cell_id,
+            tail_intention_cells: vec![],
+            intermediate_cells: Vec::with_capacity(0),
+            tail_maneuver: tail_maneuver,
+            should_stop: false,
+        };
+        return Ok(result);
+    }
+
+    // Vehicle's speed should not be greater than speed limit
+    let mut intention_speed = vehicle.speed.min(speed_limit);
+
+    // Consider acceleration
+    let mut speed_possible = intention_speed;
+    let acceleration_allowed = vehicle.timer_non_acceleration <= 0;
+    if acceleration_allowed {
+        // Vehicle should could have (speed + 1) as possible speed untill it reaches speed limit
+        speed_possible = (speed_possible + 1).min(speed_limit);
+    }
+
+    // Random slowdown
+    let mut isSlowdown = false;
+    let slowdown_allowed = vehicle.timer_non_slowdown <= 0;
+    if slowdown_allowed && intention_speed > 0 && random::<f64>() < vehicle.slow_down_factor {
+        // @todo: consider to switch two lines below.
+        speed_possible = intention_speed;
+        intention_speed = (intention_speed - 1).max(0);
+        isSlowdown = true;
+    }
+
+    // Considering that vehicle always wants to accelerate:
+    let observe_distance = speed_possible + vehicle.min_safe_distance;
+
+    // Check if maneuvers are allowed (they could be prohibeted due the vehicle's tail is not done previous maneuver yet)
+    let maneuvers_allowed = vehicle.timer_non_maneuvers <= 0
+        && tail_maneuver.intention_maneuver != LaneChangeType::ChangeRight
+        && tail_maneuver.intention_maneuver != LaneChangeType::ChangeLeft;
+
+    let mut destination: Option<CellID> = None;
+    let mut confusion: Option<bool> = None;
+
+    let mut path = match shortest_path(
+        source_cell,
+        target_cell,
+        net,
+        maneuvers_allowed,
+        Some(observe_distance + 1),
+    ) {
+        Ok(path) => path,
+        Err(e)
+            if e != shortest_path::router::AStarError::NoPathFound {
+                start_id: source_cell.get_id(),
+                end_id: target_cell.get_id(),
+            } =>
+        {
+            return Err(IntentionError::NoPathFound(e));
+        }
+        Err(_) => {
+            let new_path = match process_no_route_found(source_cell, net) {
+                Ok(path) => path,
+                Err(e) => return Err(IntentionError::NoPathForNoRoute(e)),
+            };
+            destination = Some(new_path.vertices()[new_path.vertices().len() - 1].get_id());
+            intention_speed = 1;
+            speed_possible = intention_speed;
+            confusion = Some(true);
+            new_path
+        }
+    };
+
+    // Process path to find wanted maneuver, success forward movement and to trim path
+    let observable_path = process_path(&mut path, speed_possible, current_state);
+    let wanted_maneuver = observable_path.wanted_maneuver;
+    let last_cell_state = observable_path.last_cell_state;
+    let vertices = observable_path.path_vertices;
+
+    // Possible speed should not be greater than success forward movement counter
+    // If len(vertices) < speed, then it means that vehicle slow downed due conflict #1.1. Otherwise vehicle could accelerate
+    speed_possible = speed_possible.min(vertices.len() as i32);
+
+    if vertices.len() > 0 {
+        let wanted_cell_id = vertices[vertices.len() - 1].get_id();
+        let result = VehicleIntention {
+            intention_maneuver: wanted_maneuver,
+            intention_speed: speed_possible,
+            destination: destination,
+            confusion: confusion,
+            intention_cell_id: wanted_cell_id,
+            tail_intention_cells: vec![],
+            intermediate_cells: vertices[..vertices.len() - 1]
+                .iter()
+                .map(|cell| cell.get_id())
+                .collect(),
+            tail_maneuver: tail_maneuver,
+            should_stop: false,
+        };
+        return Ok(result);
+    }
+    // Stopped due the traffic light ahead
+    if last_cell_state != CellState::Free {
+        let result = VehicleIntention {
+            intention_maneuver: LaneChangeType::Block,
+            intention_speed: 0,
+            destination: destination,
+            confusion: confusion,
+            intention_cell_id: source_cell.get_id(),
+            tail_intention_cells: vec![],
+            intermediate_cells: Vec::with_capacity(0),
+            tail_maneuver: tail_maneuver,
+            should_stop: false,
+        };
+        return Ok(result);
+    }
+    // Otherwise just collect vehicles which can't move forward since not free cells ahead.
+    // Then they are trying to lane change in separate loop
+    // (in further we could make cooperative drives which allow other vehicles to change lane).
+    // Then we know vehicles which can't move at all.
+    let result = VehicleIntention {
+        intention_maneuver: LaneChangeType::Block,
+        intention_speed: 0,
+        destination: destination,
+        confusion: confusion,
+        intention_cell_id: source_cell.get_id(),
+        tail_intention_cells: vec![],
+        intermediate_cells: Vec::with_capacity(0),
+        tail_maneuver: tail_maneuver,
+        should_stop: true,
+    };
+    Ok(result)
+}
+
 /* Change it according to right-hand or left-hand traffic (driving side) */
 /* @todo: should be an argument in further  */
-const undefined_maneuver: LaneChangeType = LaneChangeType::ChangeRight;
+const UNDEFINED_MANEUVER: LaneChangeType = LaneChangeType::ChangeRight;
 
 pub fn find_alternate_intention<'a>(
     net: &'a GridRoads,
-    current_state: &IndexMap<CellID, VehicleID>,
-    vehicle: &'a mut Vehicle,
-) -> Result<Vec<IntentionInfo<'a>>, IntentionError> {
+    current_state: &HashMap<CellID, VehicleID>,
+    vehicle: &'a Vehicle,
+) -> Result<VehicleIntention, IntentionError> {
     let source_cell_id = vehicle.cell_id;
     let target_cell_id = vehicle.destination;
-    
-    let mut collected_intentions: Vec<IntentionInfo> = Vec::new();
 
     let source_cell = net
         .get_cell(&source_cell_id)
@@ -88,8 +284,8 @@ pub fn find_alternate_intention<'a>(
                 }
                 Err(e)
                     if e != shortest_path::router::AStarError::NoPathFound {
-                        start_id: 1,
-                        end_id: 2,
+                        start_id: left_cell_id,
+                        end_id: target_cell_id,
                     } =>
                 {
                     return Err(IntentionError::LeftPathFind(left_cell_id))
@@ -123,8 +319,8 @@ pub fn find_alternate_intention<'a>(
                 }
                 Err(e)
                     if e != shortest_path::router::AStarError::NoPathFound {
-                        start_id: 1,
-                        end_id: 2,
+                        start_id: right_cell_id,
+                        end_id: target_cell_id,
                     } =>
                 {
                     return Err(IntentionError::RightPathFind(right_cell_id))
@@ -141,7 +337,7 @@ pub fn find_alternate_intention<'a>(
     // Choose best maneuver
     let mut min_cell: CellID;
     let mut intention_maneuver: LaneChangeType;
-    if undefined_maneuver == LaneChangeType::ChangeRight {
+    if UNDEFINED_MANEUVER == LaneChangeType::ChangeRight {
         min_cell = right_cell_id;
         intention_maneuver = LaneChangeType::ChangeRight;
         if min_left_dist < min_right_dist {
@@ -156,31 +352,35 @@ pub fn find_alternate_intention<'a>(
             intention_maneuver = LaneChangeType::ChangeRight;
         }
     }
-    vehicle.intention_maneuver = intention_maneuver;
 
     // Apply the chosen maneuver
     if min_cell > 0 {
-        vehicle.speed = 1;
-        // Old code: borrowing issues
-        // intentions.add_intention(min_cell, vehicle, IntentionType::Target);
-        collected_intentions.push(IntentionInfo {
-            cell_id: min_cell,
-            vehicle: vehicle,
-            intention_type: IntentionType::Target,
-        });
-    } else {
-        vehicle.intention_maneuver = LaneChangeType::Block;
-        vehicle.speed = 0;
-        // Old code: borrowing issues
-        // intentions.add_intention(source_cell_id, vehicle, IntentionType::Target);
-        collected_intentions.push(IntentionInfo {
-            cell_id: source_cell_id,
-            vehicle: vehicle,
-            intention_type: IntentionType::Target,
-        });
+        let result = VehicleIntention {
+            intention_maneuver: intention_maneuver,
+            intention_speed: 1,
+            destination: None,
+            confusion: None,
+            intention_cell_id: min_cell,
+            tail_intention_cells: vec![],
+            intermediate_cells: Vec::with_capacity(0),
+            tail_maneuver: TailIntentionManeuver::default(),
+            should_stop: true,
+        };
+        return Ok(result);
     }
+    let result = VehicleIntention {
+        intention_maneuver: LaneChangeType::Block,
+        intention_speed: 0,
+        destination: None,
+        confusion: None,
+        intention_cell_id: source_cell_id,
+        tail_intention_cells: vec![],
+        intermediate_cells: Vec::with_capacity(0),
+        tail_maneuver: TailIntentionManeuver::default(),
+        should_stop: false,
+    };
 
-    Ok(collected_intentions)
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -298,31 +498,29 @@ mod tests {
             .build();
         let blocking_vehicle = Vehicle::new(78).with_cell(blocked_cell.get_id()).build();
 
-        let mut current_state: IndexMap<CellID, VehicleID> = IndexMap::new();
+        let mut current_state: HashMap<CellID, VehicleID> = HashMap::new();
         current_state.insert(source_cell.get_id(), vehicle.id);
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
-        let mut intentions = Intentions::new();
-        let collected_intentions = find_alternate_intention(&net, &current_state, &mut vehicle);
-        assert!(collected_intentions.is_ok());
-        for intention in collected_intentions.unwrap() {
-            intentions.add_intention(intention.cell_id, intention.vehicle, intention.intention_type);
-        }
+        let mut intentions: Intentions<'_> = Intentions::new();
+        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+        assert!(collected_intention.is_ok());
+        let unwrapped_intention = collected_intention.unwrap();
+        vehicle.set_intention(unwrapped_intention);
+        intentions.add_intention(&mut vehicle, IntentionType::Target);
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
-        let correct_speed = 1;
         let mut correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
-            .with_speed(correct_speed)
             .with_destination(dest_cell.get_id())
-            .with_intention_maneuver(LaneChangeType::ChangeRight)
             .build();
+        let mut correct_intention = VehicleIntention::default();
+        correct_intention.intention_cell_id = source_cell.get_right_id();
+        correct_intention.intention_maneuver = LaneChangeType::ChangeRight;
+        correct_intention.intention_speed = 1;
+        correct_vehicle.set_intention(correct_intention);
         let mut correct_intentions = Intentions::new();
-        correct_intentions.add_intention(
-            source_cell.get_right_id(),
-            &mut correct_vehicle,
-            IntentionType::Target,
-        );
+        correct_intentions.add_intention(&mut correct_vehicle, IntentionType::Target);
         assert_eq!(
             correct_intentions.len(),
             intentions.len(),
@@ -369,8 +567,12 @@ mod tests {
                     j
                 );
                 assert_eq!(
-                    correct_intentions.get(i).unwrap()[j].vehicle.unwrap().speed,
-                    intention.vehicle.unwrap().speed,
+                    correct_intentions.get(i).unwrap()[j]
+                        .vehicle
+                        .unwrap()
+                        .intention
+                        .intention_speed,
+                    intention.vehicle.unwrap().intention.intention_speed,
                     "Incorrect vehicle speed for cell #{} at pos #{}",
                     i,
                     j
@@ -379,8 +581,9 @@ mod tests {
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
                         .unwrap()
+                        .intention
                         .intention_maneuver,
-                    intention.vehicle.unwrap().intention_maneuver,
+                    intention.vehicle.unwrap().intention.intention_maneuver,
                     "Incorrect vehicle maneuver for cell #{} at pos #{}",
                     i,
                     j
@@ -400,31 +603,29 @@ mod tests {
             .build();
         let blocking_vehicle = Vehicle::new(78).with_cell(blocked_cell.get_id()).build();
 
-        let mut current_state: IndexMap<CellID, VehicleID> = IndexMap::new();
+        let mut current_state: HashMap<CellID, VehicleID> = HashMap::new();
         current_state.insert(source_cell.get_id(), vehicle.id);
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
         let mut intentions = Intentions::new();
-        let collected_intentions = find_alternate_intention(&net, &current_state, &mut vehicle);
-        assert!(collected_intentions.is_ok());
-        for intention in collected_intentions.unwrap() {
-            intentions.add_intention(intention.cell_id, intention.vehicle, intention.intention_type);
-        }
+        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+        assert!(collected_intention.is_ok());
+        let unwrapped_intention = collected_intention.unwrap();
+        vehicle.set_intention(unwrapped_intention);
+        intentions.add_intention(&mut vehicle, IntentionType::Target);
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
-        let correct_speed = 1;
         let mut correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
-            .with_speed(correct_speed)
             .with_destination(dest_cell.get_id())
-            .with_intention_maneuver(LaneChangeType::ChangeRight)
             .build();
+        let mut correct_intention = VehicleIntention::default();
+        correct_intention.intention_cell_id = source_cell.get_right_id();
+        correct_intention.intention_maneuver = LaneChangeType::ChangeRight;
+        correct_intention.intention_speed = 1;
         let mut correct_intentions = Intentions::new();
-        correct_intentions.add_intention(
-            source_cell.get_right_id(),
-            &mut correct_vehicle,
-            IntentionType::Target,
-        );
+        correct_vehicle.set_intention(correct_intention);
+        correct_intentions.add_intention(&mut correct_vehicle, IntentionType::Target);
         assert_eq!(
             correct_intentions.len(),
             intentions.len(),
@@ -471,8 +672,12 @@ mod tests {
                     j
                 );
                 assert_eq!(
-                    correct_intentions.get(i).unwrap()[j].vehicle.unwrap().speed,
-                    intention.vehicle.unwrap().speed,
+                    correct_intentions.get(i).unwrap()[j]
+                        .vehicle
+                        .unwrap()
+                        .intention
+                        .intention_speed,
+                    intention.vehicle.unwrap().intention.intention_speed,
                     "Incorrect vehicle speed for cell #{} at pos #{}",
                     i,
                     j
@@ -481,8 +686,9 @@ mod tests {
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
                         .unwrap()
+                        .intention
                         .intention_maneuver,
-                    intention.vehicle.unwrap().intention_maneuver,
+                    intention.vehicle.unwrap().intention.intention_maneuver,
                     "Incorrect vehicle maneuver for cell #{} at pos #{}",
                     i,
                     j
@@ -492,7 +698,6 @@ mod tests {
 
         // Case 3: Vehicle tries to find path via right maneuver (because of vehicle in front) but cannot find it
         // and there is also another vehicle in the right maneuver cell
-
         let source_cell = net.get_cell(&2).unwrap();
         let blocked_cell = net.get_cell(&3).unwrap();
         let dest_cell = net.get_cell(&500).unwrap();
@@ -506,32 +711,31 @@ mod tests {
             .with_cell(source_cell.get_right_id())
             .build();
 
-        let mut current_state: IndexMap<CellID, VehicleID> = IndexMap::new();
+        let mut current_state: HashMap<CellID, VehicleID> = HashMap::new();
         current_state.insert(source_cell.get_id(), vehicle.id);
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
         current_state.insert(source_cell.get_right_id(), blocking_vehicle2.id);
 
         let mut intentions = Intentions::new();
-        let collected_intentions = find_alternate_intention(&net, &current_state, &mut vehicle);
-        assert!(collected_intentions.is_ok());
-        for intention in collected_intentions.unwrap() {
-            intentions.add_intention(intention.cell_id, intention.vehicle, intention.intention_type);
-        }
+        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+        assert!(collected_intention.is_ok());
+        let unwrapped_intention = collected_intention.unwrap();
+        vehicle.set_intention(unwrapped_intention);
+        intentions.add_intention(&mut vehicle, IntentionType::Target);
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
-        let correct_speed = 0; // Vehicle could not move either forward or right
+        // Vehicle could not move either forward or right
         let mut correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
-            .with_speed(correct_speed)
             .with_destination(dest_cell.get_id())
-            .with_intention_maneuver(LaneChangeType::Block)
             .build();
+        let mut correct_intention = VehicleIntention::default();
+        correct_intention.intention_cell_id = source_cell.get_id();
+        correct_intention.intention_maneuver = LaneChangeType::Block;
+        correct_intention.intention_speed = 0;
         let mut correct_intentions = Intentions::new();
-        correct_intentions.add_intention(
-            source_cell.get_id(),
-            &mut correct_vehicle,
-            IntentionType::Target,
-        );
+        correct_vehicle.set_intention(correct_intention);
+        correct_intentions.add_intention(&mut correct_vehicle, IntentionType::Target);
         assert_eq!(
             correct_intentions.len(),
             intentions.len(),
@@ -578,8 +782,12 @@ mod tests {
                     j
                 );
                 assert_eq!(
-                    correct_intentions.get(i).unwrap()[j].vehicle.unwrap().speed,
-                    intention.vehicle.unwrap().speed,
+                    correct_intentions.get(i).unwrap()[j]
+                        .vehicle
+                        .unwrap()
+                        .intention
+                        .intention_speed,
+                    intention.vehicle.unwrap().intention.intention_speed,
                     "Incorrect vehicle speed for cell #{} at pos #{}",
                     i,
                     j
@@ -588,8 +796,9 @@ mod tests {
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
                         .unwrap()
+                        .intention
                         .intention_maneuver,
-                    intention.vehicle.unwrap().intention_maneuver,
+                    intention.vehicle.unwrap().intention.intention_maneuver,
                     "Incorrect vehicle maneuver for cell #{} at pos #{}",
                     i,
                     j

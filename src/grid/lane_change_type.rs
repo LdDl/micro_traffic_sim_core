@@ -1,8 +1,9 @@
 use std::fmt;
 
 /// Represents the type of lane change maneuvers.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LaneChangeType {
+    #[default]
     // Unknow lane change type
     Undefined = 0,
     // Straightforward

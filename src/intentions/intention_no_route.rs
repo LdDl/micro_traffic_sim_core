@@ -39,9 +39,9 @@ pub fn process_no_route_found<'a>(
     let (destination_cell_id, maneuver) = if current_cell.get_forward_id() >= 0 {
         (current_cell.get_forward_id(), LaneChangeType::NoChange)
     } else if current_cell.get_right_id() >= 0 {
-        (current_cell.get_right_id(), LaneChangeType::ChangeLeft)
+        (current_cell.get_right_id(), LaneChangeType::ChangeRight)
     } else if current_cell.get_left_id() >= 0 {
-        (current_cell.get_left_id(), LaneChangeType::ChangeRight)
+        (current_cell.get_left_id(), LaneChangeType::ChangeLeft)
     } else {
         return Err(NoRouteError::NoExitPath);
     };
@@ -61,4 +61,3 @@ pub fn process_no_route_found<'a>(
         heuristic(current_cell, destination_cell), // Default cost for single step
     ))
 }
-
