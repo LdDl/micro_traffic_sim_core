@@ -183,7 +183,7 @@ pub fn find_intention<'a>(
     let observable_path = process_path(&mut path, speed_possible, current_state);
     let wanted_maneuver = observable_path.wanted_maneuver;
     let last_cell_state = observable_path.last_cell_state;
-    let vertices = observable_path.path_vertices;
+    let vertices = observable_path.trimmed_path;
 
     // Possible speed should not be greater than success forward movement counter
     // If len(vertices) < speed, then it means that vehicle slow downed due conflict #1.1. Otherwise vehicle could accelerate
@@ -388,6 +388,80 @@ mod tests {
     use super::*;
     use crate::geom::new_point;
     use crate::grid::cell::Cell;
+    use crate::utils::test_grids::create_pretty_simple_grid;
+    #[test]
+    fn test_intention() {
+        let net = create_pretty_simple_grid();
+
+        // Case 1: basics
+        let current_state: HashMap<CellID, VehicleID> = HashMap::from([(101, 1)]);
+        let vehicle_1 = Vehicle::new(1)
+            .with_cell(101)
+            .with_speed(1)
+            .with_destination(7)
+            .build();
+        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let correct_intention = VehicleIntention {
+            intention_cell_id: 1,
+            intention_speed: 1,
+            intention_maneuver: LaneChangeType::NoChange,
+            ..Default::default()
+        };
+        assert_eq!(intention, correct_intention);
+
+        // Case 2: move with speed > 1
+        let current_state: HashMap<CellID, VehicleID> = HashMap::from([(101, 1)]);
+        let vehicle_1 = Vehicle::new(1)
+            .with_cell(101)
+            .with_speed(3)
+            .with_destination(7)
+            .build();
+        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let correct_intention = VehicleIntention {
+            intention_cell_id: 3,
+            intention_speed: 3,
+            intention_maneuver: LaneChangeType::NoChange,
+            intermediate_cells: vec![1, 2],
+            ..Default::default()
+        };
+        assert_eq!(intention, correct_intention);
+
+        // Case 3: move with speed > 1, but intention speed will be less due maneuver
+        // before last cell in path. Intention cell will be cell
+        // before last cell in path due the same reason.
+        let current_state: HashMap<CellID, VehicleID> = HashMap::from([(101, 1)]);
+        let vehicle_1 = Vehicle::new(1)
+            .with_cell(101)
+            .with_speed(4)
+            .with_destination(7)
+            .build();
+        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let correct_intention = VehicleIntention {
+            intention_cell_id: 3,
+            intention_speed: 3,
+            intention_maneuver: LaneChangeType::NoChange,
+            intermediate_cells: vec![1, 2],
+            ..Default::default()
+        };
+        assert_eq!(intention, correct_intention);
+
+        // Case 4: vehicle could not move
+        let current_state: HashMap<CellID, VehicleID> = HashMap::from([(101, 1), (1, 2)]);
+        let vehicle_1 = Vehicle::new(1)
+            .with_cell(101)
+            .with_speed(3)
+            .with_destination(7)
+            .build();
+        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let correct_intention = VehicleIntention {
+            intention_cell_id: 101,
+            intention_speed: 0,
+            intention_maneuver: LaneChangeType::Block,
+            should_stop: true,
+            ..Default::default()
+        };
+        assert_eq!(intention, correct_intention);
+    }
     #[test]
     fn test_alternate_intention() {
         // Golang code migration

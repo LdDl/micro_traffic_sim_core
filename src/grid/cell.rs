@@ -1,4 +1,4 @@
-use crate::geom::{PointType, Point, new_point};
+use crate::geom::{new_point, Point, PointType};
 use crate::grid::zones::ZoneType;
 use std::fmt;
 
@@ -236,10 +236,10 @@ impl Cell {
     }
 
     /// Returns speed limit in the cell.
-    /// 
+    ///
     /// # Returns
     /// The speed limit in the cell.
-    /// 
+    ///
     /// # Example
     /// ```
     /// use micro_traffic_sim_core::grid::cell::Cell;

@@ -106,7 +106,7 @@ pub struct Vehicle {
 }
 
 /// Represents vehicle's tail intention
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TailIntentionManeuver {
     /// This field is for establishing source cell of maneuver for the vehicle's tail (in case when vehicle has size more that one cell)
     pub source_cell_maneuver: CellID,
@@ -127,7 +127,7 @@ impl Default for TailIntentionManeuver {
 }
 
 /// Represents vehicle's intention to perform maneuver and other actions
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct VehicleIntention {
     /// Flag to repesent vehicle intentions to perform maneuver. See the ref. at `LaneChangeType`
     /// If the vehicle makes a maneuver, then it has no explicit advantage in possible conflicts

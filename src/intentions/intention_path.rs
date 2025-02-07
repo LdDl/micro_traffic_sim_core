@@ -15,10 +15,8 @@ pub struct ObservablePath<'a> {
     pub wanted_maneuver: LaneChangeType,
     /// State of the last cell in path
     pub last_cell_state: CellState,
-    /// Number of cells vehicle can move forward
-    pub success_forward_movement: i32,
-    /// Path vertices (cells)
-    pub path_vertices: Vec<&'a Cell>,
+    /// Path vertices (cells) after trimming
+    pub trimmed_path: Vec<&'a Cell>,
 }
 
 /// Process path by trimming and analyzing possible movement
@@ -119,8 +117,7 @@ pub fn process_path<'a>(
     ObservablePath {
         wanted_maneuver,
         last_cell_state,
-        success_forward_movement,
-        path_vertices: vertices.to_vec(),
+        trimmed_path: vertices[..success_forward_movement as usize].to_vec(),
     }
 }
 
@@ -153,8 +150,7 @@ mod tests {
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
-            success_forward_movement: 3,
-            path_vertices: vec![&cell2, &cell3, &cell4],
+            trimmed_path: vec![&cell2, &cell3, &cell4],
         };
 
         assert_eq!(
@@ -168,19 +164,15 @@ mod tests {
         );
 
         assert_eq!(
-            observable_path.success_forward_movement, correct_path.success_forward_movement,
+            observable_path.trimmed_path.len(),
+            correct_path.trimmed_path.len(),
             "Incorrect number of cells vehicle can move forward"
         );
 
-        assert_eq!(
-            observable_path.path_vertices.len(),
-            correct_path.path_vertices.len(),
-            "Incorrect number of cells in observable path"
-        );
-        for i in 0..observable_path.path_vertices.len() {
+        for i in 0..observable_path.trimmed_path.len() {
             assert_eq!(
-                observable_path.path_vertices[i].get_id(),
-                correct_path.path_vertices[i].get_id(),
+                observable_path.trimmed_path[i].get_id(),
+                correct_path.trimmed_path[i].get_id(),
                 "Incorrect cell at pos #{} in observable path",
                 i
             );
@@ -204,8 +196,7 @@ mod tests {
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
-            success_forward_movement: 2,
-            path_vertices: vec![&cell2, &cell3, &cell4],
+            trimmed_path: vec![&cell2, &cell3],
         };
 
         assert_eq!(
@@ -219,20 +210,15 @@ mod tests {
         );
 
         assert_eq!(
-            observable_path.success_forward_movement, correct_path.success_forward_movement,
+            observable_path.trimmed_path.len(),
+            correct_path.trimmed_path.len(),
             "Incorrect number of cells vehicle can move forward"
         );
 
-        assert_eq!(
-            observable_path.path_vertices.len(),
-            correct_path.path_vertices.len(),
-            "Incorrect number of cells in observable path"
-        );
-
-        for i in 0..observable_path.path_vertices.len() {
+        for i in 0..observable_path.trimmed_path.len() {
             assert_eq!(
-                observable_path.path_vertices[i].get_id(),
-                correct_path.path_vertices[i].get_id(),
+                observable_path.trimmed_path[i].get_id(),
+                correct_path.trimmed_path[i].get_id(),
                 "Incorrect cell at pos #{} in observable path",
                 i
             );
@@ -256,8 +242,7 @@ mod tests {
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
-            success_forward_movement: 1,
-            path_vertices: vec![&cell2, &cell3, &cell4],
+            trimmed_path: vec![&cell2],
         };
 
         assert_eq!(
@@ -271,20 +256,15 @@ mod tests {
         );
 
         assert_eq!(
-            observable_path.success_forward_movement, correct_path.success_forward_movement,
+            observable_path.trimmed_path.len(),
+            correct_path.trimmed_path.len(),
             "Incorrect number of cells vehicle can move forward"
         );
 
-        assert_eq!(
-            observable_path.path_vertices.len(),
-            correct_path.path_vertices.len(),
-            "Incorrect number of cells in observable path"
-        );
-
-        for i in 0..observable_path.path_vertices.len() {
+        for i in 0..observable_path.trimmed_path.len() {
             assert_eq!(
-                observable_path.path_vertices[i].get_id(),
-                correct_path.path_vertices[i].get_id(),
+                observable_path.trimmed_path[i].get_id(),
+                correct_path.trimmed_path[i].get_id(),
                 "Incorrect cell at pos #{} in observable path",
                 i
             );
@@ -306,8 +286,7 @@ mod tests {
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::ChangeLeft,
             last_cell_state: CellState::Free,
-            success_forward_movement: 0,
-            path_vertices: vec![&cell2, &cell3, &cell4],
+            trimmed_path: vec![],
         };
 
         assert_eq!(
@@ -321,20 +300,15 @@ mod tests {
         );
 
         assert_eq!(
-            observable_path.success_forward_movement, correct_path.success_forward_movement,
+            observable_path.trimmed_path.len(),
+            correct_path.trimmed_path.len(),
             "Incorrect number of cells vehicle can move forward"
         );
 
-        assert_eq!(
-            observable_path.path_vertices.len(),
-            correct_path.path_vertices.len(),
-            "Incorrect number of cells in observable path"
-        );
-
-        for i in 0..observable_path.path_vertices.len() {
+        for i in 0..observable_path.trimmed_path.len() {
             assert_eq!(
-                observable_path.path_vertices[i].get_id(),
-                correct_path.path_vertices[i].get_id(),
+                observable_path.trimmed_path[i].get_id(),
+                correct_path.trimmed_path[i].get_id(),
                 "Incorrect cell at pos #{} in observable path",
                 i
             );
@@ -357,8 +331,7 @@ mod tests {
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
-            success_forward_movement: vehicle_speed,
-            path_vertices: vec![&cell2, &cell3, &cell4],
+            trimmed_path: vec![&cell2],
         };
 
         assert_eq!(
@@ -372,20 +345,15 @@ mod tests {
         );
 
         assert_eq!(
-            observable_path.success_forward_movement, correct_path.success_forward_movement,
+            observable_path.trimmed_path.len(),
+            correct_path.trimmed_path.len(),
             "Incorrect number of cells vehicle can move forward"
         );
 
-        assert_eq!(
-            observable_path.path_vertices.len(),
-            correct_path.path_vertices.len(),
-            "Incorrect number of cells in observable path"
-        );
-
-        for i in 0..observable_path.path_vertices.len() {
+        for i in 0..observable_path.trimmed_path.len() {
             assert_eq!(
-                observable_path.path_vertices[i].get_id(),
-                correct_path.path_vertices[i].get_id(),
+                observable_path.trimmed_path[i].get_id(),
+                correct_path.trimmed_path[i].get_id(),
                 "Incorrect cell at pos #{} in observable path",
                 i
             );
@@ -408,8 +376,7 @@ mod tests {
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Banned,
-            success_forward_movement: 1,
-            path_vertices: vec![&cell2, &cell3, &cell4],
+            trimmed_path: vec![&cell2],
         };
 
         assert_eq!(
@@ -423,24 +390,18 @@ mod tests {
         );
 
         assert_eq!(
-            observable_path.success_forward_movement, correct_path.success_forward_movement,
+            observable_path.trimmed_path.len(),
+            correct_path.trimmed_path.len(),
             "Incorrect number of cells vehicle can move forward"
         );
 
-        assert_eq!(
-            observable_path.path_vertices.len(),
-            correct_path.path_vertices.len(),
-            "Incorrect number of cells in observable path"
-        );
-
-        for i in 0..observable_path.path_vertices.len() {
+        for i in 0..observable_path.trimmed_path.len() {
             assert_eq!(
-                observable_path.path_vertices[i].get_id(),
-                correct_path.path_vertices[i].get_id(),
+                observable_path.trimmed_path[i].get_id(),
+                correct_path.trimmed_path[i].get_id(),
                 "Incorrect cell at pos #{} in observable path",
                 i
             );
         }
     }
 }
-
