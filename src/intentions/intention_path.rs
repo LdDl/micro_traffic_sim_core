@@ -50,25 +50,29 @@ pub struct ObservablePath<'a> {
 /// );
 ///
 /// let mut current_state = HashMap::new();
-/// let observable_path = process_path(&mut path, 2, &current_state);
+/// let observable_path = process_path(&mut path, 2, 4, &current_state);
 ///
 /// println!("Observable path without obstacles: {:?}", observable_path); // Should print 3 cells forward
 ///
 /// current_state.insert(cell3.get_id(), 1);
-/// let observable_path = process_path(&mut path, 2, &current_state);
+/// let observable_path = process_path(&mut path, 2, 4, &current_state);
 ///
 /// println!("Observable path with obstacles: {:?}", observable_path); // Should print 1 cell forward
 /// ```
 pub fn process_path<'a>(
     shortest_path: &'a mut Path,
     speed_possible: i32,
+    destination: CellID,
     current_state: &HashMap<CellID, VehicleID>,
 ) -> ObservablePath<'a> {
     // Remove first cell from path since it's vehicle's position
     shortest_path.vertices_mut().remove(0);
-
-    // Remove last cell if path has more than 1 cell
-    if shortest_path.vertices().len() > 1 {
+    let speed_limit = (speed_possible as usize - 1).min(shortest_path.vertices().len() - 1);
+    // Remove last cell if path has more than 1 cell and last cell in possible path (untill speed
+    // limit would has been reached) is not vehicle's destination
+    if shortest_path.vertices().len() > 1
+        && shortest_path.vertices()[speed_limit].get_id() != destination
+    {
         shortest_path.vertices_mut().pop();
         shortest_path.maneuvers_mut().pop();
     }
@@ -113,7 +117,6 @@ pub fn process_path<'a>(
             break;
         }
     }
-
     ObservablePath {
         wanted_maneuver,
         last_cell_state,
@@ -145,7 +148,7 @@ mod tests {
         );
 
         let mut current_state = HashMap::new();
-        let observable_path = process_path(&mut path, speed_limit, &current_state);
+        let observable_path = process_path(&mut path, speed_limit, cell5.get_id(), &current_state);
 
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
@@ -191,7 +194,7 @@ mod tests {
             ],
             10.0,
         );
-        let observable_path = process_path(&mut path, speed_limit, &current_state);
+        let observable_path = process_path(&mut path, speed_limit, cell5.get_id(), &current_state);
 
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
@@ -237,7 +240,7 @@ mod tests {
             ],
             10.0,
         );
-        let observable_path = process_path(&mut path, speed_limit, &current_state);
+        let observable_path = process_path(&mut path, speed_limit, cell5.get_id(), &current_state);
 
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
@@ -281,7 +284,7 @@ mod tests {
             ],
             10.0,
         );
-        let observable_path = process_path(&mut path, speed_limit, &current_state);
+        let observable_path = process_path(&mut path, speed_limit, cell5.get_id(), &current_state);
 
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::ChangeLeft,
@@ -326,7 +329,8 @@ mod tests {
             ],
             10.0,
         );
-        let observable_path = process_path(&mut path, vehicle_speed, &current_state);
+        let observable_path =
+            process_path(&mut path, vehicle_speed, cell5.get_id(), &current_state);
 
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,
@@ -371,7 +375,7 @@ mod tests {
             ],
             10.0,
         );
-        let observable_path = process_path(&mut path, speed_limit, &current_state);
+        let observable_path = process_path(&mut path, speed_limit, cell5.get_id(), &current_state);
 
         let correct_path = ObservablePath {
             wanted_maneuver: LaneChangeType::NoChange,

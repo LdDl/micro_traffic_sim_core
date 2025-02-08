@@ -4,7 +4,7 @@ use crate::{
 };
 
 /// Creates a simple grid for testing purposes
-/// 
+///
 /// # Example
 /// ```
 /// // .         (44) ---(55) ---(66)
@@ -20,11 +20,13 @@ use crate::{
 /// // .            /   \    / \     / Forward
 /// // .           /     \  /   \   /
 /// // . (101) --(1) ----(2) ----(3)
+/// // .                             \
+/// // .                              (8)
 /// ```
-/// 
+///
 pub fn create_pretty_simple_grid() -> GridRoads {
     let mut grid = GridRoads::new();
-    
+
     // Add cells to grid
     grid.add_cell(
         Cell::new(101)
@@ -41,7 +43,7 @@ pub fn create_pretty_simple_grid() -> GridRoads {
     grid.add_cell(
         Cell::new(1)
             .with_point(new_point(1.0, 1.0, None))
-            .with_zone_type(ZoneType::Common) 
+            .with_zone_type(ZoneType::Common)
             .with_speed_limit(4)
             .with_left_node(5)
             .with_forward_node(2)
@@ -69,7 +71,7 @@ pub fn create_pretty_simple_grid() -> GridRoads {
             .with_speed_limit(4)
             .with_left_node(-1)
             .with_forward_node(7)
-            .with_right_node(-1)
+            .with_right_node(8)
             .with_meso_link(999)
             .build(),
     );
@@ -113,6 +115,18 @@ pub fn create_pretty_simple_grid() -> GridRoads {
     grid.add_cell(
         Cell::new(7)
             .with_point(new_point(4.0, 1.5, None))
+            .with_zone_type(ZoneType::Common)
+            .with_speed_limit(4)
+            .with_left_node(-1)
+            .with_forward_node(-1)
+            .with_right_node(-1)
+            .with_meso_link(999)
+            .build(),
+    );
+
+    grid.add_cell(
+        Cell::new(8)
+            .with_point(new_point(5.0, 0.5, None))
             .with_zone_type(ZoneType::Common)
             .with_speed_limit(4)
             .with_left_node(-1)

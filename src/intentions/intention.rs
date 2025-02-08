@@ -180,7 +180,12 @@ pub fn find_intention<'a>(
     };
 
     // Process path to find wanted maneuver, success forward movement and to trim path
-    let observable_path = process_path(&mut path, speed_possible, current_state);
+    let observable_path = process_path(
+        &mut path,
+        speed_possible.min(vehicle.speed),
+        vehicle.destination,
+        current_state,
+    );
     let wanted_maneuver = observable_path.wanted_maneuver;
     let last_cell_state = observable_path.last_cell_state;
     let vertices = observable_path.trimmed_path;
@@ -433,7 +438,7 @@ mod tests {
         let vehicle_1 = Vehicle::new(1)
             .with_cell(101)
             .with_speed(4)
-            .with_destination(7)
+            .with_destination(8)
             .build();
         let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
         let correct_intention = VehicleIntention {
@@ -445,7 +450,7 @@ mod tests {
         };
         assert_eq!(intention, correct_intention);
 
-        // Case 4: vehicle could not move
+        // Case 4: vehicle could not move due other vehicle in front
         let current_state: HashMap<CellID, VehicleID> = HashMap::from([(101, 1), (1, 2)]);
         let vehicle_1 = Vehicle::new(1)
             .with_cell(101)
@@ -458,6 +463,57 @@ mod tests {
             intention_speed: 0,
             intention_maneuver: LaneChangeType::Block,
             should_stop: true,
+            ..Default::default()
+        };
+        assert_eq!(intention, correct_intention);
+
+        // Case 5: vehicle could move but not that far and will decrease speed due the other vehicle in front
+        let current_state: HashMap<CellID, VehicleID> = HashMap::from([(101, 1), (3, 2)]);
+        let vehicle_1 = Vehicle::new(1)
+            .with_cell(101)
+            .with_speed(3)
+            .with_destination(7)
+            .build();
+        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let correct_intention = VehicleIntention {
+            intention_cell_id: 2,
+            intention_speed: 2,
+            intention_maneuver: LaneChangeType::NoChange,
+            intermediate_cells: vec![1],
+            ..Default::default()
+        };
+        assert_eq!(intention, correct_intention);
+
+        // Case 6: vehicle has speed more than is needed to reach destination (vehicle should slow down)
+        let current_state: HashMap<CellID, VehicleID> = HashMap::from([(101, 1)]);
+        let vehicle_1 = Vehicle::new(1)
+            .with_cell(101)
+            .with_speed(3)
+            .with_destination(2)
+            .build();
+        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let correct_intention = VehicleIntention {
+            intention_cell_id: 2,
+            intention_speed: 2,
+            intention_maneuver: LaneChangeType::NoChange,
+            intermediate_cells: vec![1],
+            ..Default::default()
+        };
+        assert_eq!(intention, correct_intention);
+
+        // Case 7: vehicle can reach destination
+        let current_state: HashMap<CellID, VehicleID> = HashMap::from([(101, 1)]);
+        let vehicle_1 = Vehicle::new(1)
+            .with_cell(101)
+            .with_speed(4)
+            .with_destination(7)
+            .build();
+        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let correct_intention = VehicleIntention {
+            intention_cell_id: 7,
+            intention_speed: 4,
+            intention_maneuver: LaneChangeType::NoChange,
+            intermediate_cells: vec![1, 2, 3],
             ..Default::default()
         };
         assert_eq!(intention, correct_intention);
