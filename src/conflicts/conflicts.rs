@@ -1,6 +1,10 @@
 use std::fmt;
+use std::collections::HashMap;
 use crate::grid::cell::CellID;
+use crate::grid::road_network::GridRoads;
 use crate::agents::Vehicle;
+use crate::intentions::Intentions;
+use crate::conflict_zones::{ConflictZone, ConflictZoneID};
 
 /// Different types of conflicts that can occur between vehicles
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,3 +78,14 @@ impl fmt::Display for CellConflict<'_> {
         write!(f, "CellConflict{{CellID: {}, Type: {}, Participants: ({:?}), Priority participant: {}}}", cell_id, self.conflict_type, participants, priority_participant_id)
     }
 }
+
+/// Collects all conflicts between agents
+pub fn collect_conflicts<'a>(
+    intentions: &'a mut Intentions<'a>,
+    net: &GridRoads,
+    conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
+    cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
+) -> Result<Vec<CellConflict<'a>>, String> {
+    todo!();
+}
+
