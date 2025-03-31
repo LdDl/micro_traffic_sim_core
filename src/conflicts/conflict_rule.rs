@@ -141,9 +141,64 @@ pub fn resolve_merge_forward<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::VehicleIntention;
     #[test]
     fn test_resolve_merge_lane_change() {
-        todo!();
+        // Case 1: Aggressive vehicle should win
+        let vehicle_one = Vehicle::new(1)
+            .with_behaviour(BehaviourType::Aggressive)
+            .with_speed(1)
+            .build();
+        let vehicle_two = Vehicle::new(2)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(3)
+            .build();
+        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
+        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+
+        let correct_winner = (intention_one.clone(), ConflictType::MergeLaneChange);
+        let actual_winner = resolve_merge_lane_change(&intention_one, &intention_two);
+        assert_eq!(
+            correct_winner.0.get_vehicle().unwrap().id,
+            actual_winner.0.get_vehicle().unwrap().id,
+            "Vehicle ID for the winner is not correct"
+        );
+        assert_eq!(
+            correct_winner.1, actual_winner.1,
+            "Conflict type is not correct"
+        );
+
+        // Case 2: Vehicle doing LEFT maneuver should win
+        let mut vehicle_one = Vehicle::new(1)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(1)
+            .build();
+        vehicle_one.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeLeft,
+            ..Default::default()
+        });
+        let mut vehicle_two = Vehicle::new(2)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(3)
+            .build();
+        vehicle_two.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeRight,
+            ..Default::default()
+        });
+        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
+        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+
+        let correct_winner = (intention_one.clone(), ConflictType::MergeLaneChange);
+        let actual_winner = resolve_merge_lane_change(&intention_one, &intention_two);
+        assert_eq!(
+            correct_winner.0.get_vehicle().unwrap().id,
+            actual_winner.0.get_vehicle().unwrap().id,
+            "Vehicle ID for the winner is not correct"
+        );
+        assert_eq!(
+            correct_winner.1, actual_winner.1,
+            "Conflict type is not correct"
+        );
     }
     #[test]
     fn test_resolve_by_speed_and_cooperativity() {
