@@ -4,6 +4,7 @@ pub mod conflict_zones;
 pub mod geom;
 pub mod grid;
 pub mod intentions;
+pub mod conflicts;
 pub mod shortest_path;
 pub mod simulation;
 pub mod traffic_lights;
