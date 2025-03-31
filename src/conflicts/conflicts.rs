@@ -1,4 +1,6 @@
 use std::fmt;
+use crate::grid::cell::CellID;
+use crate::agents::Vehicle;
 
 /// Different types of conflicts that can occur between vehicles
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,5 +50,27 @@ impl fmt::Display for ConflictType {
             ConflictType::TailCrossLaneChange => "tail+cross+lane_change",
         };
         write!(f, "{}", as_str)
+    }
+}
+
+
+/// Represents a conflict between vehicles
+pub struct CellConflict<'a> {
+    /// Cell ID where the conflict occurs
+    pub cell_id: CellID,
+    /// Agents that are involved in the conflict
+    pub participants: Vec<&'a mut Vehicle>,
+    /// Agent that has priority in the conflict
+    pub priority_participant: &'a mut Vehicle,
+    /// Type of the conflict
+    pub conflict_type: ConflictType,
+}
+
+impl fmt::Display for CellConflict<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let participants: Vec<String> = self.participants.iter().map(|p| p.id.to_string()).collect();
+        let priority_participant_id = self.priority_participant.id.to_string();
+        let cell_id = self.cell_id.to_string();
+        write!(f, "CellConflict{{CellID: {}, Type: {}, Participants: ({:?}), Priority participant: {}}}", cell_id, self.conflict_type, participants, priority_participant_id)
     }
 }
