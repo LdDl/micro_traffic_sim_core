@@ -5,6 +5,17 @@ use crate::grid::lane_change_type::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType};
 use rand::Rng;
 
+// At the top of your file
+#[cfg(not(test))]
+use rand::thread_rng;
+
+#[cfg(test)]
+pub fn thread_rng() -> impl Rng {
+    // Return a fixed-seed RNG for testing
+    use rand::SeedableRng;
+    rand::rngs::StdRng::seed_from_u64(42)
+}
+
 const EPS_COOP_LEVEL: f64 = 0.0001;
 
 /// Checks if the vehicle is changing lane
@@ -82,7 +93,8 @@ pub fn resolve_by_speed_and_cooperativity<'a>(
     let coop_diff = vehicle_one.cooperativity - vehicle_two.cooperativity;
     if coop_diff.abs() < EPS_COOP_LEVEL {
         // Random choice for equal cooperativity
-        let mut rng = rand::thread_rng();
+        // let mut rng = rand::thread_rng(); // This is not working in the test because of the thread_rng() function
+        let mut rng = thread_rng();
         if rng.gen_bool(0.5) {
             return (intention_one, ConflictType::MergeForward);
         }
@@ -202,7 +214,79 @@ mod tests {
     }
     #[test]
     fn test_resolve_by_speed_and_cooperativity() {
-        todo!();
+        // Case 1: Vehicle with higher speed should win
+        let vehicle_one = Vehicle::new(1)
+            .with_speed(5)
+            .with_cooperative_level(0.5)
+            .build();
+        let vehicle_two = Vehicle::new(2)
+            .with_speed(3)
+            .with_cooperative_level(0.5)
+            .build();
+        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
+        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+
+        let correct_winner = (intention_one.clone(), ConflictType::MergeForward);
+        let actual_winner = resolve_by_speed_and_cooperativity(&intention_one, &intention_two);
+        assert_eq!(
+            correct_winner.0.get_vehicle().unwrap().id,
+            actual_winner.0.get_vehicle().unwrap().id,
+            "Vehicle ID for the winner is not correct"
+        );
+        assert_eq!(
+            correct_winner.1, actual_winner.1,
+            "Conflict type is not correct"
+        );
+
+        // Case 2: Same speed, less cooperative vehicle should win
+        let vehicle_three = Vehicle::new(3)
+            .with_speed(4)
+            .with_cooperative_level(0.3)
+            .build();
+        let vehicle_four = Vehicle::new(4)
+            .with_speed(4)
+            .with_cooperative_level(0.8)
+            .build();
+        let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
+        let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Target);
+
+        let correct_winner = (intention_three.clone(), ConflictType::MergeForward);
+        let actual_winner = resolve_by_speed_and_cooperativity(&intention_three, &intention_four);
+        assert_eq!(
+            correct_winner.0.get_vehicle().unwrap().id,
+            actual_winner.0.get_vehicle().unwrap().id,
+            "Vehicle ID for the winner is not correct"
+        );
+        assert_eq!(
+            correct_winner.1, actual_winner.1,
+            "Conflict type is not correct"
+        );
+
+        // Case 3: Equal speed, equal cooperativity (random decision - cannot test deterministically)
+        // Just verify it runs without errors
+        let vehicle_five = Vehicle::new(5)
+            .with_speed(3)
+            .with_cooperative_level(0.5)
+            .build();
+        let vehicle_six = Vehicle::new(6)
+            .with_speed(3)
+            .with_cooperative_level(0.5)
+            .build();
+        let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
+        let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
+
+        // Send seed for random number generator to make test deterministicgg
+        let correct_winner = (intention_six.clone(), ConflictType::MergeForward);
+        let actual_winner = resolve_by_speed_and_cooperativity(&intention_five, &intention_six);
+        assert_eq!(
+            correct_winner.0.get_vehicle().unwrap().id,
+            actual_winner.0.get_vehicle().unwrap().id,
+            "Vehicle ID for the winner is not correct"
+        );
+        assert_eq!(
+            correct_winner.1, actual_winner.1,
+            "Conflict type is not correct"
+        );
     }
     #[test]
     fn test_resolve_merge_forward() {
