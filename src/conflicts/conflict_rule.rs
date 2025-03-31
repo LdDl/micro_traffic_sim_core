@@ -167,7 +167,6 @@ mod tests {
             .build();
         let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
         let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
-
         let correct_winner = (intention_one.clone(), ConflictType::MergeLaneChange);
         let actual_winner = resolve_merge_lane_change(&intention_one, &intention_two);
         assert_eq!(
@@ -199,7 +198,6 @@ mod tests {
         });
         let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
         let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
-
         let correct_winner = (intention_one.clone(), ConflictType::MergeLaneChange);
         let actual_winner = resolve_merge_lane_change(&intention_one, &intention_two);
         assert_eq!(
@@ -225,7 +223,6 @@ mod tests {
             .build();
         let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
         let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
-
         let correct_winner = (intention_one.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_by_speed_and_cooperativity(&intention_one, &intention_two);
         assert_eq!(
@@ -249,7 +246,6 @@ mod tests {
             .build();
         let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
         let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Target);
-
         let correct_winner = (intention_three.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_by_speed_and_cooperativity(&intention_three, &intention_four);
         assert_eq!(
@@ -262,8 +258,7 @@ mod tests {
             "Conflict type is not correct"
         );
 
-        // Case 3: Equal speed, equal cooperativity (random decision - cannot test deterministically)
-        // Just verify it runs without errors
+        // Case 3: Equal speed, equal cooperativity
         let vehicle_five = Vehicle::new(5)
             .with_speed(3)
             .with_cooperative_level(0.5)
@@ -274,8 +269,6 @@ mod tests {
             .build();
         let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
         let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
-
-        // Send seed for random number generator to make test deterministicgg
         let correct_winner = (intention_six.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_by_speed_and_cooperativity(&intention_five, &intention_six);
         assert_eq!(
@@ -301,7 +294,6 @@ mod tests {
             .build();
         let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
         let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
-
         let coorect_winner = (intention_one.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_merge_forward(&intention_one, &intention_two);
         assert_eq!(
@@ -325,7 +317,6 @@ mod tests {
             .build();
         let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
         let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Transit);
-
         let correct_winner = (intention_four.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_merge_forward(&intention_three, &intention_four);
         assert_eq!(
@@ -352,7 +343,6 @@ mod tests {
             .build();
         let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
         let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
-
         let correct_winner = (intention_five.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_merge_forward(&intention_five, &intention_six);
         assert_eq!(
