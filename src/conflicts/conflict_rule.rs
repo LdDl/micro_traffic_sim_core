@@ -290,6 +290,79 @@ mod tests {
     }
     #[test]
     fn test_resolve_merge_forward() {
-        todo!();
+        // Case 1: Aggressive vehicle should win over cooperative
+        let vehicle_one = Vehicle::new(1)
+            .with_behaviour(BehaviourType::Aggressive)
+            .with_speed(3)
+            .build();
+        let vehicle_two = Vehicle::new(2)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(3)
+            .build();
+        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
+        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+
+        let coorect_winner = (intention_one.clone(), ConflictType::MergeForward);
+        let actual_winner = resolve_merge_forward(&intention_one, &intention_two);
+        assert_eq!(
+            coorect_winner.0.get_vehicle().unwrap().id,
+            actual_winner.0.get_vehicle().unwrap().id,
+            "Vehicle ID for the winner is not correct"
+        );
+        assert_eq!(
+            coorect_winner.1, actual_winner.1,
+            "Conflict type is not correct"
+        );
+
+        // Case 2: Transit intention should win over Target intention
+        let vehicle_three = Vehicle::new(3)
+            .with_behaviour(BehaviourType::Undefined)
+            .with_speed(3)
+            .build();
+        let vehicle_four = Vehicle::new(4)
+            .with_behaviour(BehaviourType::Undefined)
+            .with_speed(3)
+            .build();
+        let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
+        let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Transit);
+
+        let correct_winner = (intention_four.clone(), ConflictType::MergeForward);
+        let actual_winner = resolve_merge_forward(&intention_three, &intention_four);
+        assert_eq!(
+            correct_winner.0.get_vehicle().unwrap().id,
+            actual_winner.0.get_vehicle().unwrap().id,
+            "Vehicle ID for the winner is not correct"
+        );
+        assert_eq!(
+            correct_winner.1, actual_winner.1,
+            "Conflict type is not correct"
+        );
+
+        // Case 3: For same intention types, should delegate to
+        // resolve_by_speed_and_cooperativity() call
+        let vehicle_five = Vehicle::new(5)
+            .with_behaviour(BehaviourType::Undefined)
+            .with_speed(5)
+            .with_cooperative_level(0.5)
+            .build();
+        let vehicle_six = Vehicle::new(6)
+            .with_behaviour(BehaviourType::Undefined)
+            .with_speed(3)
+            .with_cooperative_level(0.5)
+            .build();
+        let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
+        let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
+
+        let correct_winner = (intention_five.clone(), ConflictType::MergeForward);
+        let actual_winner = resolve_merge_forward(&intention_five, &intention_six);
+        assert_eq!(
+            correct_winner.0.get_vehicle().unwrap().id,
+            actual_winner.0.get_vehicle().unwrap().id,
+            "Vehicle ID for the winner is not correct"
+        );
+        assert_eq!(
+            correct_winner.1, actual_winner.1,
+            "Conflict type is not correct"
+        );
     }
 }
