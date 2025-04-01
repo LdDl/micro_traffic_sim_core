@@ -59,7 +59,7 @@ static CONFLICT_RULES: &[ConflictRule] = conflict_rules![
     [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange, |cin1, cin2| {
         // Second vehicle is not doing maneuver, when the first one is doing lane change.
         // Therefore the first vehicle should give way to the second one
-        (cin2, ConflictType::MergeForward)
+        (cin2, ConflictType::ForwardLaneChange)
     } ],
 
     // First vehicle is changing lane, second is blocking its lane
@@ -613,7 +613,7 @@ mod tests {
         });
         let intention_seven = CellIntention::new(Some(&vehicle_seven), IntentionType::Target);
         let intention_eight = CellIntention::new(Some(&vehicle_eight), IntentionType::Target);
-        let correct_winner = (intention_eight.clone(), ConflictType::MergeForward);
+        let correct_winner = (intention_eight.clone(), ConflictType::ForwardLaneChange);
         let actual_winner = resolve_simple_rules(&intention_seven, &intention_eight);
         assert_eq!(
             correct_winner.0.get_vehicle().unwrap().id,
