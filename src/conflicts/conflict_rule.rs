@@ -26,66 +26,116 @@ struct ConflictRule {
     ) -> (&'a CellIntention<'a>, ConflictType),
 }
 
-// Create a static array of rules
-static CONFLICT_RULES: &[ConflictRule] = &[
-    ConflictRule {
-        // Both vehicles are changing lane on a single road
-        // Two source lanes on one road is going to merge into single lane on another road
-        condition: |v1, v2| changing_lane(v1) && changing_lane(v2),
-        resolver: |cin1, cin2| resolve_merge_lane_change(cin1, cin2),
-    },
-    ConflictRule {
-        // Both vehicles are moving forward on different lanes of different roads
-        // Differet roads are going to merge into single road
-        condition: |v1, v2| {
-            v1.intention.intention_maneuver == LaneChangeType::NoChange
-                && v2.intention.intention_maneuver == LaneChangeType::NoChange
-        },
-        resolver: |cin1, cin2| resolve_merge_forward(cin1, cin2),
-    },
-    ConflictRule {
-        // First vehicle is moving forward, second is changing lane
-        condition: |v1, v2| {
-            v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2)
-        },
-        resolver: |cin1, cin2| {
-            // First vehicle is not doing maneuver, when the second one is doing lane change.
-            // Therefore the second vehicle should give way to the first one
-            (cin1, ConflictType::MergeForward)
-        },
-    },
-    ConflictRule {
-        // First vehicle is changing lane, second is moving forward
-        condition: |v1, v2| {
-            changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange
-        },
-        resolver: |cin1, cin2| {
-            // Second vehicle is not doing maneuver, when the first one is doing lane change.
-            // Therefore the first vehicle should give way to the second one
-            (cin2, ConflictType::MergeForward)
-        },
-    },
-    ConflictRule {
-        // First vehicle is changing lane, second is blocking its lane
-        condition: |v1, v2| {
-            changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::Block
-        },
-        resolver: |cin1, cin2| {
-            // Second vehicle is not moving therefore it holds the position
-            (cin2, ConflictType::BlockLaneChange)
-        },
-    },
-    ConflictRule {
-        // First vehicle is blocking its lane, second is changing lane
-        condition: |v1, v2| {
-            v1.intention.intention_maneuver == LaneChangeType::Block && changing_lane(v2)
-        },
-        resolver: |cin1, cin2| {
-            // First vehicle is not moving therefore it holds the position
-            (cin1, ConflictType::BlockLaneChange)
-        },
-    },
+macro_rules! conflict_rules {
+    ( $( [ $condition:expr, $resolver:expr ] ),* ) => {
+        &[
+            $(
+                ConflictRule {
+                    condition: $condition,
+                    resolver: $resolver,
+                },
+            )*
+        ]
+    }
+}
+
+static CONFLICT_RULES: &[ConflictRule] = conflict_rules![
+    // Both vehicles are changing lane on a single road
+    // Two source lanes on one road is going to merge into single lane on another road
+    [ |v1, v2| changing_lane(v1) && changing_lane(v2), resolve_merge_lane_change ],
+    
+    // Both vehicles are moving forward on different lanes of different roads
+    // Differet roads are going to merge into single road
+    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && v2.intention.intention_maneuver == LaneChangeType::NoChange, resolve_merge_forward ],
+
+    // First vehicle is moving forward, second is changing lane
+    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2), |cin1, cin2| {
+        // First vehicle is not doing maneuver, when the second one is doing lane change.
+        // Therefore the second vehicle should give way to the first one
+        (cin1, ConflictType::MergeForward)
+    } ],
+
+    // First vehicle is changing lane, second is moving forward
+    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange, |cin1, cin2| {
+        // Second vehicle is not doing maneuver, when the first one is doing lane change.
+        // Therefore the first vehicle should give way to the second one
+        (cin2, ConflictType::MergeForward)
+    } ],
+
+    // First vehicle is changing lane, second is blocking its lane
+    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::Block, |cin1, cin2| {
+        // Second vehicle is not moving therefore it holds the position
+        (cin2, ConflictType::BlockLaneChange)
+    } ],
+
+    // First vehicle is blocking its lane, second is changing lane
+    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::Block && changing_lane(v2), |cin1, cin2| {
+        // First vehicle is not moving therefore it holds the position
+        (cin1, ConflictType::BlockLaneChange)
+    } ]
 ];
+
+// Dynamic approach: obsolete
+// Create a static array of rules
+// static CONFLICT_RULES: &[ConflictRule] = &[
+//     ConflictRule {
+//         // Both vehicles are changing lane on a single road
+//         // Two source lanes on one road is going to merge into single lane on another road
+//         condition: |v1, v2| changing_lane(v1) && changing_lane(v2),
+//         resolver: |cin1, cin2| resolve_merge_lane_change(cin1, cin2),
+//     },
+//     ConflictRule {
+//         // Both vehicles are moving forward on different lanes of different roads
+//         // Differet roads are going to merge into single road
+//         condition: |v1, v2| {
+//             v1.intention.intention_maneuver == LaneChangeType::NoChange
+//                 && v2.intention.intention_maneuver == LaneChangeType::NoChange
+//         },
+//         resolver: |cin1, cin2| resolve_merge_forward(cin1, cin2),
+//     },
+//     ConflictRule {
+//         // First vehicle is moving forward, second is changing lane
+//         condition: |v1, v2| {
+//             v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2)
+//         },
+//         resolver: |cin1, cin2| {
+//             // First vehicle is not doing maneuver, when the second one is doing lane change.
+//             // Therefore the second vehicle should give way to the first one
+//             (cin1, ConflictType::MergeForward)
+//         },
+//     },
+//     ConflictRule {
+//         // First vehicle is changing lane, second is moving forward
+//         condition: |v1, v2| {
+//             changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange
+//         },
+//         resolver: |cin1, cin2| {
+//             // Second vehicle is not doing maneuver, when the first one is doing lane change.
+//             // Therefore the first vehicle should give way to the second one
+//             (cin2, ConflictType::MergeForward)
+//         },
+//     },
+//     ConflictRule {
+//         // First vehicle is changing lane, second is blocking its lane
+//         condition: |v1, v2| {
+//             changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::Block
+//         },
+//         resolver: |cin1, cin2| {
+//             // Second vehicle is not moving therefore it holds the position
+//             (cin2, ConflictType::BlockLaneChange)
+//         },
+//     },
+//     ConflictRule {
+//         // First vehicle is blocking its lane, second is changing lane
+//         condition: |v1, v2| {
+//             v1.intention.intention_maneuver == LaneChangeType::Block && changing_lane(v2)
+//         },
+//         resolver: |cin1, cin2| {
+//             // First vehicle is not moving therefore it holds the position
+//             (cin1, ConflictType::BlockLaneChange)
+//         },
+//     },
+// ];
 
 // Function to resolve conflicts
 pub fn resolve_simple_rules<'a>(
