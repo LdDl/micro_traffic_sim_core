@@ -143,6 +143,6 @@ mod tests {
         cells_conflicts_zones.insert(200, 1);
         let correct_winner = 111;
         let winner = find_zone_conflict_for_two_intentions(200, &conflict_zones, &cells_conflicts_zones);
-        assert_eq!(winner, Some(correct_winner));
+        assert_eq!(winner, Some(correct_winner), "Conflict winner is incorrect");
     }
 }
