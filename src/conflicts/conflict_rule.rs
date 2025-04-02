@@ -4,16 +4,7 @@ use crate::conflicts::ConflictType;
 use crate::grid::lane_change_type::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType};
 use rand::Rng;
-
-#[cfg(not(test))]
-use rand::thread_rng;
-
-#[cfg(test)]
-pub fn thread_rng() -> impl Rng {
-    // Return a fixed-seed RNG for testing
-    use rand::SeedableRng;
-    rand::rngs::StdRng::seed_from_u64(42)
-}
+use crate::utils::rand::thread_rng;
 
 const EPS_COOP_LEVEL: f64 = 0.0001;
 

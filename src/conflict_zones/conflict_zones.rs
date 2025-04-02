@@ -1,4 +1,5 @@
 use std::fmt;
+use crate::grid::cell::CellID;
 
 /// Identifier for a conflict zone.
 pub type ConflictZoneID = i32;
@@ -21,8 +22,8 @@ pub enum ConflictWinnerType {
 /// Represents an edge in a conflict zone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictEdge {
-    pub source: i32,
-    pub target: i32,
+    pub source: CellID,
+    pub target: CellID,
 }
 
 /// Error types for conflict zones.
