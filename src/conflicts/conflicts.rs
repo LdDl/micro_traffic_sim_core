@@ -66,7 +66,7 @@ pub struct CellConflict<'a> {
     /// Agents that are involved in the conflict
     pub participants: Vec<&'a mut Vehicle>,
     /// Agent that has priority in the conflict
-    pub priority_participant: &'a mut Vehicle,
+    pub priority_participant_index: usize,
     /// Type of the conflict
     pub conflict_type: ConflictType,
 }
@@ -75,7 +75,9 @@ impl fmt::Display for CellConflict<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let participants: Vec<String> =
             self.participants.iter().map(|p| p.id.to_string()).collect();
-        let priority_participant_id = self.priority_participant.id.to_string();
+        let priority_participant_id = self.participants
+            .get(self.priority_participant_index)
+            .map_or("None".to_string(), |p| p.id.to_string());
         let cell_id = self.cell_id.to_string();
         write!(
             f,
@@ -84,6 +86,8 @@ impl fmt::Display for CellConflict<'_> {
         )
     }
 }
+
+
 
 fn find_zone_conflict_for_two_intentions(
     intention_cell_id: CellID,

@@ -334,7 +334,13 @@ impl Vehicle {
     pub fn set_intention(&mut self, intention: VehicleIntention) {
         self.intention = intention;
     }
-
+    /// Blocks the vehicle in its current cell with a specified speed.
+    pub fn block_with_speed(&mut self, speed: i32) {
+        self.intention.intention_cell_id = self.cell_id;
+        self.intention.intention_speed = speed;
+        self.intention.intention_maneuver = LaneChangeType::Block;
+        self.intention.intermediate_cells = vec![];
+    }
     /// Updates the vehicle's tail maneuver by scanning occupied cells and determining if vehicle is in lane changing process
     ///
     /// # Arguments
