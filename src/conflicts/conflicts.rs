@@ -1,8 +1,9 @@
-use crate::agents::Vehicle;
+use crate::agents::{Vehicle, BehaviourType};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
-use crate::grid::cell::CellID;
+use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
-use crate::intentions::Intentions;
+use crate::grid::lane_change_type::LaneChangeType;
+use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::utils::rand::thread_rng;
 use rand::Rng;
 
@@ -87,6 +88,210 @@ impl fmt::Display for CellConflict<'_> {
     }
 }
 
+#[derive(Debug)]
+pub enum TrajectoryConflictError {
+    CellNotFound(CellID),
+    InvalidVehicle(String),
+}
+
+impl std::fmt::Display for TrajectoryConflictError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CellNotFound(cell_id) => write!(f, "Cell {} not found in network", cell_id),
+            Self::InvalidVehicle(msg) => write!(f, "Invalid vehicle: {}", msg),
+        }
+    }
+}
+
+/// Information about detected trajectory conflict (to avoid borrowing issues)
+#[derive(Debug)]
+pub struct TrajectoryConflictInfo {
+    pub vehicle_id: u64,
+    pub side_vehicle_id: u64,
+    pub conflict_type: ConflictType,
+    pub priority_vehicle_id: u64,
+}
+
+/// Find crossing trajectories conflicts (naive implementation)
+/// Returns TrajectoryConflictInfo to avoid borrowing complexity
+pub fn find_cross_trajectories_conflict_naive(
+    cell_intention: &CellIntention,
+    intention_cell: &Cell,
+    collected_intentions: &Intentions,
+    net: &GridRoads,
+) -> Result<Option<TrajectoryConflictInfo>, TrajectoryConflictError> {
+    /* No straight conflict, but could be crossing trajectories conflict */
+    // A        B
+    // |  L  R  |
+    // |   \/   |
+    // F   /\   F
+    // |  /  \  |
+    // X        Y
+
+    // X, Y, A, B - positions
+    // F - forward
+    // L - left
+    // R - right
+    // Vehicle in position 'X'. Intention - position 'B'
+
+    let vehicle = cell_intention.get_vehicle()
+        .ok_or_else(|| TrajectoryConflictError::InvalidVehicle("No vehicle in cell intention".to_string()))?;
+
+    // Check if vehicle maneuver is RIGHT or its tail is going to RIGHT
+    let mut cell_x = vehicle.cell_id;
+    let mut cell_b = intention_cell.get_id();
+    let mut conflict_type = ConflictType::CrossLaneChange;
+
+    // Handle tail maneuvers (equivalent to Go's tail logic)
+    if !vehicle.tail_cells.is_empty() && 
+       vehicle.intention.intention_maneuver != LaneChangeType::ChangeRight && 
+       vehicle.intention.tail_maneuver.intention_maneuver != LaneChangeType::ChangeRight {
+        return Ok(None);
+    }
+    
+    if !vehicle.tail_cells.is_empty() && vehicle.intention.tail_maneuver.intention_maneuver == LaneChangeType::ChangeRight {
+        cell_x = vehicle.intention.tail_maneuver.source_cell_maneuver;
+        cell_b = vehicle.intention.tail_maneuver.target_cell_maneuver;
+        conflict_type = ConflictType::TailCrossLaneChange;
+    }
+    
+    if vehicle.tail_cells.is_empty() && vehicle.intention.intention_maneuver != LaneChangeType::ChangeRight {
+        return Ok(None);
+    }
+
+    // Extract cell object by 'X' position
+    let current_cell = net.get_cell(&cell_x)
+        .ok_or(TrajectoryConflictError::CellNotFound(cell_x))?;
+
+    // Check if position 'A' exists for 'X'
+    if current_cell.get_forward_id() < 0 {
+        // No forward cell at all for current vehicle's position
+        return Ok(None);
+    }
+
+    // Get all intentions for position 'A' 
+    let forward_intentions = collected_intentions.get(&current_cell.get_forward_id());
+    if forward_intentions.is_none() || forward_intentions.unwrap().is_empty() {
+        // No intentions for position 'A'
+        return Ok(None);
+    }
+
+    // Scan any vehicle which is targeted for position 'A' and is doing LEFT maneuver or there is some tail
+    let mut side_vehicle_left: Option<&Vehicle> = None;
+    let mut last_cell_intention = IntentionType::Target;
+    
+    for forward_intention in forward_intentions.unwrap() {
+        if let Some(fwd_vehicle) = forward_intention.get_vehicle() {
+            if fwd_vehicle.intention.intention_maneuver == LaneChangeType::ChangeLeft || 
+               forward_intention.int_type == IntentionType::Tail {
+                last_cell_intention = forward_intention.int_type;
+                side_vehicle_left = Some(fwd_vehicle);
+                break;
+            }
+        }
+    }
+    
+    let side_vehicle = match side_vehicle_left {
+        Some(vehicle) => vehicle,
+        None => return Ok(None), // No conflict found
+    };
+
+    // Handle tail case
+    if last_cell_intention == IntentionType::Tail {
+        if side_vehicle.tail_cells.is_empty() {
+            return Err(TrajectoryConflictError::InvalidVehicle(
+                format!("Cell intention with 'INTENTION_TAIL' type has reference to vehicle which has no tail {}", side_vehicle.id)
+            ));
+        }
+
+        // Check if any tail cell's forward node matches our target
+        for &occ_cell_id in &side_vehicle.tail_cells {
+            if occ_cell_id < 1 {
+                continue;
+            }
+            
+            let side_vehicle_cell = net.get_cell(&occ_cell_id)
+                .ok_or(TrajectoryConflictError::CellNotFound(occ_cell_id))?;
+            
+            if side_vehicle_cell.get_forward_id() < 0 {
+                continue;
+            }
+            
+            if side_vehicle_cell.get_forward_id() == cell_b {
+                // Found tail cross conflict - side vehicle has priority
+                return Ok(Some(TrajectoryConflictInfo {
+                    vehicle_id: vehicle.id,
+                    side_vehicle_id: side_vehicle.id,
+                    conflict_type: ConflictType::TailCrossLaneChange,
+                    priority_vehicle_id: side_vehicle.id, // Side vehicle has priority in tail conflicts
+                }));
+            }
+        }
+        return Ok(None);
+    }
+
+    // Handle regular maneuver case
+    // Extract cell object for side vehicle. It should be position 'Y'
+    let side_vehicle_cell = net.get_cell(&side_vehicle.cell_id)
+        .ok_or(TrajectoryConflictError::CellNotFound(side_vehicle.cell_id))?;
+
+    // Check if forward cell for side vehicle exists. It should be position 'B'
+    if side_vehicle_cell.get_forward_id() < 0 {
+        return Ok(None);
+    }
+
+    // Check if position is 'B' == intention cell
+    if side_vehicle_cell.get_forward_id() == cell_b {
+        // Determine priority based on behavior types and maneuver types (matching Go logic)
+        let priority_vehicle_id = if conflict_type == ConflictType::TailCrossLaneChange {
+            // For tail conflicts, side vehicle has priority
+            side_vehicle.id
+        } else {
+            // Check behavior types for priority (matching Go logic)
+            if side_vehicle.strategy_type != vehicle.strategy_type && 
+               vehicle.strategy_type == BehaviourType::Aggressive {
+                // Aggressive vehicle has priority
+                vehicle.id
+            } else {
+                // Left maneuver has priority over right maneuver (side_vehicle is doing LEFT)
+                side_vehicle.id
+            }
+        };
+
+        return Ok(Some(TrajectoryConflictInfo {
+            vehicle_id: vehicle.id,
+            side_vehicle_id: side_vehicle.id,
+            conflict_type,
+            priority_vehicle_id,
+        }));
+    }
+
+    Ok(None)
+}
+
+/// Helper function to create actual CellConflict from TrajectoryConflictInfo
+/// This would be called by the collect_conflicts function with proper mutable references
+impl<'a> CellConflict<'a> {
+    pub fn from_trajectory_conflict_info(
+        info: TrajectoryConflictInfo,
+        vehicle1: &'a mut Vehicle,
+        vehicle2: &'a mut Vehicle,
+    ) -> Self {
+        // Determine participant order based on priority
+        let (participants, priority_index) = if info.priority_vehicle_id == vehicle1.id {
+            (vec![vehicle1, vehicle2], 0)
+        } else {
+            (vec![vehicle2, vehicle1], 0)
+        };
+
+        CellConflict {
+            cell_id: -1, // No specific cell for trajectory conflicts
+            participants,
+            priority_participant_index: priority_index,
+            conflict_type: info.conflict_type,
+        }
+    }
+}
 
 
 fn find_zone_conflict_for_two_intentions(
@@ -128,10 +333,13 @@ fn find_zone_conflict_for_two_intentions(
     None // No conflict detected
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::conflict_zones::ConflictEdge;
+    use crate::agents::VehicleIntention;
+    use crate::intentions;
     #[test]
     fn test_find_zone_conflict_for_two_intentions() {
         // Case 1: Both edges have the same target cell
@@ -148,5 +356,182 @@ mod tests {
         let correct_winner = 111;
         let winner = find_zone_conflict_for_two_intentions(200, &conflict_zones, &cells_conflicts_zones);
         assert_eq!(winner, Some(correct_winner), "Conflict winner is incorrect");
+    }
+
+    #[test]
+    fn test_find_cross_trajectories_no_right_maneuver() {
+        // Case: Vehicle at cell with no right maneuver should return None
+        let mut vehicle = Vehicle::new(1)
+            .with_cell(10)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeLeft,
+            intention_cell_id: 11,
+            ..Default::default()
+        });
+        let cell_intention = CellIntention::new(Some(&vehicle), IntentionType::Target);
+        let intention_cell = Cell::new(15).build();
+        let collected_intentions = Intentions::new();
+        let grid = GridRoads::new();
+        let result = find_cross_trajectories_conflict_naive(
+            &cell_intention, &intention_cell, &collected_intentions, &grid
+        );
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_find_cross_trajectories_no_forward_cell() {
+        // Case: Vehicle at cell with no forward node should return None
+        let mut vehicle = Vehicle::new(1)
+            .with_cell(10)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeRight,
+            intention_cell_id: 15,
+            ..Default::default()
+        });
+        let cell_intention = CellIntention::new(Some(&vehicle), IntentionType::Target);
+        let intention_cell = Cell::new(15).build();
+        let collected_intentions = Intentions::new();
+        let mut grid = GridRoads::new();
+        let cell = Cell::new(10)
+            .with_forward_node(-1)  // No forward cell
+            .build();
+        grid.add_cell(cell.clone());
+        let result = find_cross_trajectories_conflict_naive(
+            &cell_intention, &intention_cell, &collected_intentions, &grid
+        );
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_find_cross_trajectories_no_conflict_same_direction() {
+        // Test case where both vehicles go in same direction - no conflict
+        let mut vehicle1 = Vehicle::new(1)
+            .with_cell(4)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle1.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeRight,
+            intention_cell_id: 2,
+            intention_speed: 2,
+            ..Default::default()
+        });
+
+        let mut vehicle2 = Vehicle::new(2)
+            .with_cell(1)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle2.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeRight, // Same direction - no crossing
+            intention_cell_id: 5,
+            intention_speed: 2,
+            ..Default::default()
+        });
+
+        let mut net = GridRoads::new();
+        net.add_cell(Cell::new(4).with_forward_node(1).build());
+        net.add_cell(Cell::new(1).with_forward_node(5).build());
+        net.add_cell(Cell::new(2).build());
+        net.add_cell(Cell::new(5).build());
+
+        let mut collected_intentions = Intentions::new();
+        collected_intentions.add_intention(&mut vehicle2, IntentionType::Target);
+
+        let vehicle1_intention = CellIntention::new(Some(&vehicle1), IntentionType::Target);
+        let intention_cell = Cell::new(2).build();
+
+        let result = find_cross_trajectories_conflict_naive(
+            &vehicle1_intention, &intention_cell, &collected_intentions, &net
+        );
+
+        assert!(result.is_ok());
+        let conflict_info = result.unwrap();
+        assert!(conflict_info.is_none(), "Should not detect conflict when both vehicles go same direction");
+    }
+
+    #[test]
+    fn test_find_cross_trajectories_conflict_naive() {
+        // A        B
+        // |  L  R  |
+        // |   \/   |
+        // F   /\   F
+        // |  /  \  |
+        // X        Y
+
+        // X, Y, A, B - positions
+        // F - forward
+        // L - left
+        // R - right
+        // Vehicle in position 'X'. Intention - position 'B'
+
+        // 1 - X
+        // 2 - A
+        // 3 - Y
+        // 4 - B
+        let mut net = GridRoads::new();
+        net.add_cell(Cell::new(1).with_forward_node(2).with_right_node(4).build());
+        net.add_cell(Cell::new(2).build());
+        net.add_cell(Cell::new(3).with_forward_node(4).with_left_node(1).build());
+        net.add_cell(Cell::new(4).build());
+
+        // Vehicle 1: At position X (cell 1), wants to go RIGHT to B (cell 4)
+        let mut vehicle1 = Vehicle::new(1)
+            .with_cell(1)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle1.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeRight,
+            intention_cell_id: 4,
+            ..Default::default()
+        });
+
+        // Vehicle 2: At position Y (cell 3), wants to go LEFT to A (cell 2)
+        let mut vehicle2 = Vehicle::new(2)
+            .with_cell(3)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle2.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeLeft,
+            intention_cell_id: 2,
+            ..Default::default()
+        });
+
+        // Set up intentions - vehicle2 wants cell 2
+        let mut collected_intentions = Intentions::new();
+        collected_intentions.add_intention(&mut vehicle2, IntentionType::Target);
+
+        // Test vehicle1's intention to go to cell 4
+        let vehicle1_intention = CellIntention::new(Some(&vehicle1), IntentionType::Target);
+        let intention_cell = net.get_cell(&4).unwrap(); // Cell B
+
+        let result = find_cross_trajectories_conflict_naive(
+            &vehicle1_intention, intention_cell, &collected_intentions, &net
+        );
+
+        // Assertions
+        assert!(result.is_ok(), "Should not return error");
+        let conflict_info = result.unwrap();
+        assert!(conflict_info.is_some(), "Should detect crossing trajectories conflict");
+        
+        let info = conflict_info.unwrap();
+        assert_eq!(info.conflict_type, ConflictType::CrossLaneChange, "Should be cross lane change conflict");
+        
+        // // Check that both vehicles are in the conflict
+        assert_eq!(info.vehicle_id, 1, "Vehicle 1 should be primary vehicle");
+        assert_eq!(info.side_vehicle_id, 2, "Vehicle 2 should be side vehicle");
+        
+        // Vehicle 2 (left maneuver) should have priority over vehicle 1 (right maneuver)
+        assert_eq!(info.priority_vehicle_id, 2, "Left maneuver should have priority over right maneuver");
     }
 }

@@ -299,7 +299,7 @@ mod tests {
         let mut right_vehicle = create_test_vehicle(2, 2, LaneChangeType::ChangeRight, 6);
         
         let conflicts = vec![CellConflict {
-            cell_id: 0, // Trajectories conflict has no specific cell
+            cell_id: -1, // Trajectories conflict has no specific cell
             participants: vec![&mut left_vehicle, &mut right_vehicle],
             priority_participant_index: 0, // Left vehicle has priority
             conflict_type: ConflictType::CrossLaneChange,
