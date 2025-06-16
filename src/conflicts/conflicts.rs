@@ -1,5 +1,6 @@
 use crate::agents::{Vehicle, BehaviourType};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
+use crate::conflicts::resolve_simple_rules;
 use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
 use crate::grid::lane_change_type::LaneChangeType;
@@ -333,6 +334,87 @@ fn find_zone_conflict_for_two_intentions(
     None // No conflict detected
 }
 
+/// Find conflict type between two intentions
+/// Returns the winning intention and the conflict type
+pub fn find_conflict_type<'a>(
+    intention_cell_id: CellID,
+    conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
+    cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
+    intention_one: &'a CellIntention<'a>,
+    intention_two: &'a CellIntention<'a>,
+) -> (&'a CellIntention<'a>, ConflictType) {
+    let intention_type_one = intention_one.int_type;
+    let intention_type_two = intention_two.int_type;
+
+    // Handle tail conflicts first
+    if intention_type_one == IntentionType::Tail && intention_type_two == IntentionType::Transit {
+        return (intention_one, ConflictType::Tail);
+    }
+    if intention_type_one == IntentionType::Transit && intention_type_two == IntentionType::Tail {
+        return (intention_two, ConflictType::Tail);
+    }
+    if intention_type_one == IntentionType::Tail {
+        return (intention_one, ConflictType::Tail);
+    }
+    if intention_type_two == IntentionType::Tail {
+        return (intention_two, ConflictType::Tail);
+    }
+    let vehicle_one = intention_one.get_vehicle()
+        .expect("Vehicle missing in intention_one");
+    let vehicle_two = intention_two.get_vehicle()
+        .expect("Vehicle missing in intention_two");
+    // Check if there's a conflict zone for this cell
+    let conflict_zone_winner_source_cell = find_zone_conflict_for_two_intentions(
+        intention_cell_id, 
+        conflict_zones, 
+        cells_conflicts_zones
+    );
+    // The conflict zone is found - early return
+    if let Some(winner_cell) = conflict_zone_winner_source_cell {
+        if vehicle_one.cell_id == winner_cell {
+            return (intention_one, ConflictType::MergeForwardConflictZone);
+        }
+        if vehicle_two.cell_id == winner_cell {
+            return (intention_two, ConflictType::MergeForwardConflictZone);
+        }
+        // Check intermediate cells for vehicle one
+        if !vehicle_one.intention.intermediate_cells.is_empty() {
+            if let Some(elem_idx) = find_elem_in_slice(winner_cell, &vehicle_one.intention.intermediate_cells) {
+                let trim_inter = &vehicle_one.intention.intermediate_cells[..=elem_idx];
+                if let Some(&last_cell_id) = trim_inter.last() {
+                    if last_cell_id == winner_cell {
+                        return (intention_one, ConflictType::MergeForwardConflictZone);
+                    }
+                }
+            }
+        }
+        // Check intermediate cells for vehicle two
+        if !vehicle_two.intention.intermediate_cells.is_empty() {
+            if let Some(elem_idx) = find_elem_in_slice(winner_cell, &vehicle_two.intention.intermediate_cells) {
+                let trim_inter = &vehicle_two.intention.intermediate_cells[..=elem_idx];
+                if let Some(&last_cell_id) = trim_inter.last() {
+                    if last_cell_id == winner_cell {
+                        return (intention_two, ConflictType::MergeForwardConflictZone);
+                    }
+                }
+            }
+        }
+        // Log error and panic for unexpected cases
+        eprintln!(
+            "Can't happen in CONFLICT_TYPE_MERGE_CONFLICT_ZONE: winner_cell={}, vehicle_one={}, vehicle_two={}, pos_one={}, pos_two={}",
+            winner_cell, vehicle_one.id, vehicle_two.id, vehicle_one.cell_id, vehicle_two.cell_id
+        );
+        panic!("Can't happen in CONFLICT_TYPE_MERGE_CONFLICT_ZONE");
+    }
+
+    // No conflict zone found, use simple rules
+    resolve_simple_rules(intention_one, intention_two)
+}
+
+/// Helper function to find element index in slice
+fn find_elem_in_slice(target: CellID, slice: &[CellID]) -> Option<usize> {
+    slice.iter().position(|&x| x == target)
+}
 
 #[cfg(test)]
 mod tests {
@@ -533,5 +615,167 @@ mod tests {
         
         // Vehicle 2 (left maneuver) should have priority over vehicle 1 (right maneuver)
         assert_eq!(info.priority_vehicle_id, 2, "Left maneuver should have priority over right maneuver");
+    }
+    
+    #[test]
+    fn test_find_conflict_type() {
+        // Test 1: Tail vs Transit conflict - Tail should win
+        let mut vehicle_one = Vehicle::new(1)
+            .with_cell(10)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle_one.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 15,
+            ..Default::default()
+        });
+
+        let mut vehicle_two = Vehicle::new(2)
+            .with_cell(11)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle_two.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 15,
+            ..Default::default()
+        });
+
+        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Tail);
+        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Transit);
+
+        let (winner, conflict_type) = find_conflict_type(
+            15,
+            &HashMap::new(),
+            &HashMap::new(),
+            &intention_one,
+            &intention_two
+        );
+
+        assert_eq!(winner.get_vehicle().unwrap().id, vehicle_one.id, "Tail intention should win over transit");
+        assert_eq!(conflict_type, ConflictType::Tail, "Conflict type should be Tail");
+
+        // Test 2: Conflict zone winner - First edge source should win
+        let mut conflict_zones = HashMap::new();
+        let mut cells_conflicts_zones = HashMap::new();
+
+        let first_edge = ConflictEdge { source: 10, target: 15 };
+        let second_edge = ConflictEdge { source: 11, target: 15 };
+        let zone = ConflictZone::new(1, first_edge, second_edge)
+            .with_winner_type(ConflictWinnerType::First)
+            .build();
+        conflict_zones.insert(1, zone);
+        cells_conflicts_zones.insert(15, 1);
+
+        let mut vehicle_three = Vehicle::new(3)
+            .with_cell(10)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle_three.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 15,
+            ..Default::default()
+        });
+
+        let mut vehicle_four = Vehicle::new(4)
+            .with_cell(11)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle_four.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 15,
+            ..Default::default()
+        });
+
+        let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
+        let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Target);
+
+        let (winner, conflict_type) = find_conflict_type(
+            15,
+            &conflict_zones,
+            &cells_conflicts_zones,
+            &intention_three,
+            &intention_four
+        );
+
+        assert_eq!(winner.get_vehicle().unwrap().id, vehicle_three.id, "First edge source vehicle should win");
+        assert_eq!(conflict_type, ConflictType::MergeForwardConflictZone, "Conflict type should be MergeForwardConflictZone");
+
+        // Test 3: Merge lane change - Left maneuver should have priority over right
+        let mut vehicle_five = Vehicle::new(5)
+            .with_cell(20)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle_five.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeLeft,
+            intention_cell_id: 25,
+            ..Default::default()
+        });
+
+        let mut vehicle_six = Vehicle::new(6)
+            .with_cell(21)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle_six.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeRight,
+            intention_cell_id: 25,
+            ..Default::default()
+        });
+
+        let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
+        let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
+
+        let (winner, conflict_type) = find_conflict_type(
+            25,
+            &HashMap::new(),
+            &HashMap::new(),
+            &intention_five,
+            &intention_six
+        );
+
+        assert_eq!(winner.get_vehicle().unwrap().id, vehicle_five.id, "Left maneuver should have priority over right");
+        assert_eq!(conflict_type, ConflictType::MergeLaneChange, "Conflict type should be MergeLaneChange");
+
+        // Test 4: Aggressive vs Cooperative behavior
+        let mut vehicle_seven = Vehicle::new(7)
+            .with_cell(30)
+            .with_behaviour(BehaviourType::Aggressive)
+            .with_speed(3)
+            .build();
+        vehicle_seven.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 35,
+            ..Default::default()
+        });
+
+        let mut vehicle_eight = Vehicle::new(8)
+            .with_cell(31)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build();
+        vehicle_eight.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 35,
+            ..Default::default()
+        });
+
+        let intention_seven = CellIntention::new(Some(&vehicle_seven), IntentionType::Target);
+        let intention_eight = CellIntention::new(Some(&vehicle_eight), IntentionType::Target);
+
+        let (winner, conflict_type) = find_conflict_type(
+            35,
+            &HashMap::new(),
+            &HashMap::new(),
+            &intention_seven,
+            &intention_eight
+        );
+
+        assert_eq!(winner.get_vehicle().unwrap().id, vehicle_seven.id, "Aggressive vehicle should win over cooperative");
+        assert_eq!(conflict_type, ConflictType::MergeForward, "Conflict type should be MergeForward");
     }
 }
