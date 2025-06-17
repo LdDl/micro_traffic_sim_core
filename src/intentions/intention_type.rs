@@ -1,4 +1,4 @@
-use crate::agents::Vehicle;
+use crate::agents::{Vehicle, VehicleRef};
 
 use std::fmt;
 
@@ -28,12 +28,12 @@ impl fmt::Display for IntentionType {
 
 /// Represents the intention of the agent for the cell
 #[derive(Debug, Clone)]
-pub struct CellIntention<'a> {
-    pub vehicle: Option<&'a Vehicle>,
+pub struct CellIntention{
+    pub vehicle: VehicleRef,
     pub int_type: IntentionType,
 }
 
-impl<'a> CellIntention<'a> {
+impl CellIntention {
     /// Creates a new cell intention with the specified vehicle and intention type.
     ///
     /// # Arguments
@@ -50,38 +50,11 @@ impl<'a> CellIntention<'a> {
     /// let vehicle = Vehicle::new(1)
     ///     .with_type(AgentType::Car)
     ///     .build();
-    /// let cell_intention = CellIntention::new(Some(&vehicle), IntentionType::Target);
+    /// let cell_intention = CellIntention::new(&vehicle, IntentionType::Target);
     /// println!("Cell intention: {:?}", cell_intention);
     /// ```
-    pub fn new(vehicle: Option<&'a Vehicle>, int_type: IntentionType) -> Self {
+    pub fn new(vehicle: VehicleRef, int_type: IntentionType) -> Self {
         CellIntention { vehicle, int_type }
-    }
-
-    /// Checks if this intention has an associated vehicle.
-    ///
-    /// # Returns
-    /// * `true` if there is a vehicle reference present
-    /// * `false` otherwise
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, AgentType};
-    /// use micro_traffic_sim_core::intentions::{CellIntention, IntentionType};
-    ///
-    /// let vehicle = Vehicle::new(1)
-    ///     .with_type(AgentType::Car)
-    ///     .build();
-    /// let cell_intention1 = CellIntention::new(Some(&vehicle), IntentionType::Target);
-    /// println!("Cell intention: {:?}", cell_intention1);
-    /// println!("Has vehicle: {}", cell_intention1.has_vehicle()); // true
-    ///
-    /// let cell_intention2 = CellIntention::new(Some(&vehicle), IntentionType::Target);
-    /// println!("Cell intention: {:?}", cell_intention2);
-    /// println!("Has vehicle: {}", cell_intention2.has_vehicle()); // false
-    /// ```
-    pub fn has_vehicle(&self) -> bool {
-        self.vehicle.is_some()
     }
 
     /// Returns a reference to the associated vehicle if present.
@@ -108,7 +81,10 @@ impl<'a> CellIntention<'a> {
     ///     None => println!("No vehicle associated"),
     /// }
     /// ```
-    pub fn get_vehicle(&self) -> Option<&Vehicle> {
-        self.vehicle
+    // pub fn get_vehicle(&self) -> &Vehicle {
+    //     self.vehicle
+    // }
+    pub fn get_vehicle_id(&self) -> u64 {
+        self.vehicle.borrow().id
     }
 }

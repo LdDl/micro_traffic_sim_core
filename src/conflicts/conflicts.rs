@@ -1,4 +1,4 @@
-use crate::agents::{Vehicle, BehaviourType};
+use crate::agents::{BehaviourType, VehicleID, VehicleRef};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
 use crate::conflicts::resolve_simple_rules;
 use crate::grid::cell::{Cell, CellID};
@@ -9,7 +9,8 @@ use crate::utils::rand::thread_rng;
 use rand::Rng;
 
 use std::collections::HashMap;
-use std::fmt;
+use std::{fmt, vec};
+
 /// Different types of conflicts that can occur between vehicles
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictType {
@@ -62,24 +63,24 @@ impl fmt::Display for ConflictType {
 }
 
 /// Represents a conflict between vehicles
-pub struct CellConflict<'a> {
+pub struct CellConflict {
     /// Cell ID where the conflict occurs
     pub cell_id: CellID,
     /// Agents that are involved in the conflict
-    pub participants: Vec<&'a mut Vehicle>,
+    pub participants: Vec<VehicleRef>,
     /// Agent that has priority in the conflict
     pub priority_participant_index: usize,
     /// Type of the conflict
     pub conflict_type: ConflictType,
 }
 
-impl fmt::Display for CellConflict<'_> {
+impl fmt::Display for CellConflict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let participants: Vec<String> =
-            self.participants.iter().map(|p| p.id.to_string()).collect();
+            self.participants.iter().map(|p| p.borrow().id.to_string()).collect();
         let priority_participant_id = self.participants
             .get(self.priority_participant_index)
-            .map_or("None".to_string(), |p| p.id.to_string());
+            .map_or("None".to_string(), |p| p.borrow().id.to_string());
         let cell_id = self.cell_id.to_string();
         write!(
             f,
@@ -135,8 +136,7 @@ pub fn find_cross_trajectories_conflict_naive(
     // R - right
     // Vehicle in position 'X'. Intention - position 'B'
 
-    let vehicle = cell_intention.get_vehicle()
-        .ok_or_else(|| TrajectoryConflictError::InvalidVehicle("No vehicle in cell intention".to_string()))?;
+    let vehicle = cell_intention.vehicle.borrow();
 
     // Check if vehicle maneuver is RIGHT or its tail is going to RIGHT
     let mut cell_x = vehicle.cell_id;
@@ -178,24 +178,25 @@ pub fn find_cross_trajectories_conflict_naive(
     }
 
     // Scan any vehicle which is targeted for position 'A' and is doing LEFT maneuver or there is some tail
-    let mut side_vehicle_left: Option<&Vehicle> = None;
+    let mut side_vehicle_left_ref: Option<VehicleRef> = None;
     let mut last_cell_intention = IntentionType::Target;
     
     for forward_intention in forward_intentions.unwrap() {
-        if let Some(fwd_vehicle) = forward_intention.get_vehicle() {
-            if fwd_vehicle.intention.intention_maneuver == LaneChangeType::ChangeLeft || 
-               forward_intention.int_type == IntentionType::Tail {
-                last_cell_intention = forward_intention.int_type;
-                side_vehicle_left = Some(fwd_vehicle);
-                break;
-            }
+        let fwd_vehicle= forward_intention.vehicle.borrow();
+        let ref_clone = forward_intention.vehicle.clone();
+        if fwd_vehicle.intention.intention_maneuver == LaneChangeType::ChangeLeft || 
+            forward_intention.int_type == IntentionType::Tail {
+            last_cell_intention = forward_intention.int_type;
+            side_vehicle_left_ref = Some(ref_clone);
+            break;
         }
     }
     
-    let side_vehicle = match side_vehicle_left {
-        Some(vehicle) => vehicle,
+    let side_vehicle_ref = match side_vehicle_left_ref {
+        Some(vehicle_ref) => vehicle_ref,
         None => return Ok(None), // No conflict found
     };
+    let side_vehicle = side_vehicle_ref.borrow();
 
     // Handle tail case
     if last_cell_intention == IntentionType::Tail {
@@ -272,14 +273,14 @@ pub fn find_cross_trajectories_conflict_naive(
 
 /// Helper function to create actual CellConflict from TrajectoryConflictInfo
 /// This would be called by the collect_conflicts function with proper mutable references
-impl<'a> CellConflict<'a> {
+impl CellConflict {
     pub fn from_trajectory_conflict_info(
         info: TrajectoryConflictInfo,
-        vehicle1: &'a mut Vehicle,
-        vehicle2: &'a mut Vehicle,
+        vehicle1: VehicleRef,
+        vehicle2: VehicleRef,
     ) -> Self {
         // Determine participant order based on priority
-        let (participants, priority_index) = if info.priority_vehicle_id == vehicle1.id {
+        let (participants, priority_index) = if info.priority_vehicle_id == vehicle1.borrow().id {
             (vec![vehicle1, vehicle2], 0)
         } else {
             (vec![vehicle2, vehicle1], 0)
@@ -340,9 +341,9 @@ pub fn find_conflict_type<'a>(
     intention_cell_id: CellID,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
     cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
-    intention_one: &'a CellIntention<'a>,
-    intention_two: &'a CellIntention<'a>,
-) -> (&'a CellIntention<'a>, ConflictType) {
+    intention_one: &'a CellIntention,
+    intention_two: &'a CellIntention,
+) -> (&'a CellIntention, ConflictType) {
     let intention_type_one = intention_one.int_type;
     let intention_type_two = intention_two.int_type;
 
@@ -359,10 +360,9 @@ pub fn find_conflict_type<'a>(
     if intention_type_two == IntentionType::Tail {
         return (intention_two, ConflictType::Tail);
     }
-    let vehicle_one = intention_one.get_vehicle()
-        .expect("Vehicle missing in intention_one");
-    let vehicle_two = intention_two.get_vehicle()
-        .expect("Vehicle missing in intention_two");
+    let vehicle_one = intention_one.vehicle.borrow();
+    let vehicle_two = intention_two.vehicle.borrow();
+
     // Check if there's a conflict zone for this cell
     let conflict_zone_winner_source_cell = find_zone_conflict_for_two_intentions(
         intention_cell_id, 
@@ -420,7 +420,7 @@ fn find_elem_in_slice(target: CellID, slice: &[CellID]) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::conflict_zones::ConflictEdge;
-    use crate::agents::VehicleIntention;
+    use crate::agents::{Vehicle, VehicleIntention};
     use crate::intentions;
     #[test]
     fn test_find_zone_conflict_for_two_intentions() {
@@ -447,13 +447,13 @@ mod tests {
             .with_cell(10)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeLeft,
             intention_cell_id: 11,
             ..Default::default()
         });
-        let cell_intention = CellIntention::new(Some(&vehicle), IntentionType::Target);
+        let cell_intention = CellIntention::new(vehicle, IntentionType::Target);
         let intention_cell = Cell::new(15).build();
         let collected_intentions = Intentions::new();
         let grid = GridRoads::new();
@@ -471,13 +471,13 @@ mod tests {
             .with_cell(10)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             intention_cell_id: 15,
             ..Default::default()
         });
-        let cell_intention = CellIntention::new(Some(&vehicle), IntentionType::Target);
+        let cell_intention = CellIntention::new(vehicle, IntentionType::Target);
         let intention_cell = Cell::new(15).build();
         let collected_intentions = Intentions::new();
         let mut grid = GridRoads::new();
@@ -495,24 +495,24 @@ mod tests {
     #[test]
     fn test_find_cross_trajectories_no_conflict_same_direction() {
         // Test case where both vehicles go in same direction - no conflict
-        let mut vehicle1 = Vehicle::new(1)
+        let vehicle1 = Vehicle::new(1)
             .with_cell(4)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle1.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle1.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             intention_cell_id: 2,
             intention_speed: 2,
             ..Default::default()
         });
 
-        let mut vehicle2 = Vehicle::new(2)
+        let vehicle2 = Vehicle::new(2)
             .with_cell(1)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle2.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle2.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight, // Same direction - no crossing
             intention_cell_id: 5,
             intention_speed: 2,
@@ -526,9 +526,9 @@ mod tests {
         net.add_cell(Cell::new(5).build());
 
         let mut collected_intentions = Intentions::new();
-        collected_intentions.add_intention(&mut vehicle2, IntentionType::Target);
+        collected_intentions.add_intention(vehicle2, IntentionType::Target);
 
-        let vehicle1_intention = CellIntention::new(Some(&vehicle1), IntentionType::Target);
+        let vehicle1_intention = CellIntention::new(vehicle1, IntentionType::Target);
         let intention_cell = Cell::new(2).build();
 
         let result = find_cross_trajectories_conflict_naive(
@@ -566,24 +566,24 @@ mod tests {
         net.add_cell(Cell::new(4).build());
 
         // Vehicle 1: At position X (cell 1), wants to go RIGHT to B (cell 4)
-        let mut vehicle1 = Vehicle::new(1)
+        let vehicle1 = Vehicle::new(1)
             .with_cell(1)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle1.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle1.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             intention_cell_id: 4,
             ..Default::default()
         });
 
         // Vehicle 2: At position Y (cell 3), wants to go LEFT to A (cell 2)
-        let mut vehicle2 = Vehicle::new(2)
+        let vehicle2 = Vehicle::new(2)
             .with_cell(3)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle2.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle2.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeLeft,
             intention_cell_id: 2,
             ..Default::default()
@@ -591,10 +591,10 @@ mod tests {
 
         // Set up intentions - vehicle2 wants cell 2
         let mut collected_intentions = Intentions::new();
-        collected_intentions.add_intention(&mut vehicle2, IntentionType::Target);
+        collected_intentions.add_intention(vehicle2, IntentionType::Target);
 
         // Test vehicle1's intention to go to cell 4
-        let vehicle1_intention = CellIntention::new(Some(&vehicle1), IntentionType::Target);
+        let vehicle1_intention = CellIntention::new(vehicle1, IntentionType::Target);
         let intention_cell = net.get_cell(&4).unwrap(); // Cell B
 
         let result = find_cross_trajectories_conflict_naive(
@@ -620,30 +620,30 @@ mod tests {
     #[test]
     fn test_find_conflict_type() {
         // Test 1: Tail vs Transit conflict - Tail should win
-        let mut vehicle_one = Vehicle::new(1)
+        let vehicle_one = Vehicle::new(1)
             .with_cell(10)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle_one.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_one.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             intention_cell_id: 15,
             ..Default::default()
         });
 
-        let mut vehicle_two = Vehicle::new(2)
+        let vehicle_two = Vehicle::new(2)
             .with_cell(11)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle_two.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_two.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             intention_cell_id: 15,
             ..Default::default()
         });
-
-        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Tail);
-        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Transit);
+        let correct_id = vehicle_one.borrow().id;
+        let intention_one = CellIntention::new(vehicle_one, IntentionType::Tail);
+        let intention_two = CellIntention::new(vehicle_two, IntentionType::Transit);
 
         let (winner, conflict_type) = find_conflict_type(
             15,
@@ -653,7 +653,7 @@ mod tests {
             &intention_two
         );
 
-        assert_eq!(winner.get_vehicle().unwrap().id, vehicle_one.id, "Tail intention should win over transit");
+        assert_eq!(winner.vehicle.borrow_mut().id, correct_id, "Tail intention should win over transit");
         assert_eq!(conflict_type, ConflictType::Tail, "Conflict type should be Tail");
 
         // Test 2: Conflict zone winner - First edge source should win
@@ -668,30 +668,31 @@ mod tests {
         conflict_zones.insert(1, zone);
         cells_conflicts_zones.insert(15, 1);
 
-        let mut vehicle_three = Vehicle::new(3)
+        let vehicle_three = Vehicle::new(3)
             .with_cell(10)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle_three.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_three.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             intention_cell_id: 15,
             ..Default::default()
         });
 
-        let mut vehicle_four = Vehicle::new(4)
+        let vehicle_four = Vehicle::new(4)
             .with_cell(11)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle_four.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_four.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             intention_cell_id: 15,
             ..Default::default()
         });
 
-        let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
-        let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Target);
+        let correct_id = vehicle_three.borrow().id;
+        let intention_three = CellIntention::new(vehicle_three, IntentionType::Target);
+        let intention_four = CellIntention::new(vehicle_four, IntentionType::Target);
 
         let (winner, conflict_type) = find_conflict_type(
             15,
@@ -701,34 +702,35 @@ mod tests {
             &intention_four
         );
 
-        assert_eq!(winner.get_vehicle().unwrap().id, vehicle_three.id, "First edge source vehicle should win");
+        assert_eq!(winner.vehicle.borrow().id, correct_id, "First edge source vehicle should win");
         assert_eq!(conflict_type, ConflictType::MergeForwardConflictZone, "Conflict type should be MergeForwardConflictZone");
 
         // Test 3: Merge lane change - Left maneuver should have priority over right
-        let mut vehicle_five = Vehicle::new(5)
+        let vehicle_five = Vehicle::new(5)
             .with_cell(20)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle_five.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_five.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeLeft,
             intention_cell_id: 25,
             ..Default::default()
         });
 
-        let mut vehicle_six = Vehicle::new(6)
+        let vehicle_six = Vehicle::new(6)
             .with_cell(21)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle_six.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_six.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             intention_cell_id: 25,
             ..Default::default()
         });
 
-        let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
-        let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
+        let correct_id = vehicle_five.borrow().id;
+        let intention_five = CellIntention::new(vehicle_five, IntentionType::Target);
+        let intention_six = CellIntention::new(vehicle_six, IntentionType::Target);
 
         let (winner, conflict_type) = find_conflict_type(
             25,
@@ -738,34 +740,35 @@ mod tests {
             &intention_six
         );
 
-        assert_eq!(winner.get_vehicle().unwrap().id, vehicle_five.id, "Left maneuver should have priority over right");
+        assert_eq!(winner.vehicle.borrow().id, correct_id, "Left maneuver should have priority over right");
         assert_eq!(conflict_type, ConflictType::MergeLaneChange, "Conflict type should be MergeLaneChange");
 
         // Test 4: Aggressive vs Cooperative behavior
-        let mut vehicle_seven = Vehicle::new(7)
+        let vehicle_seven = Vehicle::new(7)
             .with_cell(30)
             .with_behaviour(BehaviourType::Aggressive)
             .with_speed(3)
-            .build();
-        vehicle_seven.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_seven.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             intention_cell_id: 35,
             ..Default::default()
         });
 
-        let mut vehicle_eight = Vehicle::new(8)
+        let vehicle_eight = Vehicle::new(8)
             .with_cell(31)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
-            .build();
-        vehicle_eight.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_eight.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             intention_cell_id: 35,
             ..Default::default()
         });
 
-        let intention_seven = CellIntention::new(Some(&vehicle_seven), IntentionType::Target);
-        let intention_eight = CellIntention::new(Some(&vehicle_eight), IntentionType::Target);
+        let correct_id = vehicle_seven.borrow().id;
+        let intention_seven = CellIntention::new(vehicle_seven, IntentionType::Target);
+        let intention_eight = CellIntention::new(vehicle_eight, IntentionType::Target);
 
         let (winner, conflict_type) = find_conflict_type(
             35,
@@ -775,7 +778,7 @@ mod tests {
             &intention_eight
         );
 
-        assert_eq!(winner.get_vehicle().unwrap().id, vehicle_seven.id, "Aggressive vehicle should win over cooperative");
+        assert_eq!(winner.vehicle.borrow().id, correct_id, "Aggressive vehicle should win over cooperative");
         assert_eq!(conflict_type, ConflictType::MergeForward, "Conflict type should be MergeForward");
     }
 }
