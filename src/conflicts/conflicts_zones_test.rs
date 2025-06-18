@@ -1,0 +1,527 @@
+use super::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone};
+    use crate::agents::{Vehicle, VehicleIntention, TailIntentionManeuver};
+    use crate::intentions::{CellIntention, IntentionType, Intentions};
+    use crate::geom::new_point;
+    use crate::grid::cell::{Cell};
+    use crate::grid::zones::ZoneType;
+    use crate::grid::road_network::GridRoads;
+    use crate::grid::lane_change_type::LaneChangeType;
+    use std::collections::{HashMap, HashSet};
+    use crate::utils::test_grids::{
+        create_conflict_zones_grid, create_conflict_zones_multiple_grid, create_simple_cross_shape_grid,
+    };
+    use crate::utils::generators::generate_one_lane_cells;
+    #[test]
+    fn test_find_conflicts_in_conflict_zones_trajectories() {
+        let grid = create_conflict_zones_grid();
+
+        let vehicle1 = Vehicle::new(1)
+            .with_cell(9)
+            .with_speed(2)
+            .with_destination(12)
+            .build_ref();
+        vehicle1.borrow_mut().set_intention(VehicleIntention {
+            intention_cell_id: 11,
+            intermediate_cells: vec![10],
+            ..Default::default()
+        });
+
+        let vehicle2 = Vehicle::new(2)
+            .with_cell(3)
+            .with_speed(2)
+            .with_destination(6)
+            .build_ref();
+        vehicle2.borrow_mut().set_intention(VehicleIntention {
+            intention_cell_id: 5,
+            intermediate_cells: vec![4],
+            ..Default::default()
+        });
+
+        let mut conflict_zones = HashMap::new();
+        let zone = ConflictZone::new(
+            1,
+            ConflictEdge { source: 3, target: 4 },
+            ConflictEdge { source: 9, target: 10 },
+        )
+        .with_winner_type(ConflictWinnerType::First)
+        .build();
+        conflict_zones.insert(1, zone);
+
+        let mut cells_conflicts_zones = HashMap::new();
+        cells_conflicts_zones.insert(10, 1);
+        cells_conflicts_zones.insert(4, 1);
+
+        let mut collected_intentions = Intentions::new();
+        collected_intentions.add_intention(vehicle2.clone(), IntentionType::Target);
+
+        let mut explored_conflict_zones = HashSet::new();
+
+        let vehicle1_intention = CellIntention::new(vehicle1.clone(), IntentionType::Target);
+        let intention_cell = grid.get_cell(&10).unwrap();
+
+        let result = find_conflicts_in_conflict_zones(
+            &vehicle1_intention,
+            intention_cell,
+            &collected_intentions,
+            &conflict_zones,
+            &cells_conflicts_zones,
+            &mut explored_conflict_zones,
+        );
+
+        assert!(result.is_ok());
+        let conflict_result = result.unwrap();
+        assert!(conflict_result.is_some());
+
+        let (conflict, conflict_zone_id) = conflict_result.unwrap();
+        assert_eq!(conflict_zone_id, 1);
+        assert_eq!(conflict.conflict_type, ConflictType::CrossConflictZone);
+    }
+
+    #[test]
+    fn test_find_conflicts_in_conflict_zones_trajectories_invalidated() {
+        let grid = create_conflict_zones_multiple_grid();
+
+        let vehicle1 = Vehicle::new(1)
+            .with_cell(9)
+            .with_speed(2)
+            .with_destination(12)
+            .build_ref();
+        vehicle1.borrow_mut().set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeRight,
+            intention_cell_id: 10,
+            ..Default::default()
+        });
+
+        let vehicle2 = Vehicle::new(2)
+            .with_cell(3)
+            .with_speed(2)
+            .with_destination(6)
+            .build_ref();
+        vehicle2.borrow_mut().set_intention(VehicleIntention {
+            intention_cell_id: 5,
+            intermediate_cells: vec![4],
+            ..Default::default()
+        });
+
+        let vehicle3 = Vehicle::new(3)
+            .with_cell(14)
+            .with_speed(2)
+            .with_destination(12)
+            .build_ref();
+        vehicle3.borrow_mut().set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 11,
+            intermediate_cells: vec![10],
+            ..Default::default()
+        });
+
+        let mut conflict_zones = HashMap::new();
+        let zone = ConflictZone::new(
+            1,
+            ConflictEdge { source: 3, target: 4 },
+            ConflictEdge { source: 9, target: 10 },
+        )
+        .with_winner_type(ConflictWinnerType::First)
+        .build();
+        conflict_zones.insert(1, zone);
+
+        let mut cells_conflicts_zones = HashMap::new();
+        cells_conflicts_zones.insert(10, 1);
+        cells_conflicts_zones.insert(4, 1);
+
+        let mut collected_intentions = Intentions::new();
+        collected_intentions.add_intention(vehicle2.clone(), IntentionType::Target);
+        collected_intentions.add_intention(vehicle3.clone(), IntentionType::Target);
+
+        let mut explored_conflict_zones = HashSet::new();
+
+        // Test vehicle1's intention to cell 10 (should detect cross conflict zone with vehicle2)
+        let vehicle1_intention = CellIntention::new(vehicle1.clone(), IntentionType::Target);
+        let intention_cell = grid.get_cell(&10).unwrap();
+
+        let result = find_conflicts_in_conflict_zones(
+            &vehicle1_intention,
+            intention_cell,
+            &collected_intentions,
+            &conflict_zones,
+            &cells_conflicts_zones,
+            &mut explored_conflict_zones,
+        );
+
+        assert!(result.is_ok());
+        let conflict_result = result.unwrap();
+        assert!(conflict_result.is_some());
+
+        let (conflict, conflict_zone_id) = conflict_result.unwrap();
+        assert_eq!(conflict_zone_id, 1);
+        assert_eq!(conflict.conflict_type, ConflictType::CrossConflictZone);
+        assert_eq!(conflict.participants.len(), 2);
+
+        // Vehicle2 should have priority (CONFLICT_WINNER_FIRST means first edge wins)
+        let priority_vehicle = &conflict.participants[conflict.priority_participant_index];
+        assert_eq!(priority_vehicle.borrow().id, 2);
+    }
+
+    #[test]
+    fn test_find_conflicts_in_conflict_zones_cross_grid() {
+        let grid = create_simple_cross_shape_grid();
+
+        let vehicle1 = Vehicle::new(1)
+            .with_cell(1)
+            .with_speed(2)
+            .with_destination(5)
+            .build_ref();
+        vehicle1.borrow_mut().set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 2,
+            intermediate_cells: vec![3],
+            ..Default::default()
+        });
+
+        let vehicle2 = Vehicle::new(2)
+            .with_cell(6)
+            .with_speed(2)
+            .with_destination(9)
+            .build_ref();
+        vehicle2.borrow_mut().set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 3,
+            intermediate_cells: vec![7],
+            ..Default::default()
+        });
+
+        let mut conflict_zones = HashMap::new();
+        let zone = ConflictZone::new(
+            1,
+            ConflictEdge { source: 2, target: 3 },
+            ConflictEdge { source: 7, target: 3 },
+        )
+        .with_winner_type(ConflictWinnerType::Second)
+        .build();
+        conflict_zones.insert(1, zone);
+
+        let mut cells_conflicts_zones = HashMap::new();
+        cells_conflicts_zones.insert(3, 1);
+
+        let mut collected_intentions = Intentions::new();
+        collected_intentions.add_intention(vehicle2.clone(), IntentionType::Target);
+
+        let mut explored_conflict_zones = HashSet::new();
+
+        // Test vehicle1's intention to cell 2 (intermediate cell targeting same merge point)
+        let vehicle1_intention = CellIntention::new(vehicle1.clone(), IntentionType::Target);
+        let intention_cell = grid.get_cell(&2).unwrap();
+
+        let result = find_conflicts_in_conflict_zones(
+            &vehicle1_intention,
+            intention_cell,
+            &collected_intentions,
+            &conflict_zones,
+            &cells_conflicts_zones,
+            &mut explored_conflict_zones,
+        );
+
+        // Since vehicle1 is targeting cell 2 and vehicle2 is targeting cell 3,
+        // and cell 2 is not in conflict zone, there should be no conflict from this function
+        assert!(result.is_ok());
+        let conflict_result = result.unwrap();
+        assert!(conflict_result.is_none());
+    }
+
+    #[test]
+    fn test_find_conflicts_in_conflict_zones_cross_tail() {
+        // Create a 3x7 grid similar to Go test
+        let cells_set = generate_one_lane_cells(31.5, 4.5, 3);
+        let mut grid = GridRoads::new();
+        for cell in cells_set {
+            grid.add_cell(cell);
+        }
+
+        let vehicle1 = Vehicle::new(1)
+            .with_cell(12)
+            .with_speed(1)
+            .with_destination(14)
+            .with_tail_size(2, vec![3, 4])
+            .build_ref();
+        {
+            let mut v1 = vehicle1.borrow_mut();
+            v1.tail_cells = vec![3, 4];
+            v1.set_intention(VehicleIntention {
+                intention_cell_id: 13,
+                tail_maneuver: TailIntentionManeuver {
+                    source_cell_maneuver: 4,
+                    target_cell_maneuver: 12,
+                    intention_maneuver: LaneChangeType::ChangeRight,
+                },
+                ..Default::default()
+            });
+        }
+
+        let vehicle2 = Vehicle::new(2)
+            .with_cell(11)
+            .with_speed(1)
+            .with_destination(7)
+            .build_ref();
+        vehicle2.borrow_mut().set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeLeft,
+            intention_cell_id: 5,
+            ..Default::default()
+        });
+
+        let mut conflict_zones = HashMap::new();
+        let zone = ConflictZone::new(
+            1,
+            ConflictEdge { source: 4, target: 12 },
+            ConflictEdge { source: 11, target: 5 },
+        )
+        .with_winner_type(ConflictWinnerType::Second)
+        .build();
+        conflict_zones.insert(1, zone);
+
+        let mut cells_conflicts_zones = HashMap::new();
+        cells_conflicts_zones.insert(5, 1);
+        cells_conflicts_zones.insert(12, 1);
+
+        let mut collected_intentions = Intentions::new();
+        collected_intentions.add_intention(vehicle2.clone(), IntentionType::Target);
+
+        let mut explored_conflict_zones = HashSet::new();
+
+        // Test vehicle1's tail intention to cell 12
+        let vehicle1_tail_intention = CellIntention::new(vehicle1.clone(), IntentionType::Tail);
+        let intention_cell = grid.get_cell(&12).unwrap();
+
+        let result = find_conflicts_in_conflict_zones(
+            &vehicle1_tail_intention,
+            intention_cell,
+            &collected_intentions,
+            &conflict_zones,
+            &cells_conflicts_zones,
+            &mut explored_conflict_zones,
+        );
+
+        assert!(result.is_ok());
+        let conflict_result = result.unwrap();
+        assert!(conflict_result.is_some());
+
+        let (conflict, conflict_zone_id) = conflict_result.unwrap();
+        assert_eq!(conflict_zone_id, 1);
+        assert_eq!(conflict.conflict_type, ConflictType::CrossConflictZone);
+        assert_eq!(conflict.participants.len(), 2);
+
+        // Vehicle1 should have priority because it has INTENTION_TAIL (tail conflicts have higher priority)
+        let priority_vehicle = &conflict.participants[conflict.priority_participant_index];
+        assert_eq!(priority_vehicle.borrow().id, 1);
+    }
+
+    #[test]
+    fn test_find_conflicts_in_conflict_zones_cross_tail_forward() {
+        let cells_set = vec![
+            Cell::new(1)
+                .with_point(new_point(1.0, 1.0, None))
+                .with_zone_type(ZoneType::Birth)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(2)
+                .with_right_node(-1)
+                .with_meso_link(1)
+                .build(),
+            Cell::new(2)
+                .with_point(new_point(2.0, 1.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(3)
+                .with_right_node(-1)
+                .with_meso_link(1)
+                .build(),
+            Cell::new(3)
+                .with_point(new_point(3.0, 1.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(4)
+                .with_right_node(-1)
+                .with_meso_link(1)
+                .build(),
+            Cell::new(4)
+                .with_point(new_point(4.0, 1.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(5)
+                .with_right_node(-1)
+                .with_meso_link(1)
+                .build(),
+            Cell::new(5)
+                .with_point(new_point(5.0, 1.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(6)
+                .with_right_node(-1)
+                .with_meso_link(1)
+                .build(),
+            Cell::new(6)
+                .with_point(new_point(6.0, 1.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(7)
+                .with_right_node(-1)
+                .with_meso_link(1)
+                .build(),
+            Cell::new(7)
+                .with_point(new_point(7.0, 1.0, None))
+                .with_zone_type(ZoneType::Death)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(-1)
+                .with_right_node(-1)
+                .with_meso_link(1)
+                .build(),
+            Cell::new(8)
+                .with_point(new_point(1.0, 0.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(9)
+                .with_right_node(-1)
+                .with_meso_link(2)
+                .build(),
+            Cell::new(9)
+                .with_point(new_point(2.0, 0.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(10)
+                .with_right_node(-1)
+                .with_meso_link(2)
+                .build(),
+            Cell::new(10)
+                .with_point(new_point(3.0, 0.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(11)
+                .with_right_node(-1)
+                .with_meso_link(2)
+                .build(),
+            Cell::new(11)
+                .with_point(new_point(4.0, 0.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(5)
+                .with_right_node(-1)
+                .with_meso_link(3)
+                .build(),
+            Cell::new(12)
+                .with_point(new_point(5.0, 0.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(13)
+                .with_right_node(-1)
+                .with_meso_link(3)
+                .build(),
+            Cell::new(13)
+                .with_point(new_point(6.0, 0.0, None))
+                .with_zone_type(ZoneType::Common)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(14)
+                .with_right_node(-1)
+                .with_meso_link(3)
+                .build(),
+            Cell::new(14)
+                .with_point(new_point(7.0, 0.0, None))
+                .with_zone_type(ZoneType::Death)
+                .with_speed_limit(3)
+                .with_left_node(-1)
+                .with_forward_node(-1)
+                .with_right_node(-1)
+                .with_meso_link(3)
+                .build(),
+        ];
+
+        // Convert to grid
+        let mut grid = GridRoads::new();
+        for cell in cells_set {
+            grid.add_cell(cell);
+        }
+
+        let vehicle1 = Vehicle::new(1)
+            .with_cell(12)
+            .with_speed(1)
+            .with_destination(14)
+            .with_tail_intention_maneuver(4, 12, LaneChangeType::ChangeRight)
+            .with_tail_size(2, vec![3, 4])
+            .build_ref();
+        vehicle1.borrow_mut().set_intention(VehicleIntention {
+            intention_cell_id: 13,
+            ..Default::default()
+        });
+
+        let vehicle2 = Vehicle::new(2)
+            .with_cell(11)
+            .with_speed(1)
+            .with_destination(7)
+            .build_ref();
+        vehicle2.borrow_mut().set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 5,
+            ..Default::default()
+        });
+
+        let mut conflict_zones = HashMap::new();
+        let zone = ConflictZone::new(
+            1,
+            ConflictEdge { source: 4, target: 12 },
+            ConflictEdge { source: 11, target: 5 },
+        )
+        .with_winner_type(ConflictWinnerType::Second)
+        .build();
+        conflict_zones.insert(1, zone);
+
+        let mut cells_conflicts_zones = HashMap::new();
+        cells_conflicts_zones.insert(5, 1);
+        cells_conflicts_zones.insert(12, 1);
+
+        let mut collected_intentions = Intentions::new();
+        collected_intentions.add_intention(vehicle2.clone(), IntentionType::Target);
+
+        let mut explored_conflict_zones = HashSet::new();
+
+        // Test vehicle1's tail intention to cell 12
+        let vehicle1_tail_intention = CellIntention::new(vehicle1.clone(), IntentionType::Tail);
+        let intention_cell = grid.get_cell(&12).unwrap();
+
+        let result = find_conflicts_in_conflict_zones(
+            &vehicle1_tail_intention,
+            intention_cell,
+            &collected_intentions,
+            &conflict_zones,
+            &cells_conflicts_zones,
+            &mut explored_conflict_zones,
+        );
+
+        assert!(result.is_ok());
+        let conflict_result = result.unwrap();
+        assert!(conflict_result.is_some());
+
+        let (conflict, conflict_zone_id) = conflict_result.unwrap();
+        assert_eq!(conflict_zone_id, 1);
+        assert_eq!(conflict.conflict_type, ConflictType::CrossConflictZone);
+        assert_eq!(conflict.participants.len(), 2);
+
+        // Vehicle1 should have priority because it has INTENTION_TAIL
+        let priority_vehicle = &conflict.participants[conflict.priority_participant_index];
+        assert_eq!(priority_vehicle.borrow().id, 1);
+    }
+}

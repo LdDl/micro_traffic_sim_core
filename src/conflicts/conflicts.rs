@@ -8,7 +8,7 @@ use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::utils::rand::thread_rng;
 use rand::Rng;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{fmt, vec};
 
 /// Different types of conflicts that can occur between vehicles
@@ -332,6 +332,153 @@ pub fn find_zone_conflict_for_two_intentions(
         return Some(second_edge.source);
     }
     None // No conflict detected
+}
+
+
+/// Find conflicts in conflict zones
+/// This handles trajectory conflicts within predefined conflict zones
+pub fn find_conflicts_in_conflict_zones(
+    cell_intention: &CellIntention,
+    intention_cell: &Cell,
+    collected_intentions: &Intentions,
+    conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
+    cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
+    explored_conflict_zones: &mut HashSet<ConflictZoneID>,
+) -> Result<Option<(CellConflict, ConflictZoneID)>, TrajectoryConflictError> {
+    /* Conflict via zone where first edge is YA and the second edge is XB */
+    // A      B
+    //   F  F
+    //    \/
+    //    /\
+    //   /  \
+    // X      Y
+
+    // X, Y, A, B - positions
+    // F - forward
+    // L - left
+    // R - right
+    // Vehicle in position 'X'. Intention - position 'B'
+
+    let vehicle_ref = &cell_intention.vehicle;
+    let cell_b = intention_cell.get_id();
+    let conflict_type = ConflictType::CrossConflictZone;
+
+    // Check if intention cell is part of any conflict zones
+    let cell_b_conflict_zone_id = match cells_conflicts_zones.get(&cell_b) {
+        Some(zone_id) => *zone_id,
+        None => return Ok(None), // Not part of any conflict zone
+    };
+
+    // Check if this conflict zone has already been explored
+    if explored_conflict_zones.contains(&cell_b_conflict_zone_id) {
+        return Ok(None); // Zone already processed
+    }
+
+    // Get the conflict zone
+    let conflict_zone = conflict_zones.get(&cell_b_conflict_zone_id)
+        .ok_or(TrajectoryConflictError::InvalidVehicle(
+            format!("Conflict zone {} not found", cell_b_conflict_zone_id)
+        ))?;
+
+    let first_edge = conflict_zone.get_first_edge();
+    let second_edge = conflict_zone.get_second_edge();
+
+    // Determine which edge corresponds to current vehicle intention cell
+    let (cell_a, cell_x) = if first_edge.target == cell_b && second_edge.target != cell_b {
+        (second_edge.target, second_edge.source)
+    } else if first_edge.target != cell_b && second_edge.target == cell_b {
+        (first_edge.target, first_edge.source)
+    } else {
+        return Ok(None); // No valid conflict zone configuration
+    };
+
+    // Get intentions for cell A
+    let cell_a_intentions = match collected_intentions.get(&cell_a) {
+        Some(intentions) => intentions,
+        None => return Ok(None), // No other intentions in conflict zone
+    };
+
+    // Find vehicle which has source cell X and is not already in conflict
+    let mut second_cell_intention: Option<&CellIntention> = None;
+    for neighbor_intention in cell_a_intentions {
+        let neighbor_vehicle = neighbor_intention.vehicle.borrow();
+        if neighbor_vehicle.cell_id == cell_x && !neighbor_vehicle.is_conflict_participant {
+            drop(neighbor_vehicle); // Release borrow before storing reference
+            second_cell_intention = Some(neighbor_intention);
+            break;
+        }
+    }
+
+    let second_cell_intention = match second_cell_intention {
+        Some(intention) => intention,
+        None => return Ok(None), // No conflicts
+    };
+
+    let second_vehicle = second_cell_intention.vehicle.borrow();
+    if second_vehicle.is_conflict_participant {
+        return Ok(None); // Vehicle already in another conflict
+    }
+    drop(second_vehicle); // Release borrow
+
+    // Determine priority and create participants
+    let (participants, priority_index) = if second_cell_intention.int_type == IntentionType::Tail 
+        && cell_intention.int_type != IntentionType::Tail {
+        // Second vehicle has priority (tail intention beats non-tail)
+        (vec![second_cell_intention.vehicle.clone(), vehicle_ref.clone()], 0)
+    } else if second_cell_intention.int_type != IntentionType::Tail 
+        && cell_intention.int_type == IntentionType::Tail {
+        // First vehicle has priority (tail intention beats non-tail)
+        (vec![vehicle_ref.clone(), second_cell_intention.vehicle.clone()], 0)
+    } else if second_cell_intention.int_type == IntentionType::Tail 
+        && cell_intention.int_type == IntentionType::Tail {
+        return Err(TrajectoryConflictError::InvalidVehicle(
+            format!("Incorrect cell intentions for tails. first: {:?}, second: {:?}", 
+                cell_intention, second_cell_intention)
+        ));
+    } else {
+        // No tails - use conflict zone winner
+        match conflict_zone.get_winner_type() {
+            ConflictWinnerType::First => {
+                if first_edge.target == cell_b {
+                    // First vehicle has priority
+                    (vec![vehicle_ref.clone(), second_cell_intention.vehicle.clone()], 0)
+                } else {
+                    // Second vehicle has priority
+                    (vec![second_cell_intention.vehicle.clone(), vehicle_ref.clone()], 0)
+                }
+            },
+            ConflictWinnerType::Second => {
+                if first_edge.target == cell_b {
+                    // Second vehicle has priority
+                    (vec![second_cell_intention.vehicle.clone(), vehicle_ref.clone()], 0)
+                } else {
+                    // First vehicle has priority
+                    (vec![vehicle_ref.clone(), second_cell_intention.vehicle.clone()], 0)
+                }
+            },
+            _ => {
+                // Random selection (50/50)
+                use rand::Rng;
+                let mut rng = thread_rng();
+                if rng.gen_bool(0.5) {
+                    // First vehicle has priority
+                    (vec![vehicle_ref.clone(), second_cell_intention.vehicle.clone()], 0)
+                } else {
+                    // Second vehicle has priority
+                    (vec![second_cell_intention.vehicle.clone(), vehicle_ref.clone()], 0)
+                }
+            }
+        }
+    };
+
+    let conflict = CellConflict {
+        cell_id: -1, // Conflict zones don't have specific target cells
+        participants,
+        priority_participant_index: priority_index,
+        conflict_type,
+    };
+
+    Ok(Some((conflict, cell_b_conflict_zone_id)))
 }
 
 /// Find conflict type between two intentions
