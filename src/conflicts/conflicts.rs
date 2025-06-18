@@ -416,12 +416,84 @@ fn find_elem_in_slice(target: CellID, slice: &[CellID]) -> Option<usize> {
     slice.iter().position(|&x| x == target)
 }
 
+pub fn new_conflict_multiple(
+    cell: &Cell,
+    conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
+    cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
+    cell_intentions: &[CellIntention],
+) -> Result<CellConflict, TrajectoryConflictError> {
+    if cell_intentions.len() < 2 {
+        return Err(TrajectoryConflictError::InvalidVehicle(
+            "Number of cell intentions is less than 2".to_string()
+        ));
+    }
+
+    // Step 1: Deduplicate vehicles using map
+    let mut participants_map: HashMap<VehicleID, VehicleRef> = HashMap::new();
+    for intention in cell_intentions {
+        let vehicle_id = intention.vehicle.borrow().id;
+        participants_map.entry(vehicle_id).or_insert_with(|| intention.vehicle.clone());
+    }
+
+    if participants_map.len() < 2 {
+        return Ok(CellConflict {
+            cell_id: -1,
+            participants: vec![],
+            priority_participant_index: 0,
+            conflict_type: ConflictType::SelfTail,
+        });
+    }
+
+    // Step 2: Convert map to vector for indexed access
+    let participants: Vec<VehicleRef> = participants_map.values().cloned().collect();
+
+    // Step 3: Create conflict with temporary priority index
+    let mut conflict = CellConflict {
+        cell_id: cell.get_id(),
+        participants,
+        priority_participant_index: 0, // Will be determined below
+        conflict_type: ConflictType::Undefined,
+    };
+
+    // Step 4: Determine priority participant and conflict type
+    let mut priority_intention = &cell_intentions[0];
+    let mut conflict_type = ConflictType::Undefined;
+    
+    for i in 1..cell_intentions.len() {
+        let (winner, c_type) = find_conflict_type(
+            cell.get_id(),
+            conflict_zones,
+            cells_conflicts_zones,
+            priority_intention,
+            &cell_intentions[i],
+        );
+        priority_intention = winner;
+        conflict_type = c_type;
+    }
+
+    // Step 5: Find the index of the priority participant in the participants vector
+    let priority_vehicle_id = priority_intention.vehicle.borrow().id;
+    let mut priority_index = 0;
+    for (i, participant) in conflict.participants.iter().enumerate() {
+        if participant.borrow().id == priority_vehicle_id {
+            priority_index = i;
+            break;
+        }
+    }
+
+    conflict.priority_participant_index = priority_index;
+    conflict.conflict_type = conflict_type;
+    
+    Ok(conflict)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::conflict_zones::ConflictEdge;
     use crate::agents::{Vehicle, VehicleIntention};
     use crate::intentions;
+
     #[test]
     fn test_find_zone_conflict_for_two_intentions() {
         // Case 1: Both edges have the same target cell
@@ -780,5 +852,73 @@ mod tests {
 
         assert_eq!(winner.vehicle.borrow().id, correct_id, "Aggressive vehicle should win over cooperative");
         assert_eq!(conflict_type, ConflictType::MergeForward, "Conflict type should be MergeForward");
+    }
+
+    #[test]
+    fn test_new_conflict_multiple_basic() {
+        let vehicle1 = Vehicle::new(1)
+            .with_cell(10)
+            .with_behaviour(BehaviourType::Aggressive)
+            .with_speed(2)
+            .build_ref();
+        vehicle1.borrow_mut().set_intention(VehicleIntention {
+            intention_cell_id: 15,
+            intention_maneuver: LaneChangeType::NoChange,
+            ..Default::default()
+        });
+
+        let vehicle2 = Vehicle::new(2)
+            .with_cell(11)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_speed(2)
+            .build_ref();
+        vehicle2.borrow_mut().set_intention(VehicleIntention {
+            intention_cell_id: 15,
+            intention_maneuver: LaneChangeType::NoChange,
+            ..Default::default()
+        });
+
+        let intentions = vec![
+            CellIntention::new(vehicle1.clone(), IntentionType::Target),
+            CellIntention::new(vehicle2.clone(), IntentionType::Target),
+        ];
+
+        let cell = Cell::new(15).build();
+        let conflict_zones = HashMap::new();
+        let cells_conflicts_zones = HashMap::new();
+
+        let result = new_conflict_multiple(&cell, &conflict_zones, &cells_conflicts_zones, &intentions);
+        
+        assert!(result.is_ok());
+        let conflict = result.unwrap();
+        
+        assert_eq!(conflict.cell_id, 15);
+        assert_eq!(conflict.participants.len(), 2);
+        assert_eq!(conflict.conflict_type, ConflictType::MergeForward);
+        
+        // Aggressive vehicle should have priority
+        let priority_vehicle = &conflict.participants[conflict.priority_participant_index];
+        assert_eq!(priority_vehicle.borrow().id, 1);
+    }
+
+    #[test]
+    fn test_new_conflict_multiple_deduplication() {
+        let vehicle1 = Vehicle::new(1)
+            .with_cell(10)
+            .build_ref();
+
+        // Same vehicle appears in multiple intentions
+        let intentions = vec![
+            CellIntention::new(vehicle1.clone(), IntentionType::Target),
+            CellIntention::new(vehicle1.clone(), IntentionType::Transit),
+        ];
+
+        let cell = Cell::new(15).build();
+        let result = new_conflict_multiple(&cell, &HashMap::new(), &HashMap::new(), &intentions);
+        
+        assert!(result.is_ok());
+        let conflict = result.unwrap();
+        
+        assert_eq!(conflict.conflict_type, ConflictType::SelfTail);
     }
 }
