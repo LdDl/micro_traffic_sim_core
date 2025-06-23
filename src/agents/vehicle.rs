@@ -4,6 +4,8 @@ use crate::grid::lane_change_type::LaneChangeType;
 use crate::grid::road_network::GridRoads;
 use crate::trips::trip::TripID;
 use std::fmt;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[derive(Debug)]
 pub enum VehicleError {
@@ -35,6 +37,8 @@ impl fmt::Display for VehicleError {
         }
     }
 }
+
+pub type VehicleRef = Rc<RefCell<Vehicle>>;
 
 pub type VehicleID = u64; // Alias for VehicleID
 
@@ -201,6 +205,7 @@ impl Vehicle {
             },
         }
     }
+
     /// Increments number of transit have been made by vehicle
     ///
     /// # Returns
@@ -334,7 +339,13 @@ impl Vehicle {
     pub fn set_intention(&mut self, intention: VehicleIntention) {
         self.intention = intention;
     }
-
+    /// Blocks the vehicle in its current cell with a specified speed.
+    pub fn block_with_speed(&mut self, speed: i32) {
+        self.intention.intention_cell_id = self.cell_id;
+        self.intention.intention_speed = speed;
+        self.intention.intention_maneuver = LaneChangeType::Block;
+        self.intention.intermediate_cells = vec![];
+    }
     /// Updates the vehicle's tail maneuver by scanning occupied cells and determining if vehicle is in lane changing process
     ///
     /// # Arguments
@@ -914,6 +925,14 @@ impl VehicleBuilder {
     /// The fully constructed `Vehicle` object.
     pub fn build(self) -> Vehicle {
         self.vehicle
+    }
+
+    /// Builds a reference to the `Vehicle` object.
+    ///     
+    /// # Returns
+    /// A reference to the `Vehicle` object.
+    pub fn build_ref(self) -> VehicleRef {
+        Rc::new(RefCell::new(self.vehicle))
     }
 }
 

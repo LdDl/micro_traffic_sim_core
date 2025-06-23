@@ -12,9 +12,9 @@ const EPS_COOP_LEVEL: f64 = 0.0001;
 struct ConflictRule {
     condition: fn(&Vehicle, &Vehicle) -> bool,
     resolver: for<'a> fn(
-        &'a CellIntention<'a>,
-        &'a CellIntention<'a>,
-    ) -> (&'a CellIntention<'a>, ConflictType),
+        &'a CellIntention,
+        &'a CellIntention,
+    ) -> (&'a CellIntention, ConflictType),
 }
 
 macro_rules! conflict_rules {
@@ -130,15 +130,11 @@ static CONFLICT_RULES: &[ConflictRule] = conflict_rules![
 
 // Function to resolve conflicts
 pub fn resolve_simple_rules<'a>(
-    intention_one: &'a CellIntention<'a>,
-    intention_two: &'a CellIntention<'a>,
-) -> (&'a CellIntention<'a>, ConflictType) {
-    let v1 = intention_one
-        .get_vehicle()
-        .expect("Vehicle missing in intention_one");
-    let v2 = intention_two
-        .get_vehicle()
-        .expect("Vehicle missing in intention_two");
+    intention_one: &'a CellIntention,
+    intention_two: &'a CellIntention,
+) -> (&'a CellIntention, ConflictType) {
+    let v1 = &*intention_one.vehicle.borrow();
+    let v2 = &*intention_two.vehicle.borrow();
     for rule in CONFLICT_RULES {
         if (rule.condition)(v1, v2) {
             return (rule.resolver)(intention_one, intention_two);
@@ -160,23 +156,19 @@ pub fn has_agressive_level_advantage(vehicle_one: &Vehicle, vehicle_two: &Vehicl
 }
 
 pub fn resolve_merge_lane_change<'a>(
-    intention_one: &'a CellIntention<'a>,
-    intention_two: &'a CellIntention<'a>,
-) -> (&'a CellIntention<'a>, ConflictType) {
+    intention_one: &'a CellIntention,
+    intention_two: &'a CellIntention,
+) -> (&'a CellIntention, ConflictType) {
     // Extract vehicles once (with early panic if missing)
-    let vehicle_one = intention_one
-        .get_vehicle()
-        .expect("Vehicle missing in intention_one");
-    let vehicle_two = intention_two
-        .get_vehicle()
-        .expect("Vehicle missing in intention_two");
+    let vehicle_one = intention_one.vehicle.borrow();
+    let vehicle_two = intention_two.vehicle.borrow();
 
     // Check aggressive behaviour advantage, so aggressive vehicle could even violate the traffic rules
     // and have advantage over the cooperative vehicle
-    if has_agressive_level_advantage(vehicle_one, vehicle_two) {
+    if has_agressive_level_advantage(&vehicle_one, &vehicle_two) {
         return (intention_one, ConflictType::MergeLaneChange);
     }
-    if has_agressive_level_advantage(vehicle_two, vehicle_one) {
+    if has_agressive_level_advantage(&vehicle_two, &vehicle_one) {
         return (intention_two, ConflictType::MergeLaneChange);
     }
 
@@ -199,15 +191,11 @@ pub fn resolve_merge_lane_change<'a>(
 }
 
 pub fn resolve_by_speed_and_cooperativity<'a>(
-    intention_one: &'a CellIntention<'a>,
-    intention_two: &'a CellIntention<'a>,
-) -> (&'a CellIntention<'a>, ConflictType) {
-    let vehicle_one = intention_one
-        .get_vehicle()
-        .expect("Vehicle missing in intention_one");
-    let vehicle_two = intention_two
-        .get_vehicle()
-        .expect("Vehicle missing in intention_two");
+    intention_one: &'a CellIntention,
+    intention_two: &'a CellIntention,
+) -> (&'a CellIntention, ConflictType) {
+    let vehicle_one = intention_one.vehicle.borrow();
+    let vehicle_two = intention_two.vehicle.borrow();
 
     // Check speed advantage
     if vehicle_one.speed != vehicle_two.speed {
@@ -238,22 +226,18 @@ pub fn resolve_by_speed_and_cooperativity<'a>(
 }
 
 pub fn resolve_merge_forward<'a>(
-    intention_one: &'a CellIntention<'a>,
-    intention_two: &'a CellIntention<'a>,
-) -> (&'a CellIntention<'a>, ConflictType) {
+    intention_one: &'a CellIntention,
+    intention_two: &'a CellIntention,
+) -> (&'a CellIntention, ConflictType) {
     // Extract vehicles once (with early panic if missing)
-    let vehicle_one = intention_one
-        .get_vehicle()
-        .expect("Vehicle missing in intention_one");
-    let vehicle_two = intention_two
-        .get_vehicle()
-        .expect("Vehicle missing in intention_two");
+    let vehicle_one = intention_one.vehicle.borrow();
+    let vehicle_two = intention_two.vehicle.borrow();
 
     // Check aggressive behaviour advantage
-    if has_agressive_level_advantage(vehicle_one, vehicle_two) {
+    if has_agressive_level_advantage(&vehicle_one, &vehicle_two) {
         return (intention_one, ConflictType::MergeForward);
     }
-    if has_agressive_level_advantage(vehicle_two, vehicle_one) {
+    if has_agressive_level_advantage(&vehicle_two, &vehicle_one) {
         return (intention_two, ConflictType::MergeForward);
     }
 
@@ -289,18 +273,18 @@ mod tests {
         let vehicle_one = Vehicle::new(1)
             .with_behaviour(BehaviourType::Aggressive)
             .with_speed(1)
-            .build();
+            .build_ref();
         let vehicle_two = Vehicle::new(2)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(3)
-            .build();
-        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
-        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+            .build_ref();
+        let intention_one = CellIntention::new(vehicle_one, IntentionType::Target);
+        let intention_two = CellIntention::new(vehicle_two, IntentionType::Target);
         let correct_winner = (intention_one.clone(), ConflictType::MergeLaneChange);
         let actual_winner = resolve_merge_lane_change(&intention_one, &intention_two);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -312,26 +296,26 @@ mod tests {
         let mut vehicle_one = Vehicle::new(1)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(1)
-            .build();
-        vehicle_one.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_one.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeLeft,
             ..Default::default()
         });
         let mut vehicle_two = Vehicle::new(2)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(3)
-            .build();
-        vehicle_two.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_two.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             ..Default::default()
         });
-        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
-        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+        let intention_one = CellIntention::new(vehicle_one, IntentionType::Target);
+        let intention_two = CellIntention::new(vehicle_two, IntentionType::Target);
         let correct_winner = (intention_one.clone(), ConflictType::MergeLaneChange);
         let actual_winner = resolve_merge_lane_change(&intention_one, &intention_two);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -345,18 +329,18 @@ mod tests {
         let vehicle_one = Vehicle::new(1)
             .with_speed(5)
             .with_cooperative_level(0.5)
-            .build();
+            .build_ref();
         let vehicle_two = Vehicle::new(2)
             .with_speed(3)
             .with_cooperative_level(0.5)
-            .build();
-        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
-        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+            .build_ref();
+        let intention_one = CellIntention::new(vehicle_one, IntentionType::Target);
+        let intention_two = CellIntention::new(vehicle_two, IntentionType::Target);
         let correct_winner = (intention_one.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_by_speed_and_cooperativity(&intention_one, &intention_two);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -368,18 +352,18 @@ mod tests {
         let vehicle_three = Vehicle::new(3)
             .with_speed(4)
             .with_cooperative_level(0.3)
-            .build();
+            .build_ref();
         let vehicle_four = Vehicle::new(4)
             .with_speed(4)
             .with_cooperative_level(0.8)
-            .build();
-        let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
-        let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Target);
+            .build_ref();
+        let intention_three = CellIntention::new(vehicle_three, IntentionType::Target);
+        let intention_four = CellIntention::new(vehicle_four, IntentionType::Target);
         let correct_winner = (intention_three.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_by_speed_and_cooperativity(&intention_three, &intention_four);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -391,18 +375,18 @@ mod tests {
         let vehicle_five = Vehicle::new(5)
             .with_speed(3)
             .with_cooperative_level(0.5)
-            .build();
+            .build_ref();
         let vehicle_six = Vehicle::new(6)
             .with_speed(3)
             .with_cooperative_level(0.5)
-            .build();
-        let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
-        let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
+            .build_ref();
+        let intention_five = CellIntention::new(vehicle_five, IntentionType::Target);
+        let intention_six = CellIntention::new(vehicle_six, IntentionType::Target);
         let correct_winner = (intention_six.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_by_speed_and_cooperativity(&intention_five, &intention_six);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -416,18 +400,18 @@ mod tests {
         let vehicle_one = Vehicle::new(1)
             .with_behaviour(BehaviourType::Aggressive)
             .with_speed(3)
-            .build();
+            .build_ref();
         let vehicle_two = Vehicle::new(2)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(3)
-            .build();
-        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
-        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+            .build_ref();
+        let intention_one = CellIntention::new(vehicle_one, IntentionType::Target);
+        let intention_two = CellIntention::new(vehicle_two, IntentionType::Target);
         let coorect_winner = (intention_one.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_merge_forward(&intention_one, &intention_two);
         assert_eq!(
-            coorect_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            coorect_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -439,18 +423,18 @@ mod tests {
         let vehicle_three = Vehicle::new(3)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
+            .build_ref();
         let vehicle_four = Vehicle::new(4)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
-        let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Transit);
+            .build_ref();
+        let intention_three = CellIntention::new(vehicle_three, IntentionType::Target);
+        let intention_four = CellIntention::new(vehicle_four, IntentionType::Transit);
         let correct_winner = (intention_four.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_merge_forward(&intention_three, &intention_four);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -464,19 +448,19 @@ mod tests {
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(5)
             .with_cooperative_level(0.5)
-            .build();
+            .build_ref();
         let vehicle_six = Vehicle::new(6)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .with_cooperative_level(0.5)
-            .build();
-        let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
-        let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
+            .build_ref();
+        let intention_five = CellIntention::new(vehicle_five, IntentionType::Target);
+        let intention_six = CellIntention::new(vehicle_six, IntentionType::Target);
         let correct_winner = (intention_five.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_merge_forward(&intention_five, &intention_six);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -492,26 +476,26 @@ mod tests {
         let mut vehicle_one = Vehicle::new(1)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_one.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_one.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             ..Default::default()
         });
         let mut vehicle_two = Vehicle::new(2)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_two.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_two.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeLeft,
             ..Default::default()
         });
-        let intention_one = CellIntention::new(Some(&vehicle_one), IntentionType::Target);
-        let intention_two = CellIntention::new(Some(&vehicle_two), IntentionType::Target);
+        let intention_one = CellIntention::new(vehicle_one, IntentionType::Target);
+        let intention_two = CellIntention::new(vehicle_two, IntentionType::Target);
         let correct_winner = (intention_two.clone(), ConflictType::MergeLaneChange);
         let actual_winner = resolve_simple_rules(&intention_one, &intention_two);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -525,26 +509,26 @@ mod tests {
         let mut vehicle_three = Vehicle::new(3)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(5)
-            .build();
-        vehicle_three.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_three.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             ..Default::default()
         });
         let mut vehicle_four = Vehicle::new(4)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_four.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_four.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             ..Default::default()
         });
-        let intention_three = CellIntention::new(Some(&vehicle_three), IntentionType::Target);
-        let intention_four = CellIntention::new(Some(&vehicle_four), IntentionType::Target);
+        let intention_three = CellIntention::new(vehicle_three, IntentionType::Target);
+        let intention_four = CellIntention::new(vehicle_four, IntentionType::Target);
         let correct_winner = (intention_three.clone(), ConflictType::MergeForward);
         let actual_winner = resolve_simple_rules(&intention_three, &intention_four);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -557,26 +541,26 @@ mod tests {
         let mut vehicle_five = Vehicle::new(5)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_five.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_five.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             ..Default::default()
         });
         let mut vehicle_six = Vehicle::new(6)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_six.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_six.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             ..Default::default()
         });
-        let intention_five = CellIntention::new(Some(&vehicle_five), IntentionType::Target);
-        let intention_six = CellIntention::new(Some(&vehicle_six), IntentionType::Target);
+        let intention_five = CellIntention::new(vehicle_five, IntentionType::Target);
+        let intention_six = CellIntention::new(vehicle_six, IntentionType::Target);
         let correct_winner = (intention_five.clone(), ConflictType::ForwardLaneChange);  
         let actual_winner = resolve_simple_rules(&intention_five, &intention_six);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -589,26 +573,26 @@ mod tests {
         let mut vehicle_seven = Vehicle::new(7)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_seven.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_seven.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             ..Default::default()
         });
         let mut vehicle_eight = Vehicle::new(8)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_eight.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_eight.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             ..Default::default()
         });
-        let intention_seven = CellIntention::new(Some(&vehicle_seven), IntentionType::Target);
-        let intention_eight = CellIntention::new(Some(&vehicle_eight), IntentionType::Target);
+        let intention_seven = CellIntention::new(vehicle_seven, IntentionType::Target);
+        let intention_eight = CellIntention::new(vehicle_eight, IntentionType::Target);
         let correct_winner = (intention_eight.clone(), ConflictType::ForwardLaneChange);
         let actual_winner = resolve_simple_rules(&intention_seven, &intention_eight);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -621,26 +605,26 @@ mod tests {
         let mut vehicle_nine = Vehicle::new(9)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_nine.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_nine.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeLeft,
             ..Default::default()
         });
         let mut vehicle_ten = Vehicle::new(10)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_ten.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_ten.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::Block,
             ..Default::default()
         });
-        let intention_nine = CellIntention::new(Some(&vehicle_nine), IntentionType::Target);
-        let intention_ten = CellIntention::new(Some(&vehicle_ten), IntentionType::Target);
+        let intention_nine = CellIntention::new(vehicle_nine, IntentionType::Target);
+        let intention_ten = CellIntention::new(vehicle_ten, IntentionType::Target);
         let correct_winner = (intention_ten.clone(), ConflictType::BlockLaneChange);
         let actual_winner = resolve_simple_rules(&intention_nine, &intention_ten);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(
@@ -653,26 +637,26 @@ mod tests {
         let mut vehicle_eleven = Vehicle::new(11)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_eleven.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_eleven.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::Block,
             ..Default::default()
         });
         let mut vehicle_twelve = Vehicle::new(12)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
-            .build();
-        vehicle_twelve.set_intention(VehicleIntention {
+            .build_ref();
+        vehicle_twelve.borrow_mut().set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::ChangeRight,
             ..Default::default()
         });
-        let intention_eleven = CellIntention::new(Some(&vehicle_eleven), IntentionType::Target);
-        let intention_twelve = CellIntention::new(Some(&vehicle_twelve), IntentionType::Target);
+        let intention_eleven = CellIntention::new(vehicle_eleven, IntentionType::Target);
+        let intention_twelve = CellIntention::new(vehicle_twelve, IntentionType::Target);
         let correct_winner = (intention_eleven.clone(), ConflictType::BlockLaneChange);
         let actual_winner = resolve_simple_rules(&intention_eleven, &intention_twelve);
         assert_eq!(
-            correct_winner.0.get_vehicle().unwrap().id,
-            actual_winner.0.get_vehicle().unwrap().id,
+            correct_winner.0.vehicle.borrow().id,
+            actual_winner.0.vehicle.borrow().id,
             "Vehicle ID for the winner is not correct"
         );
         assert_eq!(

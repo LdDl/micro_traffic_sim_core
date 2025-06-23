@@ -1,6 +1,6 @@
 use super::{process_no_route_found, process_path, NoRouteError};
 use crate::agents::{
-    BehaviourType, TailIntentionManeuver, Vehicle, VehicleError, VehicleID, VehicleIntention,
+    BehaviourType, TailIntentionManeuver, Vehicle, VehicleRef, VehicleError, VehicleID, VehicleIntention,
 };
 use crate::grid::cell::CellState;
 use crate::grid::lane_change_type::LaneChangeType;
@@ -51,20 +51,20 @@ impl fmt::Display for IntentionError {
 pub fn prepare_intentions<'a, 'b>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
-    vehicles: &'b mut IndexMap<VehicleID, Vehicle>,
-) -> Result<Intentions<'b>, IntentionError> {
+    vehicles: &'b mut IndexMap<VehicleID, VehicleRef>, 
+) -> Result<Intentions, IntentionError> {
     let mut intentions = Intentions::new();
-    for (_, vehicle) in vehicles.iter_mut() {
-        let possible_intention = find_intention(net, current_state, vehicle)?;
+    for (_, vehicle_ref) in vehicles.iter_mut() {
+        let possible_intention = find_intention(net, current_state, &vehicle_ref.borrow())?;
         if possible_intention.should_stop {
             let alternate_possible_intention =
-                find_alternate_intention(net, current_state, vehicle)?;
-            vehicle.set_intention(alternate_possible_intention);
-            intentions.add_intention(vehicle, IntentionType::Target);
+                find_alternate_intention(net, current_state, &vehicle_ref.borrow())?;
+            vehicle_ref.borrow_mut().set_intention(alternate_possible_intention);
+            intentions.add_intention(vehicle_ref.clone(), IntentionType::Target);
             continue;
         }
-        vehicle.set_intention(possible_intention);
-        intentions.add_intention(vehicle, IntentionType::Target);
+        vehicle_ref.borrow_mut().set_intention(possible_intention);
+        intentions.add_intention(vehicle_ref.clone(), IntentionType::Target);
     }
     Ok(intentions)
 }
@@ -625,32 +625,32 @@ mod tests {
             .with_cell(source_cell.get_id())
             .with_speed(3)
             .with_destination(dest_cell.get_id())
-            .build();
+            .build_ref();
         let blocking_vehicle = Vehicle::new(78).with_cell(blocked_cell.get_id()).build();
 
         let mut current_state: HashMap<CellID, VehicleID> = HashMap::new();
-        current_state.insert(source_cell.get_id(), vehicle.id);
+        current_state.insert(source_cell.get_id(), vehicle.borrow().id);
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
-        let mut intentions: Intentions<'_> = Intentions::new();
-        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+        let mut intentions: Intentions = Intentions::new();
+        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle.borrow());
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
-        vehicle.set_intention(unwrapped_intention);
-        intentions.add_intention(&mut vehicle, IntentionType::Target);
+        vehicle.borrow_mut().set_intention(unwrapped_intention);
+        intentions.add_intention(vehicle, IntentionType::Target);
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
         let mut correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_destination(dest_cell.get_id())
-            .build();
+            .build_ref();
         let mut correct_intention = VehicleIntention::default();
         correct_intention.intention_cell_id = source_cell.get_right_id();
         correct_intention.intention_maneuver = LaneChangeType::ChangeRight;
         correct_intention.intention_speed = 1;
-        correct_vehicle.set_intention(correct_intention);
+        correct_vehicle.borrow_mut().set_intention(correct_intention);
         let mut correct_intentions = Intentions::new();
-        correct_intentions.add_intention(&mut correct_vehicle, IntentionType::Target);
+        correct_intentions.add_intention(correct_vehicle, IntentionType::Target);
         assert_eq!(
             correct_intentions.len(),
             intentions.len(),
@@ -690,8 +690,8 @@ mod tests {
                     j
                 );
                 assert_eq!(
-                    correct_intentions.get(i).unwrap()[j].vehicle.unwrap().id,
-                    intention.vehicle.unwrap().id,
+                    correct_intentions.get(i).unwrap()[j].vehicle.borrow().id,
+                    intention.vehicle.borrow().id,
                     "Incorrect vehicle ID for cell #{} at pos #{}",
                     i,
                     j
@@ -699,10 +699,10 @@ mod tests {
                 assert_eq!(
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
-                        .unwrap()
+                        .borrow()
                         .intention
                         .intention_speed,
-                    intention.vehicle.unwrap().intention.intention_speed,
+                    intention.vehicle.borrow().intention.intention_speed,
                     "Incorrect vehicle speed for cell #{} at pos #{}",
                     i,
                     j
@@ -710,10 +710,10 @@ mod tests {
                 assert_eq!(
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
-                        .unwrap()
+                        .borrow()
                         .intention
                         .intention_maneuver,
-                    intention.vehicle.unwrap().intention.intention_maneuver,
+                    intention.vehicle.borrow().intention.intention_maneuver,
                     "Incorrect vehicle maneuver for cell #{} at pos #{}",
                     i,
                     j
@@ -730,32 +730,32 @@ mod tests {
             .with_cell(source_cell.get_id())
             .with_speed(3)
             .with_destination(dest_cell.get_id())
-            .build();
+            .build_ref();
         let blocking_vehicle = Vehicle::new(78).with_cell(blocked_cell.get_id()).build();
 
         let mut current_state: HashMap<CellID, VehicleID> = HashMap::new();
-        current_state.insert(source_cell.get_id(), vehicle.id);
+        current_state.insert(source_cell.get_id(), vehicle.borrow().id);
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
         let mut intentions = Intentions::new();
-        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle.borrow());
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
-        vehicle.set_intention(unwrapped_intention);
-        intentions.add_intention(&mut vehicle, IntentionType::Target);
+        vehicle.borrow_mut().set_intention(unwrapped_intention);
+        intentions.add_intention(vehicle, IntentionType::Target);
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
         let mut correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_destination(dest_cell.get_id())
-            .build();
+            .build_ref();
         let mut correct_intention = VehicleIntention::default();
         correct_intention.intention_cell_id = source_cell.get_right_id();
         correct_intention.intention_maneuver = LaneChangeType::ChangeRight;
         correct_intention.intention_speed = 1;
         let mut correct_intentions = Intentions::new();
-        correct_vehicle.set_intention(correct_intention);
-        correct_intentions.add_intention(&mut correct_vehicle, IntentionType::Target);
+        correct_vehicle.borrow_mut().set_intention(correct_intention);
+        correct_intentions.add_intention(correct_vehicle, IntentionType::Target);
         assert_eq!(
             correct_intentions.len(),
             intentions.len(),
@@ -795,8 +795,8 @@ mod tests {
                     j
                 );
                 assert_eq!(
-                    correct_intentions.get(i).unwrap()[j].vehicle.unwrap().id,
-                    intention.vehicle.unwrap().id,
+                    correct_intentions.get(i).unwrap()[j].vehicle.borrow().id,
+                    intention.vehicle.borrow().id,
                     "Incorrect vehicle ID for cell #{} at pos #{}",
                     i,
                     j
@@ -804,10 +804,10 @@ mod tests {
                 assert_eq!(
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
-                        .unwrap()
+                        .borrow()
                         .intention
                         .intention_speed,
-                    intention.vehicle.unwrap().intention.intention_speed,
+                    intention.vehicle.borrow().intention.intention_speed,
                     "Incorrect vehicle speed for cell #{} at pos #{}",
                     i,
                     j
@@ -815,10 +815,10 @@ mod tests {
                 assert_eq!(
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
-                        .unwrap()
+                        .borrow()
                         .intention
                         .intention_maneuver,
-                    intention.vehicle.unwrap().intention.intention_maneuver,
+                    intention.vehicle.borrow().intention.intention_maneuver,
                     "Incorrect vehicle maneuver for cell #{} at pos #{}",
                     i,
                     j
@@ -835,37 +835,37 @@ mod tests {
             .with_cell(source_cell.get_id())
             .with_speed(3)
             .with_destination(dest_cell.get_id())
-            .build();
+            .build_ref();
         let blocking_vehicle = Vehicle::new(78).with_cell(blocked_cell.get_id()).build();
         let blocking_vehicle2 = Vehicle::new(4278)
             .with_cell(source_cell.get_right_id())
             .build();
 
         let mut current_state: HashMap<CellID, VehicleID> = HashMap::new();
-        current_state.insert(source_cell.get_id(), vehicle.id);
+        current_state.insert(source_cell.get_id(), vehicle.borrow().id);
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
         current_state.insert(source_cell.get_right_id(), blocking_vehicle2.id);
 
         let mut intentions = Intentions::new();
-        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+        let collected_intention = find_alternate_intention(&net, &current_state, &vehicle.borrow());
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
-        vehicle.set_intention(unwrapped_intention);
-        intentions.add_intention(&mut vehicle, IntentionType::Target);
+        vehicle.borrow_mut().set_intention(unwrapped_intention);
+        intentions.add_intention(vehicle, IntentionType::Target);
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
         // Vehicle could not move either forward or right
         let mut correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_destination(dest_cell.get_id())
-            .build();
+            .build_ref();
         let mut correct_intention = VehicleIntention::default();
         correct_intention.intention_cell_id = source_cell.get_id();
         correct_intention.intention_maneuver = LaneChangeType::Block;
         correct_intention.intention_speed = 0;
         let mut correct_intentions = Intentions::new();
-        correct_vehicle.set_intention(correct_intention);
-        correct_intentions.add_intention(&mut correct_vehicle, IntentionType::Target);
+        correct_vehicle.borrow_mut().set_intention(correct_intention);
+        correct_intentions.add_intention(correct_vehicle, IntentionType::Target);
         assert_eq!(
             correct_intentions.len(),
             intentions.len(),
@@ -905,8 +905,8 @@ mod tests {
                     j
                 );
                 assert_eq!(
-                    correct_intentions.get(i).unwrap()[j].vehicle.unwrap().id,
-                    intention.vehicle.unwrap().id,
+                    correct_intentions.get(i).unwrap()[j].vehicle.borrow().id,
+                    intention.vehicle.borrow().id,
                     "Incorrect vehicle ID for cell #{} at pos #{}",
                     i,
                     j
@@ -914,10 +914,10 @@ mod tests {
                 assert_eq!(
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
-                        .unwrap()
+                        .borrow()
                         .intention
                         .intention_speed,
-                    intention.vehicle.unwrap().intention.intention_speed,
+                    intention.vehicle.borrow().intention.intention_speed,
                     "Incorrect vehicle speed for cell #{} at pos #{}",
                     i,
                     j
@@ -925,10 +925,10 @@ mod tests {
                 assert_eq!(
                     correct_intentions.get(i).unwrap()[j]
                         .vehicle
-                        .unwrap()
+                        .borrow()
                         .intention
                         .intention_maneuver,
-                    intention.vehicle.unwrap().intention.intention_maneuver,
+                    intention.vehicle.borrow().intention.intention_maneuver,
                     "Incorrect vehicle maneuver for cell #{} at pos #{}",
                     i,
                     j
