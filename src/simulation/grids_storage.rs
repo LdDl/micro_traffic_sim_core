@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use crate::grid::road_network::GridRoads;
+use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
 
 #[derive(Debug)]
 pub struct GridsStorage {
@@ -6,6 +9,7 @@ pub struct GridsStorage {
     vehicles_net: GridRoads,
     // @future: there will be other grids and data: for pedestrian network, for crosswalks, for
     // traffic lights and etc.
+    tls: HashMap<TrafficLightID, TrafficLight>,
 }
 
 /// A builder pattern implementation for constructing `GridsStorage` objects.
@@ -33,8 +37,32 @@ impl GridsStorage {
         GridsStorageBuilder {
             storage: GridsStorage {
                 vehicles_net: GridRoads::new(),
+                tls: HashMap::new(),
             },
         }
+    }
+
+    /// Returns the number of traffic lights in the storage.
+    pub fn tls_num(&self) -> usize {
+        self.tls.len()
+    }
+
+    /// Resets timers and  active phases for every traffic light
+    pub fn tls_reset(&mut self) {
+        for light in self.tls.values_mut() {
+            light.reset();
+        }
+    }
+
+    /// Adds set of cells to the vehicles grid.
+    pub fn add_cells(&mut self, cells_data: Vec<crate::grid::cell::Cell>) {
+        for cell in cells_data {
+            self.vehicles_net.add_cell(cell);
+        }
+    }
+
+    pub fn add_traffic_light(&mut self, traffic_light: TrafficLight) {
+        self.tls.insert(traffic_light.get_id(), traffic_light);
     }
 }
 

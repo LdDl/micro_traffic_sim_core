@@ -2,7 +2,7 @@ use crate::geom::{PointType, new_point};
 use crate::traffic_lights::groups::TrafficLightGroup;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TrafficLightID(pub i64);
 
 /// Error types for TrafficLight operations.

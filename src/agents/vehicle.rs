@@ -95,9 +95,9 @@ pub struct Vehicle {
     /// It could be used to prohibit to the vehicle to do sequential maneuvers during simulation.
     pub timer_non_slowdown: i64,
     /// Relaxation time (in time units) in the transit cells (in case when they are set)
-    pub relax_time: u64,
+    pub relax_time: i32,
     // Timer for `relax_time` field
-    relax_countdown: u64,
+    relax_countdown: i32,
 
     /// Travel time (in time units) which vehicle has been in movement state.
     pub travel_time: i64,
@@ -312,7 +312,7 @@ impl Vehicle {
     /// vehicle.relax_countdown_reset();
     /// println!("Remaining time units to be in transit cell: {:?}", vehicle.get_relax_countdown()); // Should output 9
     /// ```
-    pub fn get_relax_countdown(&self) -> u64 {
+    pub fn get_relax_countdown(&self) -> i32 {
         self.relax_countdown
     }
 
@@ -892,7 +892,7 @@ impl VehicleBuilder {
     ///     .build();
     /// println!("Vehicle: {:?}", vehicle);
     /// ```
-    pub fn with_relax_time(mut self, t: u64) -> Self {
+    pub fn with_relax_time(mut self, t: i32) -> Self {
         self.vehicle.relax_time = t;
         self.vehicle.relax_countdown = t;
         self
