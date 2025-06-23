@@ -7,6 +7,7 @@ edition = "2021"
 rand = "0.8.5"
 lazy_static = "1.5.0"
 indexmap = "2.7.0"
+uuid = { version = "1.17.0", features = ["v4"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
