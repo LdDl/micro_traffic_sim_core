@@ -149,7 +149,8 @@ pub fn movement(
                 );
             }
             vehicles_to_remove.push(*vehicle_id);
-        } else if vehicle.cell_id == vehicle.destination {
+        }
+        if vehicle.cell_id == vehicle.destination {
             // Vehicle has reached the destination
             if verbose {
                 println!(
