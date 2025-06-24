@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::f64::INFINITY;
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum IntentionError {
     NoSourceCell(CellID),
     NoTargetCell(CellID),

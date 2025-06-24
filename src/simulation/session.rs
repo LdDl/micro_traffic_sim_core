@@ -1,10 +1,14 @@
 use crate::agents::{VehicleID, VehicleRef, Vehicle, BehaviourType};
 use crate::conflict_zones::{ConflictZone, ConflictZoneID};
-use crate::grid::cell::CellID;
+use crate::grid::cell::{CellID};
 use crate::traffic_lights::lights::{TrafficLightID};
 use crate::trips::trip::{Trip, TripID, TripType};
-use crate::simulation::grids_storage::GridsStorage;
-use crate::geom::SRID;
+use crate::simulation::grids_storage::{GridsStorage, GridsStorageError};
+use crate::geom::{Point, SRID};
+use crate::intentions::{IntentionError, prepare_intentions};
+use crate::conflicts::{ConflictError, ConflictSolverError, collect_conflicts, solve_conflicts};
+use crate::simulation::step::{AutomataState, VehicleState, TrafficLightGroupState};
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use uuid::Uuid;
 use std::fmt;
@@ -16,6 +20,16 @@ use rand::Rng;
 pub enum SessionError {
     /// Indicates that some error occurred
     ErrorPlaceholder(String),
+    /// Grid storage related error
+    GridsStorageError(GridsStorageError),
+    /// Intention processing error
+    IntentionError(IntentionError),
+    /// Conflict error
+    ConflictError(ConflictError),
+    /// Conflict solver error
+    ConflictSolverError(ConflictSolverError),
+    /// Cell not found error
+    CellNotFound(CellID),
 }
 
 impl fmt::Display for SessionError {
@@ -24,12 +38,51 @@ impl fmt::Display for SessionError {
         match self {
             SessionError::ErrorPlaceholder(value) => {
                 write!(f, "ErrorPlaceholder: {}", value)
-            }
+            },
+            SessionError::GridsStorageError(err) => {
+                write!(f, "GridsStorage error: {}", err)
+            },
+            SessionError::IntentionError(err) => {
+                write!(f, "Intention error: {}", err)
+            },
+            SessionError::ConflictError(err) => {
+                write!(f, "Conflict error: {}", err)
+            },
+            SessionError::ConflictSolverError(err) => {
+                write!(f, "Conflict solver error: {}", err)
+            },
+            SessionError::CellNotFound(cell_id) => {
+                write!(f, "Cell with ID {} not found", cell_id)
+            },
         }
     }
 }
 
 impl std::error::Error for SessionError {}
+
+impl From<GridsStorageError> for SessionError {
+    fn from(err: GridsStorageError) -> Self {
+        SessionError::GridsStorageError(err)
+    }
+}
+
+impl From<IntentionError> for SessionError {
+    fn from(err: IntentionError) -> Self {
+        SessionError::IntentionError(err)
+    }
+}
+
+impl From<ConflictError> for SessionError {
+    fn from(err: ConflictError) -> Self {
+        SessionError::ConflictError(err)
+    }
+}
+
+impl From<ConflictSolverError> for SessionError {
+    fn from(err: ConflictSolverError) -> Self {
+        SessionError::ConflictSolverError(err)
+    }
+}
 
 /// Session - representation of session for Cellular Automata with Traffic lights control management
 pub struct Session {
@@ -43,7 +96,7 @@ pub struct Session {
     trips_data: HashMap<TripID, Trip>,
 
     /// Vehicles storage
-    vehicles: HashMap<VehicleID, VehicleRef>,
+    vehicles: IndexMap<VehicleID, VehicleRef>,
 
     /// Cells under traffic lights control
     /// It could be just Cell, but we'll use CellID for now
@@ -82,7 +135,7 @@ impl Session {
         Session {
             id: Uuid::new_v4(),
             last_vehicle_id: 1,
-            vehicles: HashMap::new(),
+            vehicles: IndexMap::new(),
             grids_storage: GridsStorage::new().build(),
             trips_data: HashMap::new(),
             verbose: false,
@@ -107,7 +160,7 @@ impl Session {
         Session {
             id: Uuid::new_v4(),
             last_vehicle_id: 1,
-            vehicles: HashMap::new(),
+            vehicles: IndexMap::new(),
             grids_storage,
             trips_data: HashMap::new(),
             verbose: false,
@@ -349,5 +402,116 @@ impl Session {
                 self.last_vehicle_id = vehicle_id + 1; // Increment for next vehicle
             }
         }
+    }
+
+    /// Updates current position mapping
+    fn update_current_positions(&mut self) {
+        if self.verbose {
+            println!(
+                "Update positions: step={}, vehicles_num={}, trips_num={}",
+                self.steps,
+                self.vehicles.len(),
+                self.trips_data.len()
+            );
+        }
+        self.current_position.clear();
+        for vehicle_ref in self.vehicles.values() {
+            let vehicle = vehicle_ref.borrow();
+            if self.verbose {
+                println!(
+                    "Vehicle position: vehicle_id={}, cell_id={}",
+                    vehicle.id, vehicle.cell_id
+                );
+                for (id, &tail_cell) in vehicle.tail_cells.iter().enumerate() {
+                    println!(
+                        "Vehicle position: vehicle_id={}, tail_idx={}, tail_cell_id={}",
+                        vehicle.id, id, tail_cell
+                    );
+                }
+            }
+            self.current_position.insert(vehicle.cell_id, vehicle.id);
+            for &tail_cell in &vehicle.tail_cells {
+                self.current_position.insert(tail_cell, vehicle.id);
+            }
+        }
+    }
+
+    pub fn step(&mut self) -> Result<AutomataState, SessionError> {
+        if self.verbose {
+            println!(
+                "Run Step: step={}, vehicles_num={}, trips_num={}, tls_num={}",
+                self.steps,
+                self.vehicles.len(),
+                self.trips_data.len(),
+                self.grids_storage.tls_num()
+            );
+        }
+        
+        // 1. Generate vehicles for given trips
+        self.generate_vehicles();
+        
+        // 2. Update current positions
+        self.update_current_positions();
+
+        // 3. Update and collect TLS state
+        let tl_states_dump = self.grids_storage.tick_traffic_lights(self.verbose)?;
+
+        // 4. Create intentions for all vehicles
+        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles)?;
+        // // 5. Collect conflicts
+        let conflicts_data = collect_conflicts(
+            &collected_intentions,
+            self.grids_storage.get_vehicles_net_ref(),
+            &self.conflict_zones,
+            &self.cells_conflicts_zones,
+            self.verbose,
+        )?;
+
+        // 6. Solve conflicts
+        solve_conflicts(conflicts_data, self.verbose)?;
+
+        // Further steps are commented out as they are not implemented or tested yet
+        // 7. Move vehicles
+        // self.move_vehicles(vehicles_grid)?;
+
+        // 8. Collect current vehicles positions for state dump
+        let vehicles_grid = self.grids_storage.get_vehicles_net_ref();
+        let mut states_dump: Vec<VehicleState> = Vec::with_capacity(self.vehicles.len());
+        for vehicle_ref in self.vehicles.values() {
+            let vehicle = vehicle_ref.borrow();
+            let pt = vehicles_grid.get_cell(&vehicle.cell_id)
+                .ok_or(SessionError::CellNotFound(vehicle.cell_id))?
+                .get_point();
+            let mut occupied_points: Vec<[f64; 2]> = Vec::with_capacity(vehicle.tail_cells.len());
+            for &tail_cell_id in &vehicle.tail_cells {
+                if tail_cell_id > 0 {
+                    if let Some(opt_cell) = vehicles_grid.get_cell(&tail_cell_id) {
+                        let opt_pt = opt_cell.get_point();
+                        occupied_points.push([opt_pt.x(), opt_pt.y()]);
+                    }
+                }
+            }
+            states_dump.push(VehicleState {
+                occupied_points,
+                last_point: [pt.x(), pt.y()],
+                last_cell: vehicle.cell_id,
+                last_intermediate_cells: vehicle.intention.intermediate_cells.clone(),
+                last_speed: vehicle.speed,
+                last_angle: vehicle.bearing,
+                vehicle_type: vehicle.vehicle_type,
+                travel_time: vehicle.travel_time,
+                id: vehicle.id,
+            });
+        }
+
+        // 9. Increment step counter
+        let timestamp = self.steps;
+        self.steps += 1;
+
+        Ok(AutomataState {
+            timestamp: timestamp,
+            vehicles: states_dump,
+            tls: tl_states_dump,
+        })
     }
 }

@@ -89,6 +89,16 @@ impl TrafficLight {
     pub fn get_current_time(&self) -> i32 {
         self.timer
     }
+
+    /// Return number of signal groups
+    pub fn get_groups_num(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// Returns a reference to the traffic light's groups.
+    pub fn get_groups(&self) -> &Vec<TrafficLightGroup> {
+        &self.groups
+    }
 }
 
 /// A builder for constructing `TrafficLight` instances.

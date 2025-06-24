@@ -249,6 +249,24 @@ impl Cell {
     pub fn get_speed_limit(&self) -> i32 {
         self.speed_limit
     }
+
+    /// Returns the coordinates of the cell.
+    ///
+    /// # Returns
+    /// A `PointType` representing the coordinates of the cell.
+    /// 
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::geom::{new_point, SRID};
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// let cell = Cell::new(1)
+    ///    .with_point(new_point(37.61556, 55.75222, Some(SRID::WGS84)))
+    ///   .build();
+    /// println!("Cell coordinates: {:?}", cell.get_point());
+    /// ```
+    pub fn get_point(&self) -> &PointType {
+        &self.point
+    }
 }
 
 /// A builder pattern implementation for constructing `Cell` objects.

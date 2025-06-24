@@ -5,7 +5,7 @@ use crate::grid::cell::CellID;
 
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConflictSolverError {
     InvalidConflict(String),
     InsufficientParticipants(CellID, String),

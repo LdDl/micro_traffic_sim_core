@@ -58,6 +58,14 @@ impl TrafficLightGroup {
     pub fn get_id(&self) -> i64 {
         self.id
     }
+    /// Return signal at the specified index
+    pub fn get_signal_at(&self, idx: usize) -> &SignalType {
+        &self.signal[idx]
+    }
+    /// Returns reference to cells IDs
+    pub fn get_cells_ids(&self) -> &Vec<CellID> {
+        &self.cells_ids
+    }
 }
 
 /// A builder for constructing `TrafficLightGroup` instances.

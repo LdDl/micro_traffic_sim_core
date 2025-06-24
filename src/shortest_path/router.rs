@@ -7,7 +7,7 @@ use crate::shortest_path::{heuristics::heuristic, path::Path};
 use indexmap::IndexMap;
 use std::{cell::RefCell, cmp::Ordering, collections::BinaryHeap, fmt, rc::Rc};
 // Define custom error types
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AStarError {
     BadData { cell_id: CellID },
     NoPathFound { start_id: CellID, end_id: CellID },

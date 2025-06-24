@@ -90,13 +90,13 @@ impl fmt::Display for CellConflict {
     }
 }
 
-#[derive(Debug)]
-pub enum TrajectoryConflictError {
+#[derive(Debug, Clone)]
+pub enum ConflictError {
     CellNotFound(CellID),
     InvalidVehicle(String),
 }
 
-impl std::fmt::Display for TrajectoryConflictError {
+impl std::fmt::Display for ConflictError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CellNotFound(cell_id) => write!(f, "Cell {} not found in network", cell_id),
@@ -121,7 +121,7 @@ pub fn find_cross_trajectories_conflict_naive(
     intention_cell: &Cell,
     collected_intentions: &Intentions,
     net: &GridRoads,
-) -> Result<Option<TrajectoryConflictInfo>, TrajectoryConflictError> {
+) -> Result<Option<TrajectoryConflictInfo>, ConflictError> {
     /* No straight conflict, but could be crossing trajectories conflict */
     // A        B
     // |  L  R  |
@@ -162,7 +162,7 @@ pub fn find_cross_trajectories_conflict_naive(
 
     // Extract cell object by 'X' position
     let current_cell = net.get_cell(&cell_x)
-        .ok_or(TrajectoryConflictError::CellNotFound(cell_x))?;
+        .ok_or(ConflictError::CellNotFound(cell_x))?;
 
     // Check if position 'A' exists for 'X'
     if current_cell.get_forward_id() < 0 {
@@ -201,7 +201,7 @@ pub fn find_cross_trajectories_conflict_naive(
     // Handle tail case
     if last_cell_intention == IntentionType::Tail {
         if side_vehicle.tail_cells.is_empty() {
-            return Err(TrajectoryConflictError::InvalidVehicle(
+            return Err(ConflictError::InvalidVehicle(
                 format!("Cell intention with 'INTENTION_TAIL' type has reference to vehicle which has no tail {}", side_vehicle.id)
             ));
         }
@@ -213,7 +213,7 @@ pub fn find_cross_trajectories_conflict_naive(
             }
             
             let side_vehicle_cell = net.get_cell(&occ_cell_id)
-                .ok_or(TrajectoryConflictError::CellNotFound(occ_cell_id))?;
+                .ok_or(ConflictError::CellNotFound(occ_cell_id))?;
             
             if side_vehicle_cell.get_forward_id() < 0 {
                 continue;
@@ -235,7 +235,7 @@ pub fn find_cross_trajectories_conflict_naive(
     // Handle regular maneuver case
     // Extract cell object for side vehicle. It should be position 'Y'
     let side_vehicle_cell = net.get_cell(&side_vehicle.cell_id)
-        .ok_or(TrajectoryConflictError::CellNotFound(side_vehicle.cell_id))?;
+        .ok_or(ConflictError::CellNotFound(side_vehicle.cell_id))?;
 
     // Check if forward cell for side vehicle exists. It should be position 'B'
     if side_vehicle_cell.get_forward_id() < 0 {
@@ -345,7 +345,7 @@ pub fn find_conflicts_in_conflict_zones(
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
     cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
     explored_conflict_zones: &mut HashSet<ConflictZoneID>,
-) -> Result<Option<(CellConflict, ConflictZoneID)>, TrajectoryConflictError> {
+) -> Result<Option<(CellConflict, ConflictZoneID)>, ConflictError> {
     /* Conflict via zone where first edge is YA and the second edge is XB */
     // A      B
     //   F  F
@@ -377,7 +377,7 @@ pub fn find_conflicts_in_conflict_zones(
 
     // Get the conflict zone
     let conflict_zone = conflict_zones.get(&cell_b_conflict_zone_id)
-        .ok_or(TrajectoryConflictError::InvalidVehicle(
+        .ok_or(ConflictError::InvalidVehicle(
             format!("Conflict zone {} not found", cell_b_conflict_zone_id)
         ))?;
 
@@ -432,7 +432,7 @@ pub fn find_conflicts_in_conflict_zones(
         (vec![vehicle_ref.clone(), second_cell_intention.vehicle.clone()], 0)
     } else if second_cell_intention.int_type == IntentionType::Tail 
         && cell_intention.int_type == IntentionType::Tail {
-        return Err(TrajectoryConflictError::InvalidVehicle(
+        return Err(ConflictError::InvalidVehicle(
             format!("Incorrect cell intentions for tails. first: {:?}, second: {:?}", 
                 cell_intention, second_cell_intention)
         ));
@@ -568,9 +568,9 @@ pub fn new_conflict_multiple(
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
     cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
     cell_intentions: &[CellIntention],
-) -> Result<CellConflict, TrajectoryConflictError> {
+) -> Result<CellConflict, ConflictError> {
     if cell_intentions.len() < 2 {
-        return Err(TrajectoryConflictError::InvalidVehicle(
+        return Err(ConflictError::InvalidVehicle(
             "Number of cell intentions is less than 2".to_string()
         ));
     }
@@ -641,7 +641,7 @@ pub fn collect_conflicts(
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
     cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
     verbose: bool,
-) -> Result<Vec<CellConflict>, TrajectoryConflictError> {
+) -> Result<Vec<CellConflict>, ConflictError> {
     if verbose {
         println!("Collect conflicts: intentions_num: {}, conflict_zones_num: {}, matched_cells_zones_num: {}", 
             collected_intentions.len(), conflict_zones.len(), cells_conflicts_zones.len());
@@ -652,13 +652,13 @@ pub fn collect_conflicts(
 
     for (intention_cell_id, cell_intentions) in collected_intentions.iter() {
         if cell_intentions.is_empty() {
-            return Err(TrajectoryConflictError::InvalidVehicle(
+            return Err(ConflictError::InvalidVehicle(
                 "This should not happen - empty cell intentions".to_string()
             ));
         }
 
         let intention_cell = net.get_cell(intention_cell_id)
-            .ok_or(TrajectoryConflictError::CellNotFound(*intention_cell_id))?;
+            .ok_or(ConflictError::CellNotFound(*intention_cell_id))?;
 
         let vehicles_num = cell_intentions.len();
 

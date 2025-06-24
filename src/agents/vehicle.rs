@@ -7,7 +7,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum VehicleError {
     TailCellNotFound {
         cell_id: CellID,

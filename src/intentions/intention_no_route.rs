@@ -8,7 +8,7 @@ use crate::{
 };
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NoRouteError {
     NoVertexFound { cell_id: CellID },
     NoExitPath,
