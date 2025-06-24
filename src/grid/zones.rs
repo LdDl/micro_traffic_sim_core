@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// ZoneType gives meaning to the cell in terms of its application.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ZoneType {
     Undefined = 0,
     Birth,

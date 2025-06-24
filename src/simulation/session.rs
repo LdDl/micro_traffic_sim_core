@@ -7,6 +7,7 @@ use crate::simulation::grids_storage::{GridsStorage, GridsStorageError};
 use crate::geom::{Point, SRID};
 use crate::intentions::{IntentionError, prepare_intentions};
 use crate::conflicts::{ConflictError, ConflictSolverError, collect_conflicts, solve_conflicts};
+use crate::movement::{MovementError, movement};
 use crate::simulation::step::{AutomataState, VehicleState, TrafficLightGroupState};
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -30,6 +31,8 @@ pub enum SessionError {
     ConflictSolverError(ConflictSolverError),
     /// Cell not found error
     CellNotFound(CellID),
+    /// Movement error
+    MovementError(MovementError),
 }
 
 impl fmt::Display for SessionError {
@@ -53,6 +56,9 @@ impl fmt::Display for SessionError {
             },
             SessionError::CellNotFound(cell_id) => {
                 write!(f, "Cell with ID {} not found", cell_id)
+            },
+            SessionError::MovementError(err) => {
+                write!(f, "Movement error: {}", err)
             },
         }
     }
@@ -81,6 +87,12 @@ impl From<ConflictError> for SessionError {
 impl From<ConflictSolverError> for SessionError {
     fn from(err: ConflictSolverError) -> Self {
         SessionError::ConflictSolverError(err)
+    }
+}
+
+impl From<MovementError> for SessionError {
+    fn from(err: MovementError) -> Self {
+        SessionError::MovementError(err)
     }
 }
 
@@ -470,12 +482,11 @@ impl Session {
         // 6. Solve conflicts
         solve_conflicts(conflicts_data, self.verbose)?;
 
-        // Further steps are commented out as they are not implemented or tested yet
         // 7. Move vehicles
-        // self.move_vehicles(vehicles_grid)?;
+        let vehicles_grid = self.grids_storage.get_vehicles_net_ref();
+        movement(vehicles_grid, &mut self.vehicles, self.verbose)?;
 
         // 8. Collect current vehicles positions for state dump
-        let vehicles_grid = self.grids_storage.get_vehicles_net_ref();
         let mut states_dump: Vec<VehicleState> = Vec::with_capacity(self.vehicles.len());
         for vehicle_ref in self.vehicles.values() {
             let vehicle = vehicle_ref.borrow();
