@@ -447,6 +447,46 @@ impl Vehicle {
             intention_maneuver: self.intention.intention_maneuver,
         })
     }
+
+    /// Applies vehicle's intention to the vehicle's current state 
+    /// 
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
+    /// 
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(10)
+    ///     .with_destination(100)
+    ///     .with_speed(1)
+    ///     .build();
+    /// 
+    /// // Set some intention
+    /// vehicle.intention.intention_speed = 3;
+    /// vehicle.intention.destination = Some(200);
+    /// vehicle.intention.confusion = Some(true);
+    /// 
+    /// // Apply the intention
+    /// vehicle.apply_intention();
+    /// 
+    /// // Now vehicle state is updated
+    /// assert_eq!(vehicle.speed, 3);
+    /// assert_eq!(vehicle.destination, 200);
+    /// assert_eq!(vehicle.confusion, true);
+    /// ```
+    pub fn apply_intention(&mut self) {
+        // No need to update cell_id. It is done in movement.rs
+        self.speed = self.intention.intention_speed;
+        // Apply destination if set in intention
+        if let Some(destination) = self.intention.destination {
+            self.destination = destination;
+        }
+        // Apply confusion state if set in intention
+        if let Some(confusion) = self.intention.confusion {
+            self.confusion = confusion;
+        }
+        // No need to update tails cells. It is done in movement.rs
+    } 
 }
 
 /// A builder pattern implementation for constructing `Vehicle` objects.
