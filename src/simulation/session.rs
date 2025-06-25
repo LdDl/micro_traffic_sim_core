@@ -8,6 +8,7 @@ use crate::intentions::{IntentionError, prepare_intentions};
 use crate::conflicts::{ConflictError, ConflictSolverError, collect_conflicts, solve_conflicts};
 use crate::movement::{MovementError, movement};
 use crate::simulation::states::{AutomataState, VehicleState};
+use crate::verbose::*;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -127,7 +128,7 @@ pub struct Session {
     last_vehicle_id: VehicleID,
 
     /// Debugging information level
-    verbose: bool,
+    verbose: VerboseLevel,
 
     /// Time when this session has been created or updated (nanoseconds)
     updated_at: i64,
@@ -149,7 +150,7 @@ impl Session {
             vehicles: IndexMap::new(),
             grids_storage: GridsStorage::new().build(),
             trips_data: HashMap::new(),
-            verbose: false,
+            verbose: VerboseLevel::None,
             coordination_cells: HashMap::new(),
             conflict_zones: HashMap::new(),
             cells_conflicts_zones: HashMap::new(),
@@ -174,7 +175,7 @@ impl Session {
             vehicles: IndexMap::new(),
             grids_storage,
             trips_data: HashMap::new(),
-            verbose: false,
+            verbose: VerboseLevel::None,
             coordination_cells: HashMap::new(),
             conflict_zones: HashMap::new(),
             cells_conflicts_zones: HashMap::new(),
@@ -210,12 +211,12 @@ impl Session {
     }
 
     /// Gets the verbose level
-    pub fn get_verbose_level(&self) -> bool {
+    pub fn get_verbose_level(&self) -> VerboseLevel {
         self.verbose
     }
 
     /// Sets verbose level for the session
-    pub fn set_verbose_level(&mut self, verbose: bool) {
+    pub fn set_verbose_level(&mut self, verbose: VerboseLevel) {
         self.verbose = verbose;
     }
 
@@ -258,15 +259,16 @@ impl Session {
 
     /// Resets current/done vehicles, steps number, last vehicle ID, traffic lights states, trips
     pub fn reset(&mut self) {
-        if self.verbose {
-            println!(
-                "Reset simulation: step={}, vehicles_num={}, trips_num={}, tls_num={}",
-                self.steps,
-                self.vehicles.len(),
-                self.trips_data.len(),
-                self.grids_storage.tls_num()
-            );
-        }
+        self.verbose.log_with_fields(
+            EVENT_SIMULATION_RESET,
+            "Reset simulation",
+            &[
+                ("step", &self.steps),
+                ("vehicles_num", &self.vehicles.len()),
+                ("trips_num", &self.trips_data.len()),
+                ("tls_num", &self.grids_storage.tls_num()),
+            ]
+        );
 
         // Clear vehicles
         self.vehicles.clear();
@@ -328,10 +330,14 @@ impl Session {
                 norm_value < trip.probability
             }
             _ => {
-                if self.verbose {
-                    println!(
-                        "Trip type is not supported: trip_id={}, trip_type={:?}",
-                        trip_id, trip.trip_type
+                if self.verbose.is_at_least(VerboseLevel::Detailed) {
+                    self.verbose.log_with_fields(
+                        EVENT_GEN_VEHICLE,
+                        "Trip type is not supported",
+                        &[
+                            ("trip_id", &trip_id),
+                            ("trip_type", &format!("{:?}", trip.trip_type)),
+                        ]
                     );
                 }
                 false
@@ -375,14 +381,15 @@ impl Session {
 
     /// Generates vehicles based on the trips data
     pub fn generate_vehicles(&mut self) {
-        if self.verbose {
-            println!(
-                "Generate vehicles: step={}, vehicles_num={}, trips_num={}",
-                self.steps,
-                self.vehicles.len(),
-                self.trips_data.len()
-            );
-        }
+        self.verbose.log_with_fields(
+            EVENT_GEN_VEHICLES,
+            "Generate vehicles",
+            &[
+                ("step", &self.steps),
+                ("vehicles_num", &self.vehicles.len()),
+                ("trips_num", &self.trips_data.len()),
+            ]
+        );
         for (trip_id, trip) in &self.trips_data {
             // Check if there's already a vehicle at the source node
             let mut create = true;
@@ -397,14 +404,17 @@ impl Session {
             }
             // Generate vehicle for this trip
             if let Some(generated_vehicle) = self.generate_vehicle(trip, *trip_id) {
-                if self.verbose {
-                    println!(
-                        "Generate vehicle for trip: step={}, vehicles_num={}, trips_num={}, trip_id={}, vehicle_id={}",
-                        self.steps,
-                        self.vehicles.len(),
-                        self.trips_data.len(),
-                        trip_id,
-                        generated_vehicle.borrow().id
+                if self.verbose.is_at_least(VerboseLevel::Additional) {
+                    self.verbose.log_with_fields(
+                        EVENT_GEN_VEHICLES,
+                        "Generate vehicle for trip",
+                        &[
+                            ("step", &self.steps),
+                            ("vehicles_num", &self.vehicles.len()),
+                            ("trips_num", &self.trips_data.len()),
+                            ("trip_id", trip_id),
+                            ("vehicle_id", &generated_vehicle.borrow().id),
+                        ]
                     );
                 }
 
@@ -417,27 +427,39 @@ impl Session {
 
     /// Updates current position mapping
     fn update_current_positions(&mut self) {
-        if self.verbose {
-            println!(
-                "Update positions: step={}, vehicles_num={}, trips_num={}",
-                self.steps,
-                self.vehicles.len(),
-                self.trips_data.len()
-            );
-        }
+        self.verbose.log_with_fields(
+            EVENT_UPD_POS,
+            "Update positions",
+            &[
+                ("step", &self.steps),
+                ("vehicles_num", &self.vehicles.len()),
+                ("trips_num", &self.trips_data.len()),
+            ]
+        );
         self.current_position.clear();
         for vehicle_ref in self.vehicles.values() {
             let vehicle = vehicle_ref.borrow();
-            if self.verbose {
-                println!(
-                    "Vehicle position: vehicle_id={}, cell_id={}",
-                    vehicle.id, vehicle.cell_id
+            if self.verbose.is_at_least(VerboseLevel::Detailed) {
+                self.verbose.log_with_fields(
+                    EVENT_UPD_POS,
+                    "Vehicle position",
+                    &[
+                        ("vehicle_id", &vehicle.id),
+                        ("cell_id", &vehicle.cell_id),
+                    ]
                 );
                 for (id, &tail_cell) in vehicle.tail_cells.iter().enumerate() {
-                    println!(
-                        "Vehicle position: vehicle_id={}, tail_idx={}, tail_cell_id={}",
-                        vehicle.id, id, tail_cell
-                    );
+                    if self.verbose.is_at_least(VerboseLevel::All) {
+                        self.verbose.log_with_fields(
+                            EVENT_UPD_POS,
+                            "Vehicle tail position",
+                            &[
+                                ("vehicle_id", &vehicle.id),
+                                ("tail_idx", &id),
+                                ("tail_cell_id", &tail_cell),
+                            ]
+                        );
+                    }
                 }
             }
             self.current_position.insert(vehicle.cell_id, vehicle.id);
@@ -448,15 +470,16 @@ impl Session {
     }
 
     pub fn step(&mut self) -> Result<AutomataState, SessionError> {
-        if self.verbose {
-            println!(
-                "Run Step: step={}, vehicles_num={}, trips_num={}, tls_num={}",
-                self.steps,
-                self.vehicles.len(),
-                self.trips_data.len(),
-                self.grids_storage.tls_num()
-            );
-        }
+        self.verbose.log_with_fields(
+            EVENT_STEP,
+            "Run Step",
+            &[
+                ("step", &self.steps),
+                ("vehicles_num", &self.vehicles.len()),
+                ("trips_num", &self.trips_data.len()),
+                ("tls_num", &self.grids_storage.tls_num()),
+            ]
+        );
         
         // 1. Generate vehicles for given trips
         self.generate_vehicles();
