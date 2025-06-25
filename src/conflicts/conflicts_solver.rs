@@ -2,6 +2,7 @@ use crate::conflicts::conflicts::*;
 use crate::agents::{Vehicle, VehicleID};
 use crate::grid::lane_change_type::LaneChangeType;
 use crate::grid::cell::CellID;
+use crate::verbose::*;
 
 use std::fmt;
 
@@ -42,6 +43,7 @@ impl fmt::Display for ConflictSolverError {
 /// use micro_traffic_sim_core::agents::Vehicle;
 /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
 /// use micro_traffic_sim_core::grid::cell::CellID;
+/// use micro_traffic_sim_core::verbose::VerboseLevel;
 /// let mut vehicle1 = Vehicle::new(1).with_speed(2).build();
 /// let mut vehicle2 = Vehicle::new(2).with_speed(3).build();
 /// let conflicts = vec![CellConflict {
@@ -50,12 +52,19 @@ impl fmt::Display for ConflictSolverError {
 ///    priority_participant_index: 0,
 ///   conflict_type: ConflictType::ForwardLaneChange,
 /// }];
-/// let result = solve_conflicts(conflicts, true);
+/// let result = solve_conflicts(conflicts, VerboseLevel::None);
 /// assert!(result.is_ok(), "Conflict resolution failed");
 pub fn solve_conflicts<'b>(
     conflicts_data: Vec<CellConflict>,
-    verbose: bool,
+    verbose: VerboseLevel,
 ) -> Result<(), ConflictSolverError> {
+    if verbose.is_at_least(VerboseLevel::Main) {
+        verbose.log_with_fields(
+            EVENT_CONFLICTS_SOLVE,
+            "Solve conflicts",
+            &[("conflicts_num", &conflicts_data.len())]
+        );
+    }
     let mut trajectories_conflicts: Vec<CellConflict> = Vec::new();
     let mut conflict_zones_conflicts: Vec<CellConflict> = Vec::new();
     for mut conflict in conflicts_data {
@@ -77,8 +86,16 @@ pub fn solve_conflicts<'b>(
 
         match conflict.conflict_type {
             ConflictType::SelfTail => {
-                if verbose {
-                    println!("Conflict - self tail: cell {}, type: {:?}", conflict.cell_id, conflict.conflict_type);
+                if verbose.is_at_least(VerboseLevel::Additional) {
+                    verbose.log_with_fields(
+                        EVENT_CONFLICT_SOLVE,
+                        "Conflict - self tail",
+                        &[
+                            ("cell", &conflict.cell_id),
+                            ("conflict_type", &format!("{:?}", conflict.conflict_type)),
+                            ("participants", &format!("{:?}", conflict.participants.iter().map(|p| p.borrow().id).collect::<Vec<_>>())),
+                        ]
+                    );
                 }
                 continue;
             }
@@ -88,9 +105,17 @@ pub fn solve_conflicts<'b>(
                     let mut priority_participant = priority_participant_ref.borrow_mut();
                     priority_participant.is_conflict_participant = false;
                 }
-                if verbose {
-                    println!("Found trajectory conflict: cell {}, type: {:?}, participants: {:?}, priority participant index: {:?}", 
-                        conflict.cell_id, conflict.conflict_type, conflict.participants, conflict.priority_participant_index);
+                if verbose.is_at_least(VerboseLevel::Additional) {
+                    verbose.log_with_fields(
+                        EVENT_CONFLICT_SOLVE,
+                        "Found trajectories cross conflict",
+                        &[
+                            ("cell", &conflict.cell_id),
+                            ("conflict_type", &format!("{:?}", conflict.conflict_type)),
+                            ("participants", &format!("{:?}", conflict.participants.iter().map(|p| p.borrow().id).collect::<Vec<_>>())),
+                            ("priority_participant_index", &conflict.priority_participant_index),
+                        ]
+                    );
                 }
                 trajectories_conflicts.push(conflict);
                 continue;
@@ -100,14 +125,36 @@ pub fn solve_conflicts<'b>(
                     let mut priority_participant = priority_participant_ref.borrow_mut();
                     priority_participant.is_conflict_participant = false;
                 }
-                if verbose {
-                    println!("Found trajectory in zone conflict: cell {}, type: {:?}, participants: {:?}, priority participant index: {:?}", 
-                        conflict.cell_id, conflict.conflict_type, conflict.participants, conflict.priority_participant_index);
+                if verbose.is_at_least(VerboseLevel::Additional) {
+                    verbose.log_with_fields(
+                        EVENT_CONFLICT_SOLVE,
+                        "Found trajectories cross conflict in zone",
+                        &[
+                            ("cell", &conflict.cell_id),
+                            ("conflict_type", &format!("{:?}", conflict.conflict_type)),
+                            ("participants", &format!("{:?}", conflict.participants.iter().map(|p| p.borrow().id).collect::<Vec<_>>())),
+                            ("priority_participant_index", &conflict.priority_participant_index),
+                        ]
+                    );
                 }
                 conflict_zones_conflicts.push(conflict);
                 continue;
             }
             _ => {}           
+        }
+
+
+        if verbose.is_at_least(VerboseLevel::Additional) {
+            verbose.log_with_fields(
+                EVENT_CONFLICT_SOLVE,
+                "Solving common conflicts",
+                &[
+                    ("cell", &conflict.cell_id),
+                    ("conflict_type", &format!("{:?}", conflict.conflict_type)),
+                    ("participants", &format!("{:?}", conflict.participants.iter().map(|p| p.borrow().id).collect::<Vec<_>>())),
+                    ("priority_index", &conflict.priority_participant_index),
+                ]
+            );
         }
 
         let priority_index = conflict.priority_participant_index;
@@ -130,10 +177,17 @@ pub fn solve_conflicts<'b>(
     
     // Postprocessing remaining possible trajectories conflicts
     for mut conflict in trajectories_conflicts {
-        if verbose {
+        if verbose.is_at_least(VerboseLevel::Additional) {
             let vehicles: Vec<_> = conflict.participants.iter().map(|p| p.borrow().id).collect();
-            println!("Solve trajectory conflict: cell {}, participants_ids: {:?}, type: {:?}", 
-                conflict.cell_id, vehicles, conflict.conflict_type);
+            verbose.log_with_fields(
+                EVENT_CONFLICT_SOLVE,
+                "Solve trajectories cross conflict",
+                &[
+                    ("cell", &conflict.cell_id),
+                    ("participants_ids", &format!("{:?}", vehicles)),
+                    ("conflict_type", &format!("{:?}", conflict.conflict_type)),
+                ]
+            );
         }
         match conflict.conflict_type {
             ConflictType::TailCrossLaneChange => {
@@ -177,10 +231,17 @@ pub fn solve_conflicts<'b>(
     }
 
     for mut conflict in conflict_zones_conflicts {
-        if verbose {
+        if verbose.is_at_least(VerboseLevel::Additional) {
             let vehicles: Vec<_> = conflict.participants.iter().map(|p| p.borrow().id).collect();
-            println!("Solve trajectory in zone conflict: cell {}, participants_ids: {:?}, type: {:?}", 
-                conflict.cell_id, vehicles, conflict.conflict_type);
+            verbose.log_with_fields(
+                EVENT_CONFLICT_SOLVE,
+                "Solve trajectories cross conflict in zone",
+                &[
+                    ("cell", &conflict.cell_id),
+                    ("participants_ids", &format!("{:?}", vehicles)),
+                    ("conflict_type", &format!("{:?}", conflict.conflict_type)),
+                ]
+            );
         }
         
         let priority_index = conflict.priority_participant_index;
@@ -246,7 +307,7 @@ mod tests {
     #[test]
     fn test_solve_conflicts_empty_conflicts_list() {
         let conflicts: Vec<CellConflict> = vec![];
-        let result = solve_conflicts(conflicts, false);
+        let result = solve_conflicts(conflicts, VerboseLevel::None);
         assert!(result.is_ok(), "solve_conflicts should handle empty conflicts list");
     }
 
@@ -261,7 +322,7 @@ mod tests {
             conflict_type: ConflictType::MergeForward,
         }];
 
-        let result = solve_conflicts(conflicts,false);
+        let result = solve_conflicts(conflicts,VerboseLevel::None);
         assert!(result.is_err(), "solve_conflicts should return error for conflicts with insufficient participants");
         
         match result {
@@ -284,7 +345,7 @@ mod tests {
             conflict_type: ConflictType::MergeForward,
         }];
 
-        let result = solve_conflicts(conflicts, false);
+        let result = solve_conflicts(conflicts, VerboseLevel::None);
         assert!(result.is_err(), "solve_conflicts should return error for invalid priority index");
         
         match result {
@@ -309,7 +370,7 @@ mod tests {
             conflict_type: ConflictType::ForwardLaneChange,
         }];
 
-        let result = solve_conflicts(conflicts, false);
+        let result = solve_conflicts(conflicts, VerboseLevel::None);
         assert!(result.is_ok(), "solve_conflicts should handle common conflicts");
         
         // After solving, we can check the vehicle states
@@ -330,7 +391,7 @@ mod tests {
             conflict_type: ConflictType::CrossLaneChange,
         }];
 
-        let result = solve_conflicts(conflicts, false);
+        let result = solve_conflicts(conflicts, VerboseLevel::None);
         assert!(result.is_ok(), "solve_conflicts should handle trajectories conflicts");
         
         // Check that right vehicle is blocked (right maneuver loses to left maneuver)
@@ -350,7 +411,7 @@ mod tests {
             conflict_type: ConflictType::CrossConflictZone,
         }];
 
-        let result = solve_conflicts(conflicts, false);
+        let result = solve_conflicts(conflicts, VerboseLevel::None);
         assert!(result.is_ok(), "solve_conflicts should handle conflict zone conflicts");
         
         // In conflict zones, blocked vehicles get speed 1 (not 0)
@@ -379,7 +440,7 @@ mod tests {
             },
         ];
 
-        let result = solve_conflicts(conflicts, false);
+        let result = solve_conflicts(conflicts, VerboseLevel::None);
         assert!(result.is_ok(), "solve_conflicts should handle multiple conflicts");
         
         // Check first conflict resolution

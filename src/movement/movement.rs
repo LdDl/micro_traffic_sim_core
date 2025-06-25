@@ -5,6 +5,7 @@ use crate::grid::cell::CellID;
 use crate::grid::zones::ZoneType;
 use crate::grid::lane_change_type::LaneChangeType;
 use crate::geom::get_bearing;
+use crate::verbose::*;
 use indexmap::IndexMap;
 use std::fmt;
 
@@ -29,12 +30,13 @@ impl std::error::Error for MovementError {}
 pub fn movement(
     net: &GridRoads,
     vehicles: &mut IndexMap<VehicleID, VehicleRef>,
-    verbose: bool,
+    verbose: VerboseLevel,
 ) -> Result<(), MovementError> {
-    if verbose {
-        println!(
-            "Start movement process: vehicles_num={}",
-            vehicles.len()
+    if verbose.is_at_least(VerboseLevel::Main) {
+        verbose.log_with_fields(
+            EVENT_MOVEMENT,
+            "Start movement process",
+            &[("vehicles_num", &vehicles.len())]
         );
     }
 
@@ -44,10 +46,16 @@ pub fn movement(
     for (vehicle_id, vehicle_ref) in vehicles.iter() {
         let mut vehicle = vehicle_ref.borrow_mut();
         
-        if verbose {
-            println!(
-                "Moving vehicle: vehicle_id={}, current_cell={}, next_cell={}, intermediate_cells={:?}",
-                vehicle.id, vehicle.cell_id, vehicle.intention.intention_cell_id, vehicle.intention.intermediate_cells
+        if verbose.is_at_least(VerboseLevel::Additional) {
+            verbose.log_with_fields(
+                EVENT_MOVEMENT_VEHICLE,
+                "Moving vehicle",
+                &[
+                    ("vehicle_id", &vehicle.id),
+                    ("current_cell", &vehicle.cell_id),
+                    ("next_cell", &vehicle.intention.intention_cell_id),
+                    ("intermediate_cells", &format!("{:?}", vehicle.intention.intermediate_cells)),
+                ]
             );
         }
 
@@ -118,10 +126,16 @@ pub fn movement(
                 cell_id: vehicle.cell_id, 
                 vehicle_id: vehicle.id 
             })?;
-        if verbose {
-            println!(
-                "Done movement for vehicle: vehicle_id={}, current_cell={}, next_cell={}, intermediate_cells={:?}",
-                vehicle.id, vehicle.cell_id, vehicle.intention.intention_cell_id, vehicle.intention.intermediate_cells
+        if verbose.is_at_least(VerboseLevel::Additional) {
+            verbose.log_with_fields(
+                EVENT_MOVEMENT_VEHICLE,
+                "Done movement for vehicle",
+                &[
+                    ("vehicle_id", &vehicle.id),
+                    ("current_cell", &vehicle.cell_id),
+                    ("next_cell", &vehicle.intention.intention_cell_id),
+                    ("intermediate_cells", &format!("{:?}", vehicle.intention.intermediate_cells)),
+                ]
             );
         }
 
@@ -142,20 +156,22 @@ pub fn movement(
         // Check for vehicle removal conditions
         if zone_type == ZoneType::Death && vehicle.cell_id != vehicle.destination {
             // Vehicle has reached the death zone
-            if verbose {
-                println!(
-                    "Vehicle done movement due going to dead-end: vehicle_id={}",
-                    vehicle.id
+            if verbose.is_at_least(VerboseLevel::Main) {
+                verbose.log_with_fields(
+                    EVENT_MOVEMENT_DEAD_END,
+                    "Vehicle done movement due going to dead-end",
+                    &[("vehicle_id", &vehicle.id)]
                 );
             }
             vehicles_to_remove.push(*vehicle_id);
         }
         if vehicle.cell_id == vehicle.destination {
             // Vehicle has reached the destination
-            if verbose {
-                println!(
-                    "Vehicle done movement due reaching destination: vehicle_id={}",
-                    vehicle.id
+            if verbose.is_at_least(VerboseLevel::Main) {
+                verbose.log_with_fields(
+                    EVENT_MOVEMENT_DESTINATION,
+                    "Vehicle done movement due reaching destination",
+                    &[("vehicle_id", &vehicle.id)]
                 );
             }
             vehicles_to_remove.push(*vehicle_id);
