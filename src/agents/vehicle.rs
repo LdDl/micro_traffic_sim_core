@@ -7,7 +7,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum VehicleError {
     TailCellNotFound {
         cell_id: CellID,
@@ -95,9 +95,9 @@ pub struct Vehicle {
     /// It could be used to prohibit to the vehicle to do sequential maneuvers during simulation.
     pub timer_non_slowdown: i64,
     /// Relaxation time (in time units) in the transit cells (in case when they are set)
-    pub relax_time: u64,
+    pub relax_time: i32,
     // Timer for `relax_time` field
-    relax_countdown: u64,
+    relax_countdown: i32,
 
     /// Travel time (in time units) which vehicle has been in movement state.
     pub travel_time: i64,
@@ -312,7 +312,7 @@ impl Vehicle {
     /// vehicle.relax_countdown_reset();
     /// println!("Remaining time units to be in transit cell: {:?}", vehicle.get_relax_countdown()); // Should output 9
     /// ```
-    pub fn get_relax_countdown(&self) -> u64 {
+    pub fn get_relax_countdown(&self) -> i32 {
         self.relax_countdown
     }
 
@@ -447,6 +447,46 @@ impl Vehicle {
             intention_maneuver: self.intention.intention_maneuver,
         })
     }
+
+    /// Applies vehicle's intention to the vehicle's current state 
+    /// 
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
+    /// 
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(10)
+    ///     .with_destination(100)
+    ///     .with_speed(1)
+    ///     .build();
+    /// 
+    /// // Set some intention
+    /// vehicle.intention.intention_speed = 3;
+    /// vehicle.intention.destination = Some(200);
+    /// vehicle.intention.confusion = Some(true);
+    /// 
+    /// // Apply the intention
+    /// vehicle.apply_intention();
+    /// 
+    /// // Now vehicle state is updated
+    /// assert_eq!(vehicle.speed, 3);
+    /// assert_eq!(vehicle.destination, 200);
+    /// assert_eq!(vehicle.confusion, true);
+    /// ```
+    pub fn apply_intention(&mut self) {
+        // No need to update cell_id. It is done in movement.rs
+        self.speed = self.intention.intention_speed;
+        // Apply destination if set in intention
+        if let Some(destination) = self.intention.destination {
+            self.destination = destination;
+        }
+        // Apply confusion state if set in intention
+        if let Some(confusion) = self.intention.confusion {
+            self.confusion = confusion;
+        }
+        // No need to update tails cells. It is done in movement.rs
+    } 
 }
 
 /// A builder pattern implementation for constructing `Vehicle` objects.
@@ -892,7 +932,7 @@ impl VehicleBuilder {
     ///     .build();
     /// println!("Vehicle: {:?}", vehicle);
     /// ```
-    pub fn with_relax_time(mut self, t: u64) -> Self {
+    pub fn with_relax_time(mut self, t: i32) -> Self {
         self.vehicle.relax_time = t;
         self.vehicle.relax_countdown = t;
         self

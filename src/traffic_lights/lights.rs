@@ -2,7 +2,7 @@ use crate::geom::{PointType, new_point};
 use crate::traffic_lights::groups::TrafficLightGroup;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TrafficLightID(pub i64);
 
 /// Error types for TrafficLight operations.
@@ -88,6 +88,16 @@ impl TrafficLight {
     /// Returns the current time of the traffic light's internal timer.
     pub fn get_current_time(&self) -> i32 {
         self.timer
+    }
+
+    /// Return number of signal groups
+    pub fn get_groups_num(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// Returns a reference to the traffic light's groups.
+    pub fn get_groups(&self) -> &Vec<TrafficLightGroup> {
+        &self.groups
     }
 }
 

@@ -79,4 +79,9 @@ impl GridRoads {
     pub fn get_cell(&self, id: &CellID) -> Option<&Cell> {
         self.cells.get(id)
     }
+
+    /// Retrieves a mutable reference to a `Cell` in the grid by its `CellID`.
+    pub fn get_cell_mut(&mut self, id: CellID) -> Option<&mut Cell> {
+        self.cells.get_mut(&id)
+    }
 }

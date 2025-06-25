@@ -56,7 +56,7 @@ pub struct Trip {
     // Size of tail of the vehicle. By default every vehicle in cellular automata has size 1 itself and tail 0. When it
     // is needed to make larger vehicles (e.g. limousine) it could be handy to know extra size for
     // modeling heterogeneous road traffic flow instead of homogeneous one.
-    pub vehicle_tail_size: i32,
+    pub vehicle_tail_size: usize,
 }
 
 /// A builder pattern implementation for constructing `Trip` objects.
@@ -295,7 +295,7 @@ impl TripBuilder {
     ///     .build();
     /// println!("{:?}", trip);
     /// ```
-    pub fn with_vehicle_tail_size(mut self, len: i32) -> Self {
+    pub fn with_vehicle_tail_size(mut self, len: usize) -> Self {
         self.trip.vehicle_tail_size = len;
         self
     }
