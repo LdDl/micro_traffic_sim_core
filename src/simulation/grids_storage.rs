@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use crate::grid::road_network::GridRoads;
-use crate::grid::cell::{CellState, CellID};
+use crate::grid::cell::{CellID};
 use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
 use crate::traffic_lights::signals::SignalType;
-use crate::simulation::step::{AutomataState, TrafficLightGroupState};
+use crate::simulation::states::{TrafficLightGroupState};
 use std::fmt;
 
 /// Custom error types for `Session`.
@@ -149,7 +149,7 @@ impl GridsStorage {
                 }
                 group_states.push(TrafficLightGroupState {
                     group_id: group.get_id(),
-                    last_signal: format!("{:?}", active_signal),
+                    last_signal: *active_signal,
                 });
             }
             tl_states.insert(*tl_id, group_states);

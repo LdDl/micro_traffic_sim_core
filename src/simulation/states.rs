@@ -1,7 +1,7 @@
-use crate::simulation::session::{Session, SessionError};
 use crate::grid::cell::CellID;
 use crate::traffic_lights::lights::{TrafficLightID};
 use crate::agents::{AgentType, VehicleID};
+use crate::traffic_lights::signals::SignalType;
 use std::collections::HashMap;
 
 /// Result of a single step execution
@@ -37,5 +37,5 @@ pub struct VehicleState {
 #[derive(Debug, Clone)]
 pub struct TrafficLightGroupState {
     pub group_id: i64,
-    pub last_signal: String, // Could be enum later
+    pub last_signal: SignalType
 }

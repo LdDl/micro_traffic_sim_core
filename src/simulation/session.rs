@@ -1,14 +1,13 @@
-use crate::agents::{VehicleID, VehicleRef, Vehicle, BehaviourType};
+use crate::agents::{VehicleID, VehicleRef, Vehicle};
 use crate::conflict_zones::{ConflictZone, ConflictZoneID};
 use crate::grid::cell::{CellID};
-use crate::traffic_lights::lights::{TrafficLightID};
 use crate::trips::trip::{Trip, TripID, TripType};
 use crate::simulation::grids_storage::{GridsStorage, GridsStorageError};
 use crate::geom::{Point, SRID};
 use crate::intentions::{IntentionError, prepare_intentions};
 use crate::conflicts::{ConflictError, ConflictSolverError, collect_conflicts, solve_conflicts};
 use crate::movement::{MovementError, movement};
-use crate::simulation::step::{AutomataState, VehicleState, TrafficLightGroupState};
+use crate::simulation::states::{AutomataState, VehicleState};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use uuid::Uuid;
