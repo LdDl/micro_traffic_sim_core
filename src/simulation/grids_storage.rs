@@ -5,6 +5,7 @@ use crate::grid::cell::{CellID};
 use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
 use crate::traffic_lights::signals::SignalType;
 use crate::simulation::states::{TrafficLightGroupState};
+use crate::verbose::*;
 use std::fmt;
 
 /// Custom error types for `Session`.
@@ -110,16 +111,25 @@ impl GridsStorage {
         &mut self.tls
     }
 
-    pub fn tick_traffic_lights(&mut self, verbose: bool) -> Result<HashMap<TrafficLightID, Vec<TrafficLightGroupState>>, GridsStorageError> {
-        if verbose {
-            println!("Tick on traffic lights: tl_num={}", self.tls.len());
+    pub fn tick_traffic_lights(&mut self, verbose: VerboseLevel) -> Result<HashMap<TrafficLightID, Vec<TrafficLightGroupState>>, GridsStorageError> {
+        if verbose.is_at_least(VerboseLevel::Main) {
+            verbose.log_with_fields(
+                EVENT_TL_TICK,
+                "Tick on traffic lights",
+                &[("tl_num", &self.tls.len())]
+            );
         }
         let mut tl_states = HashMap::new();
         for (tl_id, tl) in self.tls.iter_mut() {
-            if verbose {
-                println!(
-                    "Tick on traffic light: tl_id={:?}, active_phase={}, tl_timer={}",
-                    tl_id, tl.get_active_phase(), tl.get_current_time()
+            if verbose.is_at_least(VerboseLevel::Additional) {
+                verbose.log_with_fields(
+                    EVENT_TL_TICK,
+                    "Tick on previous step on traffic light",
+                    &[
+                        ("tl_id", &format!("{:?}", tl_id)),
+                        ("active_phase", &tl.get_active_phase()),
+                        ("tl_timer", &tl.get_current_time()),
+                    ]
                 );
             }
             tl.step();
