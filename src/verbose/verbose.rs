@@ -57,7 +57,7 @@ impl From<VerboseLevel> for String {
     }
 }
 
-// Event type constants (matching Go implementation exactly)
+// Event type constants
 pub const EVENT_SIMULATION_RESET: &str = "simulation_reset";
 pub const EVENT_STEP: &str = "step";
 pub const EVENT_GEN_VEHICLES: &str = "generate_vehicles";
@@ -83,10 +83,9 @@ pub const EVENT_SESSION_EXTRACT_STATES: &str = "session_extract";
 static VERBOSE_LEVEL: OnceLock<VerboseLevel> = OnceLock::new();
 static LOGGER_INITIALIZED: OnceLock<bool> = OnceLock::new();
 
-/// Initialize the tracing logger (equivalent to Go's init function)
+/// Initialize the tracing logger once
 pub fn init_logger() {
     if LOGGER_INITIALIZED.set(true).is_ok() {
-        // JSON output like Go's slog.NewJSONHandler
         tracing_subscriber::registry()
             .with(
                 tracing_fmt::layer()
@@ -102,39 +101,32 @@ pub fn init_logger() {
     }
 }
 
+// ===== GLOBAL VERBOSE FUNCTIONS =====
+
 /// Sets the global verbose level and updates tracing filter
 pub fn set_verbose_level(level: VerboseLevel) {
     let _ = VERBOSE_LEVEL.set(level);
-    
-    // Ensure logger is initialized
     init_logger();
-    
-    // Update the tracing level
-    let tracing_level: String = level.into();
-    if let Ok(filter) = EnvFilter::try_new(&tracing_level) {
-        // Note: tracing doesn't support dynamic filter updates easily
-        // For production use, consider using tracing-subscriber's reload layer
-    }
 }
 
-/// Gets the current verbose level
+/// Gets the current global verbose level
 pub fn get_verbose_level() -> VerboseLevel {
     *VERBOSE_LEVEL.get().unwrap_or(&VerboseLevel::None)
 }
 
-/// Checks if current verbose level is at least the specified level
+/// Checks if current global verbose level is at least the specified level
 pub fn is_verbose_level(level: VerboseLevel) -> bool {
     get_verbose_level() >= level
 }
 
-/// Logs a message if the current verbose level allows it (using tracing)
+/// Logs a message if the global verbose level allows it
 pub fn verbose_log(level: VerboseLevel, event: &str, message: &str) {
     if !is_verbose_level(level) {
         return;
     }
 
     match level {
-        VerboseLevel::None => {} // No logging
+        VerboseLevel::None => {}
         VerboseLevel::Main => {
             info!(event = event, message);
         }
@@ -150,7 +142,7 @@ pub fn verbose_log(level: VerboseLevel, event: &str, message: &str) {
     }
 }
 
-/// Logs a message with additional fields using tracing
+/// Logs a message with additional fields using global verbose level
 pub fn verbose_log_with_fields(
     level: VerboseLevel, 
     event: &str, 
@@ -161,14 +153,13 @@ pub fn verbose_log_with_fields(
         return;
     }
 
-    // Convert fields to key-value pairs for tracing
     let mut field_map = std::collections::HashMap::new();
     for (key, value) in fields {
         field_map.insert(*key, format!("{}", value));
     }
 
     match level {
-        VerboseLevel::None => {} // No logging
+        VerboseLevel::None => {}
         VerboseLevel::Main => {
             info!(
                 event = event,
@@ -200,7 +191,86 @@ pub fn verbose_log_with_fields(
     }
 }
 
-/// Convenience macro for verbose logging (updated for tracing)
+// ===== PER-SESSION VERBOSE METHODS =====
+
+/// Session-specific logging functions
+impl VerboseLevel {
+    /// Logs a message if the session verbose level allows it
+    pub fn log(self, event: &str, message: &str) {
+        if self == VerboseLevel::None {
+            return;
+        }
+
+        match self {
+            VerboseLevel::None => {}
+            VerboseLevel::Main => {
+                info!(event = event, message);
+            }
+            VerboseLevel::Additional => {
+                debug!(event = event, message);
+            }
+            VerboseLevel::Detailed => {
+                debug!(event = event, message);
+            }
+            VerboseLevel::All => {
+                trace!(event = event, message);
+            }
+        }
+    }
+
+    /// Logs a message with fields if the session verbose level allows it
+    pub fn log_with_fields(self, event: &str, message: &str, fields: &[(&str, &dyn fmt::Display)]) {
+        if self == VerboseLevel::None {
+            return;
+        }
+
+        let mut field_map = std::collections::HashMap::new();
+        for (key, value) in fields {
+            field_map.insert(*key, format!("{}", value));
+        }
+
+        match self {
+            VerboseLevel::None => {}
+            VerboseLevel::Main => {
+                info!(
+                    event = event,
+                    ?field_map,
+                    message
+                );
+            }
+            VerboseLevel::Additional => {
+                debug!(
+                    event = event,
+                    ?field_map,
+                    message
+                );
+            }
+            VerboseLevel::Detailed => {
+                debug!(
+                    event = event,
+                    ?field_map,
+                    message
+                );
+            }
+            VerboseLevel::All => {
+                trace!(
+                    event = event,
+                    ?field_map,
+                    message
+                );
+            }
+        }
+    }
+
+    /// Checks if this level is at least the minimum level
+    pub fn is_at_least(self, min_level: VerboseLevel) -> bool {
+        self >= min_level
+    }
+}
+
+// ===== CONVENIENCE MACROS =====
+
+/// Convenience macro for global verbose logging
 #[macro_export]
 macro_rules! verbose_log {
     ($level:expr, $event:expr, $msg:literal) => {
@@ -216,7 +286,7 @@ macro_rules! verbose_log {
     };
 }
 
-/// Tracing-native macros for more idiomatic usage
+/// Global tracing-native macros for more idiomatic usage
 #[macro_export]
 macro_rules! log_main {
     ($event:expr, $msg:literal, $($key:ident = $value:expr),*) => {
