@@ -11,3 +11,4 @@ pub mod simulation;
 pub mod traffic_lights;
 pub mod trips;
 pub mod utils;
+pub mod verbose;
