@@ -6,6 +6,7 @@ use crate::grid::road_network::GridRoads;
 use crate::grid::lane_change_type::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::utils::rand::thread_rng;
+use crate::verbose::VerboseLevel;
 use rand::Rng;
 
 use std::collections::{HashMap, HashSet};
@@ -640,11 +641,18 @@ pub fn collect_conflicts(
     net: &GridRoads,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
     cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
-    verbose: bool,
+    verbose: VerboseLevel,
 ) -> Result<Vec<CellConflict>, ConflictError> {
-    if verbose {
-        println!("Collect conflicts: intentions_num: {}, conflict_zones_num: {}, matched_cells_zones_num: {}", 
-            collected_intentions.len(), conflict_zones.len(), cells_conflicts_zones.len());
+    if verbose.is_at_least(crate::verbose::VerboseLevel::Main) {
+        verbose.log_with_fields(
+            crate::verbose::EVENT_CONFLICTS_COLLECT,
+            "Collect conflicts",
+            &[
+                ("intentions_num", &collected_intentions.len()),
+                ("conflict_zones_num", &conflict_zones.len()),
+                ("matched_cells_zones_num", &cells_conflicts_zones.len()),
+            ]
+        );
     }
 
     let mut conflicts_data = Vec::with_capacity(collected_intentions.len() / 2); // Just allocate some memory
@@ -663,9 +671,15 @@ pub fn collect_conflicts(
         let vehicles_num = cell_intentions.len();
 
         if vehicles_num == 1 {
-            if verbose {
-                println!("Inspect single-vehicle intention: cell_intention: {:?}, intention_cell: {}", 
-                    cell_intentions[0], intention_cell.get_id());
+            if verbose.is_at_least(crate::verbose::VerboseLevel::Additional) {
+                verbose.log_with_fields(
+                    crate::verbose::EVENT_CONFLICTS_COLLECT,
+                    "Inspect single-vehicle intention",
+                    &[
+                        ("cell_intention", &format!("{:?}", cell_intentions[0])),
+                        ("intention_cell", &intention_cell.get_id()),
+                    ]
+                );
             }
 
             // Skip blocks / already processing
@@ -677,19 +691,33 @@ pub fn collect_conflicts(
             };
 
             if should_skip {
-                if verbose {
+                if verbose.is_at_least(VerboseLevel::Additional) {
                     let vehicle = cell_intention.vehicle.borrow();
-                    println!("Vehicle is blocked or is in conflict already: vehicle_id: {}, maneuver: {:?}, is_conflict_participant: {}", 
-                        vehicle.id, vehicle.intention.intention_maneuver, vehicle.is_conflict_participant);
+                    verbose.log_with_fields(
+                        crate::verbose::EVENT_CONFLICTS_COLLECT,
+                        "Vehicle is blocked or is in conflict already",
+                        &[
+                            ("vehicle_id", &vehicle.id),
+                            ("maneuver", &format!("{:?}", vehicle.intention.intention_maneuver)),
+                            ("is_conflict_participant", &vehicle.is_conflict_participant),
+                            ("intention_cell", &intention_cell.get_id()),
+                        ]
+                    );
                 }
                 continue;
             }
 
             let mut possible_cross_conflict: Option<CellConflict> = None;
 
-            if verbose {
-                println!("Try to find simple trajectories conflict: cell_intention: {:?}, intention_cell: {}", 
-                    cell_intention, intention_cell.get_id());
+            if verbose.is_at_least(VerboseLevel::Additional) {
+                verbose.log_with_fields(
+                    crate::verbose::EVENT_CONFLICTS_COLLECT,
+                    "Try to find simple trajectories conflict",
+                    &[
+                        ("cell_intention", &format!("{:?}", cell_intention)),
+                        ("intention_cell", &intention_cell.get_id()),
+                    ]
+                );
             }
 
             // Check for crossing trajectories
@@ -697,9 +725,16 @@ pub fn collect_conflicts(
                 cell_intention, intention_cell, collected_intentions, net
             )?;
 
-            if verbose {
-                println!("After simple trajectories scan: cell_intention: {:?}, intention_cell: {}, is_trajectory_conflict: {}", 
-                    cell_intention, intention_cell.get_id(), cross_conflict_info.is_some());
+            if verbose.is_at_least(VerboseLevel::Additional) {
+                verbose.log_with_fields(
+                    crate::verbose::EVENT_CONFLICTS_COLLECT,
+                    "After simple trajectories scan",
+                    &[
+                        ("cell_intention", &format!("{:?}", cell_intention)),
+                        ("intention_cell", &intention_cell.get_id()),
+                        ("is_trajectory_conflict", &cross_conflict_info.is_some()),
+                    ]
+                );
             }
 
             if let Some(conflict_info) = cross_conflict_info {
@@ -727,9 +762,15 @@ pub fn collect_conflicts(
             }
 
             if possible_cross_conflict.is_none() {
-                if verbose {
-                    println!("Try to find conflict zones trajectories conflict: cell_intention: {:?}, intention_cell: {}", 
-                        cell_intention, intention_cell.get_id());
+                if verbose.is_at_least(VerboseLevel::Additional) {
+                    verbose.log_with_fields(
+                        crate::verbose::EVENT_CONFLICTS_COLLECT,
+                        "Try to find conflict zones trajectories conflict",
+                        &[
+                            ("cell_intention", &format!("{:?}", cell_intention)),
+                            ("intention_cell", &intention_cell.get_id()),
+                        ]
+                    );
                 }
 
                 // Check for conflict zones
@@ -742,9 +783,16 @@ pub fn collect_conflicts(
                     &mut explored_conflict_zones,
                 )?;
 
-                if verbose {
-                    println!("After conflict zones trajectories scan: cell_intention: {:?}, intention_cell: {}, is_trajectory_conflict: {}", 
-                        cell_intention, intention_cell.get_id(), zone_conflict_result.is_some());
+                if verbose.is_at_least(VerboseLevel::Additional) {
+                    verbose.log_with_fields(
+                        crate::verbose::EVENT_CONFLICTS_COLLECT,
+                        "After conflict zones trajectories scan",
+                        &[
+                            ("cell_intention", &format!("{:?}", cell_intention)),
+                            ("intention_cell", &intention_cell.get_id()),
+                            ("is_trajectory_conflict", &zone_conflict_result.is_some()),
+                        ]
+                    );
                 }
 
                 if let Some((conflict, conflict_zone_id)) = zone_conflict_result {
@@ -759,9 +807,15 @@ pub fn collect_conflicts(
                 conflicts_data.push(conflict);
             }
         } else {
-            if verbose {
-                println!("Inspect multi-vehicle intention: cell_intentions_num: {}, intention_cell: {}", 
-                    cell_intentions.len(), intention_cell.get_id());
+            if verbose.is_at_least(crate::verbose::VerboseLevel::Additional) {
+                verbose.log_with_fields(
+                    crate::verbose::EVENT_CONFLICTS_COLLECT,
+                    "Inspect multi-vehicle intention",
+                    &[
+                        ("cell_intentions_num", &cell_intentions.len()),
+                        ("intention_cell", &intention_cell.get_id()),
+                    ]
+                );
             }
 
             // Check if there is a conflict between more than two vehicles
