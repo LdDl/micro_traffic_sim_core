@@ -109,6 +109,11 @@ pub fn process_path<'a>(
 
         // Check speed limit
         if speed_possible > cell.get_speed_limit() {
+            if success_forward_movement == 0 {
+                // Ensure at least one cell is moved into if speed limit is lower than possible speed
+                // Happens when very first cell has lower speed limit than vehicle's speed
+                success_forward_movement = 1;
+            }
             break;
         }
 
