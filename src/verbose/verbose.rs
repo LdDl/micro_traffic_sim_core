@@ -96,7 +96,7 @@ pub fn init_logger() {
                     .with_file(false)
                     .with_line_number(false)
             )
-            .with(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
+            .with(EnvFilter::from_default_env())
             .init();
     }
 }

@@ -26,6 +26,7 @@ pub enum IntentionError {
     VehicleError(VehicleError),
     NoPathFound(AStarError),
     NoPathForNoRoute(NoRouteError),
+    BadSpeedLimit(i64, i32),
 }
 
 impl fmt::Display for IntentionError {
@@ -44,6 +45,11 @@ impl fmt::Display for IntentionError {
             Self::VehicleError(e) => write!(f, "Vehicle error: {}", e),
             Self::NoPathFound(e) => write!(f, "No path found: {}", e),
             Self::NoPathForNoRoute(e) => write!(f, "No path found for no route case: {}", e),
+            Self::BadSpeedLimit(cell_id, speed_limit) => write!(
+                f,
+                "Cell {} has bad (negative) speed limit: {}",
+                cell_id, speed_limit
+            ),
         }
     }
 }
@@ -103,7 +109,13 @@ pub fn find_intention<'a>(
 
     let speed_limit = source_cell.get_speed_limit().min(vehicle.speed_limit);
 
-    if speed_limit <= 0 {
+    if speed_limit < 0 {
+        return Err(IntentionError::BadSpeedLimit(
+            source_cell.get_id(),
+            speed_limit,
+        ));
+    }
+    if speed_limit == 0 {
         let result = VehicleIntention {
             intention_maneuver: LaneChangeType::Block,
             intention_speed: 0,

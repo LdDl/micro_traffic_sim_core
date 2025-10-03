@@ -73,8 +73,9 @@ pub fn process_path<'a>(
     if shortest_path.vertices().len() > 1
         && shortest_path.vertices()[speed_limit].get_id() != destination
     {
-        shortest_path.vertices_mut().pop();
-        shortest_path.maneuvers_mut().pop();
+        // @todo: is this neccessary?
+        // shortest_path.vertices_mut().pop();
+        // shortest_path.maneuvers_mut().pop();
     }
 
     let maneuvers = shortest_path.maneuvers();

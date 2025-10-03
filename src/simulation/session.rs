@@ -244,7 +244,7 @@ impl Session {
     }
 
     /// Adds given vehicles to the session vehicles storage
-    fn add_vehicles(&mut self, vehicles: Vec<VehicleRef>) {
+    pub fn add_vehicles(&mut self, vehicles: Vec<VehicleRef>) {
         for vehicle in vehicles {
             let vehicle_id = vehicle.borrow().id;
             self.vehicles.insert(vehicle_id, vehicle);
@@ -492,7 +492,8 @@ impl Session {
 
         // 4. Create intentions for all vehicles
         let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles)?;
-        // // 5. Collect conflicts
+
+        // 5. Collect conflicts
         let conflicts_data = collect_conflicts(
             &collected_intentions,
             self.grids_storage.get_vehicles_net_ref(),
