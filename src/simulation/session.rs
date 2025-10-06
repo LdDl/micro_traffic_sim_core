@@ -1,6 +1,6 @@
 use crate::agents::{VehicleID, VehicleRef, Vehicle};
 use crate::conflict_zones::{ConflictZone, ConflictZoneID};
-use crate::grid::cell::{CellID};
+use crate::grid::cell::{CellID, Cell};
 use crate::trips::trip::{Trip, TripID, TripType};
 use crate::simulation::grids_storage::{GridsStorage, GridsStorageError};
 use crate::geom::{Point, SRID};
@@ -220,6 +220,11 @@ impl Session {
         self.verbose = verbose;
     }
 
+    /// Returns a reference to the cell with the given ID if it exists in the vehicles grid.
+    pub fn get_cell(&self, cell_id: &CellID) -> Option<&Cell> {
+        self.grids_storage.get_cell(cell_id)
+    }
+
     /// Adds given trip to the session. It also checks if trip's end time is valid and returns '0' if it is not.
     pub fn add_trip(&mut self, trip: Trip) -> TripID {
         let mut trip = trip;
@@ -250,6 +255,11 @@ impl Session {
             self.vehicles.insert(vehicle_id, vehicle);
             self.last_vehicle_id = vehicle_id;
         }
+    }
+
+    /// Returns a reference to the vehicles storage
+    pub fn get_vehicles(&self) -> &IndexMap<VehicleID, VehicleRef> {
+        &self.vehicles
     }
 
     /// Adds cells to the grids. It is shortcut to GridsStorage's add_cells method

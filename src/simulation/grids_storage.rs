@@ -86,6 +86,11 @@ impl GridsStorage {
         }
     }
 
+    /// Returns a reference to the cell with the given ID if it exists in the vehicles grid.
+    pub fn get_cell(&self, cell_id: &CellID) -> Option<&crate::grid::cell::Cell> {
+        self.vehicles_net.get_cell(cell_id)
+    }
+
     /// Add single traffic light to the storage.
     pub fn add_traffic_light(&mut self, traffic_light: TrafficLight) {
         self.tls.insert(traffic_light.get_id(), traffic_light);

@@ -21,3 +21,9 @@
     # time:
     ./target/release/examples/nasch-one-lane  1.85s user 0.02s system 99% cpu 1.881 total
     ```
+
+* Plot (using [gnuplot](http://www.gnuplot.info/))
+    ```bash
+    cargo run --example nasch-one-lane > examples/nasch-one-lane/output.txt
+    gnuplot examples/nasch-one-lane/plot_anim.gnuplot
+    ```
