@@ -220,14 +220,14 @@ pub fn find_intention<'a>(
         current_state,
     );
     // println!(
-    //     "  -> Observable path with wanted maneuver {:?}, last cell state {:?}, and trimmed vertices: {:?}",
+    //     "  -> Observable path: wanted_maneuver={:?}, last_cell_state={:?}, trimmed_path={:?}, has_vehicle_on_path={}, speed_limit_reached={}, stopped_on_maneuver={}, stopped_speed_possible={}",
     //     observable_path.wanted_maneuver,
     //     observable_path.last_cell_state,
-    //     observable_path
-    //         .trimmed_path
-    //         .iter()
-    //         .map(|cell| cell.get_id())
-    //         .collect::<Vec<CellID>>()
+    //     observable_path.trimmed_path.iter().map(|cell| cell.get_id()).collect::<Vec<CellID>>(),
+    //     observable_path.has_vehicle_on_path,
+    //     observable_path.speed_limit_reached,
+    //     observable_path.stopped_on_maneuver,
+    //     observable_path.stopped_speed_possible,
     // );
     let wanted_maneuver = observable_path.wanted_maneuver;
     let last_cell_state = observable_path.last_cell_state;

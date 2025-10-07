@@ -17,6 +17,10 @@ pub struct ObservablePath<'a> {
     pub last_cell_state: CellState,
     /// Path vertices (cells) after trimming
     pub trimmed_path: Vec<&'a Cell>,
+    pub has_vehicle_on_path: bool,
+    pub speed_limit_reached: bool,
+    pub stopped_on_maneuver: bool,
+    pub stopped_speed_possible: bool,
 }
 
 /// Process path by trimming and analyzing possible movement
@@ -86,20 +90,25 @@ pub fn process_path<'a>(
     // Find max number of cells vehicle can move forward
     let mut success_forward_movement = 0;
 
+    let mut has_vehicle_on_path = false;
+    let mut speed_limit_reached = false;
+    let mut stopped_on_maneuver = false;
+    let mut stopped_speed_possible = false;
+
     for (i, cell) in vertices.iter().enumerate() {
         let maneuver = maneuvers[i];
         if maneuver != LaneChangeType::NoChange {
             if success_forward_movement == 0 {
                 wanted_maneuver = maneuver;
             }
+            stopped_on_maneuver = true;
             break;
         }
 
         // Check if cell is occupied by another vehicle
         if let Some(&vehicle_id) = current_state.get(&cell.get_id()) {
-            if vehicle_id > 0 {
-                break;
-            }
+            has_vehicle_on_path = true;
+            break;
         }
 
         // Check traffic light state
@@ -115,6 +124,7 @@ pub fn process_path<'a>(
                 // Happens when very first cell has lower speed limit than vehicle's speed
                 success_forward_movement = 1;
             }
+            speed_limit_reached = true;
             break;
         }
 
@@ -127,6 +137,10 @@ pub fn process_path<'a>(
         wanted_maneuver,
         last_cell_state,
         trimmed_path: vertices[..success_forward_movement as usize].to_vec(),
+        has_vehicle_on_path,
+        speed_limit_reached,
+        stopped_on_maneuver,
+        stopped_speed_possible,
     }
 }
 
@@ -160,6 +174,10 @@ mod tests {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
             trimmed_path: vec![&cell2, &cell3, &cell4],
+            has_vehicle_on_path: false,
+            speed_limit_reached: false,
+            stopped_on_maneuver: false,
+            stopped_speed_possible: false,
         };
 
         assert_eq!(
@@ -206,6 +224,10 @@ mod tests {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
             trimmed_path: vec![&cell2, &cell3],
+            has_vehicle_on_path: false,
+            speed_limit_reached: false,
+            stopped_on_maneuver: false,
+            stopped_speed_possible: false,
         };
 
         assert_eq!(
@@ -252,6 +274,10 @@ mod tests {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
             trimmed_path: vec![&cell2],
+            has_vehicle_on_path: false,
+            speed_limit_reached: false,
+            stopped_on_maneuver: true,
+            stopped_speed_possible: false,
         };
 
         assert_eq!(
@@ -296,6 +322,10 @@ mod tests {
             wanted_maneuver: LaneChangeType::ChangeLeft,
             last_cell_state: CellState::Free,
             trimmed_path: vec![],
+            has_vehicle_on_path: false,
+            speed_limit_reached: false,
+            stopped_on_maneuver: true,
+            stopped_speed_possible: false,
         };
 
         assert_eq!(
@@ -342,6 +372,10 @@ mod tests {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Free,
             trimmed_path: vec![&cell2],
+            has_vehicle_on_path: false,
+            speed_limit_reached: true,
+            stopped_on_maneuver: false,
+            stopped_speed_possible: false,
         };
 
         assert_eq!(
@@ -387,6 +421,10 @@ mod tests {
             wanted_maneuver: LaneChangeType::NoChange,
             last_cell_state: CellState::Banned,
             trimmed_path: vec![&cell2],
+            has_vehicle_on_path: false,
+            speed_limit_reached: false,
+            stopped_on_maneuver: false,
+            stopped_speed_possible: false,
         };
 
         assert_eq!(
