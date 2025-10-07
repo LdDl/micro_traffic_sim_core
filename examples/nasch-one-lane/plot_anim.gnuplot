@@ -13,8 +13,10 @@ unset colorbox
 
 do for [i=-1:17] {
     plot \
-        'examples/nasch-one-lane/output.txt' every ::1::19 using 2:3 with points pt 6 ps 3 lc rgb "gray" notitle, \
-        'examples/nasch-one-lane/output.txt' every ::21 using ($1==i ? $8 : 1/0):($1==i ? $9 : 1/0):($2) with points pt 7 ps 1.5 lc palette notitle, \
-        'examples/nasch-one-lane/output.txt' every ::21 using ($1==i ? $8 : 1/0):($1==i ? $9 : 1/0):(sprintf("v=%s", stringcolumn(4))) with labels offset 0,1 notitle
+        'examples/nasch-one-lane/output.txt' every ::1::20 using 2:3 with points pt 6 ps 3 lc rgb "gray" notitle, \
+        'examples/nasch-one-lane/output.txt' every ::21 using ($1<=i && $2==0 ? $8 : 1/0):($1<=i && $2==0 ? $9 : 1/0):($2) with points pt 7 ps 2 lc palette notitle, \
+        'examples/nasch-one-lane/output.txt' every ::21 using ($1<i && $2==0 ? $8 : 1/0):($1<i && $2==0 ? $9 : 1/0):("p") with labels offset 0,1 font ",8" notitle, \
+        'examples/nasch-one-lane/output.txt' every ::21 using ($1==i ? $8 : 1/0):($1==i ? $9 : 1/0):($2) with points pt 7 ps 3 lc palette notitle, \
+        'examples/nasch-one-lane/output.txt' every ::21 using ($1==i ? $8 : 1/0):($1==i ? $9 : 1/0):(sprintf("v=%.0f", $4)) with labels offset 0,1 notitle
 }
 set output

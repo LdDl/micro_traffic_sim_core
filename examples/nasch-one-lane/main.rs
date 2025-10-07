@@ -20,11 +20,11 @@ fn main() {
     for i in 0..lane_length {
         let mut cell = Cell::new(i as i64);
         if i < lane_length - 1 {
-            cell = cell
-                .with_forward_node((i + 1) as i64)
-                .with_point(new_point(i as f64, 1.0, None))
-                .with_speed_limit(4);
+            cell = cell.with_forward_node((i + 1) as i64);
         }
+        cell = cell
+            .with_point(new_point(i as f64, 1.0, None))
+            .with_speed_limit(4);
         let c = cell.build();
         let pt = c.get_point();
         println!("{};{:.5};{:.5}", c.get_id(), pt.x(), pt.y());

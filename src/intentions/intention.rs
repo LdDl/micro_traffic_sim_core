@@ -144,7 +144,9 @@ pub fn find_intention<'a>(
     // Random slowdown
     let mut isSlowdown = false;
     let slowdown_allowed = vehicle.timer_non_slowdown <= 0;
-    if slowdown_allowed && intention_speed > 0 && random::<f64>() < vehicle.slow_down_factor {
+    // tmp code:
+    let slow_down_factor = vehicle.slow_down_factor;
+    if slowdown_allowed && intention_speed > 0 && random::<f64>() < slow_down_factor {
         // @todo: consider to switch two lines below.
         speed_possible = intention_speed;
         intention_speed = (intention_speed - 1).max(0);
@@ -162,6 +164,17 @@ pub fn find_intention<'a>(
     let mut destination: Option<CellID> = None;
     let mut confusion: Option<bool> = None;
 
+    // println!(
+    //     "Vehicle {} at cell {} with speed {} (possible {}) towards {} with observe distance {} and slow factor {}: {}",
+    //     vehicle.id,
+    //     source_cell.get_id(),
+    //     intention_speed,
+    //     speed_possible,
+    //     target_cell.get_id(),
+    //     observe_distance,
+    //     slow_down_factor,
+    //     if isSlowdown { " (slowdown)" } else { "" }
+    // );
     let mut path = match shortest_path(
         source_cell,
         target_cell,
@@ -191,13 +204,31 @@ pub fn find_intention<'a>(
         }
     };
 
+    // println!(
+    //     "  -> Found path with cost {} and vertices: {:?}",
+    //     path.cost(),
+    //     path.vertices()
+    //         .iter()
+    //         .map(|cell| cell.get_id())
+    //         .collect::<Vec<CellID>>()
+    // );
     // Process path to find wanted maneuver, success forward movement and to trim path
     let observable_path = process_path(
         &mut path,
-        speed_possible.min(vehicle.speed),
+        speed_possible,
         vehicle.destination,
         current_state,
     );
+    // println!(
+    //     "  -> Observable path with wanted maneuver {:?}, last cell state {:?}, and trimmed vertices: {:?}",
+    //     observable_path.wanted_maneuver,
+    //     observable_path.last_cell_state,
+    //     observable_path
+    //         .trimmed_path
+    //         .iter()
+    //         .map(|cell| cell.get_id())
+    //         .collect::<Vec<CellID>>()
+    // );
     let wanted_maneuver = observable_path.wanted_maneuver;
     let last_cell_state = observable_path.last_cell_state;
     let vertices = observable_path.trimmed_path;
