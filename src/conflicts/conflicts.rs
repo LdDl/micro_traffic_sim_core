@@ -64,6 +64,7 @@ impl fmt::Display for ConflictType {
 }
 
 /// Represents a conflict between vehicles
+#[derive(Debug)]
 pub struct CellConflict {
     /// Cell ID where the conflict occurs
     pub cell_id: CellID,
