@@ -1,4 +1,4 @@
-use crate::agents::{Vehicle, VehicleRef};
+use crate::agents::VehicleRef;
 
 use std::fmt;
 

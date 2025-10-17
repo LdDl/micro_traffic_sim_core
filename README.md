@@ -60,18 +60,32 @@ hyperfine -i --shell=none --output=pipe --runs 30 --warmup 2 -n "Rust NaSch vers
 ## Key modules / API pointers
 
 - Library entry: [`src/lib.rs`](src/lib.rs)
-- Simulation session and runtime:
-  - [`src/simulation/session.rs`](src/simulation/session.rs) — `simulation::session::Session`
-  - [`src/simulation/grids_storage.rs`](src/simulation/grids_storage.rs) — `simulation::grids_storage::GridsStorage`
-- Grid and geometry:
-  - [`src/grid/cell.rs`](src/grid/cell.rs) — `grid::cell::Cell`
-  - [`src/grid/road_network.rs`](src/grid/road_network.rs) — `grid::road_network::GridRoads`
-  - [`src/geom/point.rs`](src/geom/point.rs) — `geom::new_point`
-- Agents, intentions, behaviour:
-  - [`src/agents/vehicle.rs`](src/agents/vehicle.rs) — `agents::Vehicle`
-  - Intentions module: [`src/intentions/mod.rs`](src/intentions/mod.rs)
-- Conflicts & solver:
-  - [`src/conflicts/conflicts.rs`](src/conflicts/conflicts.rs)
-  - Conflict zones: [`src/conflict_zones/`](src/conflict_zones/)
+- Geometry and spatial utilities:
+  - Point - [`src/geom/point.rs`](src/geom/point.rs)
+  - Utilities - [`src/geom/spatial.rs`](src/geom/spatial.rs)
+- Grid (road network graph):
+  - Cell unit - [`src/grid/cell.rs`](src/grid/cell.rs)
+  - Road network - [`src/grid/road_network.rs`](src/grid/road_network.rs)
 - Pathfinding:
-  - [`src/shortest_path/router.rs`](src/shortest_path/router.rs) — `shortest_path::router::shortest_path`
+  - A* star for grid-based road network graph - [`src/shortest_path/router.rs`](src/shortest_path/router.rs)
+- Traffic lights and signals:
+  - Signals - [`src/traffic_lights/signals.rs`](src/traffic_lights/signals.rs)
+  - Signal groups (in context of single junction) - [`src/traffic_lights/groups.rs`](src/traffic_lights/groups.rs)
+  - Traffic light (as single junction) - [`src/traffic_lights/lights.rs`](src/traffic_lights/lights.rs)
+- Agents and related functionality:
+  - Agents' behaviour types - [`src/agents/behaviour.rs`](src/agents/behaviour.rs)
+  - Vehicle agents - [`src/agents/vehicle.rs`](src/agents/vehicle.rs)
+- Trips
+  - Trips generation - [`src/trips/trip.rs`](src/trips/trip.rs)
+- Intentions:
+    - Main utilities - [`src/intentions/intention.rs`](src/intentions/intention.rs)
+    - Intentions storage - [`src/intentions/intentions_datastorage.rs`](src/intentions/intentions_datastorage.rs)
+    - Intentions paths processing - [`src/intentions/intention_path.rs`](src/intentions/intention_path.rs)
+- Conflicts & solvers:
+  - Conflicts - [`src/conflicts`](src/conflicts)
+  - Conflict zones - [`src/conflict_zones/conflict_zones.rs`](src/conflict_zones/conflict_zones.rs)
+- Movement
+    - Basic movement - [`src/movement/movement.rs`](src/movement/movement.rs)
+- Simulation session and runtime:
+  - Grids storage (if future we can have multiple type of grids: for vehicles and for pedestrians) - [`src/simulation/grids_storage.rs`](src/simulation/grids_storage.rs)
+  - Simulation session and steps - [`src/simulation/session.rs`](src/simulation/session.rs)
