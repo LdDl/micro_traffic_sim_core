@@ -563,7 +563,6 @@ mod tests {
     }
     #[test]
     fn test_alternate_intention() {
-        // Golang code migration
         let speed_limit = 4;
         let mut net = GridRoads::new();
         net.add_cell(
