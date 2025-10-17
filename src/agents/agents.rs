@@ -12,7 +12,7 @@ pub enum AgentType {
     Bus,
     /// A taxi agent.
     Taxi,
-    /// A pedestrian agent.
+    /// A pedestrian agent (is not used anywhere currently).
     Pedestrian,
 }
 

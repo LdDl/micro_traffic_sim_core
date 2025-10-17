@@ -37,19 +37,19 @@ impl Intentions {
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///    .with_type(AgentType::Car)
-    ///    .build();
+    ///    .build_ref();
     /// let mut intention1 = VehicleIntention::default();
     /// intention1.intention_cell_id = 15;
-    /// vehicle1.set_intention(intention1);
+    /// vehicle1.borrow_mut().set_intention(intention1);
     /// let mut vehicle2 = Vehicle::new(2)
     ///    .with_type(AgentType::Car)
-    ///    .build();
+    ///    .build_ref();
     /// let mut intention2 = VehicleIntention::default();
     /// intention2.intention_cell_id = 16;
-    /// vehicle2.set_intention(intention2);
+    /// vehicle2.borrow_mut().set_intention(intention2);
     /// let mut intentions = Intentions::new();
-    /// intentions.add_intention(&mut vehicle1, IntentionType::Target);
-    /// intentions.add_intention(&mut vehicle2, IntentionType::Target);
+    /// intentions.add_intention(vehicle1, IntentionType::Target);
+    /// intentions.add_intention(vehicle2, IntentionType::Target);
     /// println!("Number of intentions: {}", intentions.len());
     /// ```
     pub fn len(&self) -> usize {
@@ -83,19 +83,19 @@ impl Intentions {
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///   .with_type(AgentType::Car)
-    ///   .build();
+    ///   .build_ref();
     /// let mut intention1 = VehicleIntention::default();
     /// intention1.intention_cell_id = 15;
-    /// vehicle1.set_intention(intention1);
+    /// vehicle1.borrow_mut().set_intention(intention1);
     /// let mut vehicle2 = Vehicle::new(2)
     ///   .with_type(AgentType::Car)
-    ///   .build();
+    ///   .build_ref();
     /// let mut intention2 = VehicleIntention::default();
     /// intention2.intention_cell_id = 16;
-    /// vehicle2.set_intention(intention2);
+    /// vehicle2.borrow_mut().set_intention(intention2);
     /// let mut intentions = Intentions::new();
-    /// intentions.add_intention(&mut vehicle1, IntentionType::Target);
-    /// intentions.add_intention(&mut vehicle2, IntentionType::Target);
+    /// intentions.add_intention(vehicle1, IntentionType::Target);
+    /// intentions.add_intention(vehicle2, IntentionType::Target);
     /// for (cell_id, ints) in intentions.iter() {
     ///     println!("Cell {} has {} intentions", cell_id, ints.len());
     /// }
@@ -118,19 +118,19 @@ impl Intentions {
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///   .with_type(AgentType::Car)
-    ///   .build();
+    ///   .build_ref();
     /// let mut intention1 = VehicleIntention::default();
     /// intention1.intention_cell_id = 15;
-    /// vehicle1.set_intention(intention1);
+    /// vehicle1.borrow_mut().set_intention(intention1);
     /// let mut vehicle2 = Vehicle::new(2)
     ///   .with_type(AgentType::Car)
-    ///   .build();
+    ///   .build_ref();
     /// let mut intention2 = VehicleIntention::default();
     /// intention2.intention_cell_id = 16;
-    /// vehicle2.set_intention(intention2);
+    /// vehicle2.borrow_mut().set_intention(intention2);
     /// let mut intentions = Intentions::new();
-    /// intentions.add_intention(&mut vehicle1, IntentionType::Target);
-    /// intentions.add_intention(&mut vehicle2, IntentionType::Target);
+    /// intentions.add_intention(vehicle1, IntentionType::Target);
+    /// intentions.add_intention(vehicle2, IntentionType::Target);
     /// let cell_intentions = intentions.get(&15);
     /// println!("Cell 15 has {} intentions", cell_intentions.unwrap().len());
     /// ```
@@ -181,20 +181,20 @@ impl Intentions {
     /// let mut vehicle1 = Vehicle::new(1)
     ///     .with_type(AgentType::Car)
     ///     .with_cell(10)
-    ///     .build();
+    ///     .build_ref();
     /// let mut intention1 = VehicleIntention::default();
     /// intention1.intention_cell_id = 15;
-    /// vehicle1.set_intention(intention1);
+    /// vehicle1.borrow_mut().set_intention(intention1);
     /// let mut vehicle2 = Vehicle::new(2)
     ///     .with_type(AgentType::Car)
     ///     .with_cell(20)
-    ///     .build();
+    ///     .build_ref();
     /// let mut intention2 = VehicleIntention::default();
     /// intention2.intention_cell_id = 15;
-    /// vehicle2.set_intention(intention2);
+    /// vehicle2.borrow_mut().set_intention(intention2);
     /// let mut intentions = Intentions::new();
-    /// intentions.add_intention(&mut vehicle1, IntentionType::Target);
-    /// intentions.add_intention(&mut vehicle2, IntentionType::Target);
+    /// intentions.add_intention(vehicle1, IntentionType::Target);
+    /// intentions.add_intention(vehicle2, IntentionType::Target);
     /// ```
     pub fn add_intention(&mut self, vehicle_ref: VehicleRef, intention_type: IntentionType) {
         let extracted_tail = {

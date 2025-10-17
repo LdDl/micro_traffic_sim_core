@@ -49,8 +49,8 @@ impl CellIntention {
     ///
     /// let vehicle = Vehicle::new(1)
     ///     .with_type(AgentType::Car)
-    ///     .build();
-    /// let cell_intention = CellIntention::new(&vehicle, IntentionType::Target);
+    ///     .build_ref();
+    /// let cell_intention = CellIntention::new(vehicle, IntentionType::Target);
     /// println!("Cell intention: {:?}", cell_intention);
     /// ```
     pub fn new(vehicle: VehicleRef, int_type: IntentionType) -> Self {
@@ -72,18 +72,11 @@ impl CellIntention {
     ///
     /// let vehicle = Vehicle::new(1)
     ///     .with_type(AgentType::Car)
-    ///     .build();
-    /// let cell_intention = CellIntention::new(Some(&vehicle), IntentionType::Target);
+    ///     .build_ref();
+    /// let cell_intention = CellIntention::new(vehicle, IntentionType::Target);
     /// println!("Cell intention: {:?}", cell_intention);
-    ///
-    /// match cell_intention.get_vehicle() {
-    ///     Some(v) => println!("Vehicle ID: {}", v.id),
-    ///     None => println!("No vehicle associated"),
-    /// }
+    /// println!("Associated vehicle ID: {}", cell_intention.get_vehicle_id());
     /// ```
-    // pub fn get_vehicle(&self) -> &Vehicle {
-    //     self.vehicle
-    // }
     pub fn get_vehicle_id(&self) -> u64 {
         self.vehicle.borrow().id
     }

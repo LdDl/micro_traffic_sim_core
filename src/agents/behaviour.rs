@@ -12,8 +12,8 @@ pub enum BehaviourType {
     Aggressive,
     /// Agents who do not always minimize travel time.
     Cooperative,
-    /// Movement of an agent by trip with limited velocity.
-    LimitSpeed,
+    /// Agent speed will be limited with a specified value given by the trip.
+    LimitSpeedByTrip,
 }
 
 impl BehaviourType {
@@ -54,7 +54,7 @@ impl fmt::Display for BehaviourType {
             BehaviourType::Block => "block",
             BehaviourType::Aggressive => "aggressive",
             BehaviourType::Cooperative => "cooperative",
-            BehaviourType::LimitSpeed => "limit_speed",
+            BehaviourType::LimitSpeedByTrip => "limit_speed",
         };
         write!(f, "{}", as_str)
     }
@@ -96,7 +96,7 @@ impl BehaviourParameters {
             BehaviourType::Block => Self::new(1.0, 0, 1.0, 0),
             BehaviourType::Aggressive => Self::new(0.1, 5, 0.9, 0),
             BehaviourType::Cooperative => Self::new(0.5, 4, 0.0, 1),
-            BehaviourType::LimitSpeed => Self::new(0.7, 3, 0.1, 1),
+            BehaviourType::LimitSpeedByTrip => Self::new(0.7, 3, 0.1, 1),
             BehaviourType::Undefined => Self::new(0.5, 2, 0.5, 0),
         }
     }

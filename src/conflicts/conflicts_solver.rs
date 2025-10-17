@@ -40,15 +40,18 @@ impl fmt::Display for ConflictSolverError {
 /// # Example
 /// ```
 /// use micro_traffic_sim_core::conflicts::{CellConflict, ConflictType, solve_conflicts};
-/// use micro_traffic_sim_core::agents::Vehicle;
+/// use micro_traffic_sim_core::agents::{Vehicle, VehicleRef};
 /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
 /// use micro_traffic_sim_core::grid::cell::CellID;
 /// use micro_traffic_sim_core::verbose::VerboseLevel;
+/// use std::rc::Rc;
+/// use std::cell::RefCell;
 /// let mut vehicle1 = Vehicle::new(1).with_speed(2).build();
 /// let mut vehicle2 = Vehicle::new(2).with_speed(3).build();
+/// let vehicles: Vec<VehicleRef> = vec![Rc::new(RefCell::new(vehicle1)), Rc::new(RefCell::new(vehicle2))];
 /// let conflicts = vec![CellConflict {
 ///    cell_id: 1,
-///    participants: vec![&mut vehicle1, &mut vehicle2],
+///    participants: vehicles,
 ///    priority_participant_index: 0,
 ///   conflict_type: ConflictType::ForwardLaneChange,
 /// }];
