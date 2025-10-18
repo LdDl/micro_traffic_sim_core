@@ -33,7 +33,8 @@ impl Intentions {
     ///
     /// # Examples
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///    .with_type(AgentType::Car)
@@ -63,7 +64,8 @@ impl Intentions {
     ///
     /// # Examples
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut intentions = Intentions::new();
     /// println!("Intentions storage is empty: {}", intentions.is_empty());
@@ -79,7 +81,8 @@ impl Intentions {
     ///
     /// # Examples
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///   .with_type(AgentType::Car)
@@ -114,7 +117,8 @@ impl Intentions {
     ///
     /// # Examples
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///   .with_type(AgentType::Car)
@@ -176,7 +180,8 @@ impl Intentions {
     /// # Examples
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention, AgentType};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
     /// use micro_traffic_sim_core::intentions::{Intentions, CellIntention, IntentionType};
     /// let mut vehicle1 = Vehicle::new(1)
     ///     .with_type(AgentType::Car)
@@ -270,7 +275,8 @@ impl Intentions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::{AgentType, VehicleIntention};
+    use crate::agents_types::AgentType;
+    use crate::agents::VehicleIntention;
     #[test]
     fn test_add_to_empty_intentions() {
         let mut intentions = Intentions::new();

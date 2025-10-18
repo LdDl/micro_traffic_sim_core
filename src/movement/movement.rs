@@ -1,5 +1,6 @@
 // In src/movement/mod.rs or src/movement/movement.rs
-use crate::agents::{VehicleID, VehicleRef, AgentType};
+use crate::agents_types::AgentType;
+use crate::agents::{VehicleID, VehicleRef};
 use crate::grid::road_network::GridRoads;
 use crate::grid::cell::CellID;
 use crate::grid::zones::ZoneType;

@@ -1,5 +1,6 @@
 use crate::behaviour::BehaviourType;
-use crate::agents::{AgentType, VehicleIntention, TailIntentionManeuver};
+use crate::agents_types::AgentType;
+use crate::agents::{VehicleIntention, TailIntentionManeuver};
 use crate::grid::cell::CellID;
 use crate::maneuver::LaneChangeType;
 use crate::grid::road_network::GridRoads;
@@ -129,7 +130,8 @@ impl Vehicle {
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// let vehicle = Vehicle::new(1)
     ///     .with_cell(1)
     ///     .with_destination(100)
@@ -175,7 +177,8 @@ impl Vehicle {
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// let mut vehicle = Vehicle::new(1)
     ///     .with_cell(1)
     ///     .with_destination(100)
@@ -194,7 +197,8 @@ impl Vehicle {
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// let mut vehicle = Vehicle::new(1)
     ///     .with_cell(1)
     ///     .with_destination(100)
@@ -215,7 +219,8 @@ impl Vehicle {
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// let mut vehicle = Vehicle::new(1)
     ///     .with_cell(3)
     ///     .with_destination(100)
@@ -237,7 +242,8 @@ impl Vehicle {
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// let mut vehicle = Vehicle::new(1)
     ///     .with_cell(3)
     ///     .with_destination(100)
@@ -259,7 +265,8 @@ impl Vehicle {
     ///
     /// # Example
     /// ```
-    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// let mut vehicle = Vehicle::new(1)
     ///     .with_cell(3)
     ///     .with_destination(100)
@@ -286,7 +293,8 @@ impl Vehicle {
     /// # Example
     /// ```
     /// use micro_traffic_sim_core::maneuver::LaneChangeType;
-    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle, VehicleIntention};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
     /// let mut vehicle = Vehicle::new(1)
     ///   .with_cell(3)
     ///   .with_destination(100)
@@ -469,7 +477,8 @@ impl VehicleBuilder {
     ///
     /// # Example
     /// ```rust
-    /// use micro_traffic_sim_core::agents::{AgentType, Vehicle};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// let vehicle = Vehicle::new(1)
     ///     .with_type(AgentType::Bus)
     ///     .build();

@@ -1,6 +1,7 @@
 use crate::grid::cell::CellID;
 use crate::traffic_lights::lights::{TrafficLightID};
-use crate::agents::{AgentType, VehicleID};
+use crate::agents_types::AgentType;
+use crate::agents::VehicleID;
 use crate::traffic_lights::signals::SignalType;
 use std::collections::HashMap;
 

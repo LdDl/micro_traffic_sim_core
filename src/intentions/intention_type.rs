@@ -44,7 +44,8 @@ impl CellIntention {
     /// # Example
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, AgentType};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// use micro_traffic_sim_core::intentions::{CellIntention, IntentionType};
     ///
     /// let vehicle = Vehicle::new(1)
@@ -67,7 +68,8 @@ impl CellIntention {
     /// # Example
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::{Vehicle, AgentType};
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
     /// use micro_traffic_sim_core::intentions::{CellIntention, IntentionType};
     ///
     /// let vehicle = Vehicle::new(1)

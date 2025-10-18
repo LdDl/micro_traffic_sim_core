@@ -35,7 +35,7 @@ impl AgentType {
     /// # Examples
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::AgentType;
+    /// use micro_traffic_sim_core::agents_types::AgentType;
     ///
     /// let random_agent = AgentType::random();
     /// ```

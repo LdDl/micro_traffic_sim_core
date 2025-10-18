@@ -1,4 +1,5 @@
 use crate::behaviour::BehaviourParameters;
+use crate::agents_types::AgentType;
 use crate::agents::{VehicleID, VehicleRef, Vehicle};
 use crate::conflict_zones::{ConflictZone, ConflictZoneID};
 use crate::grid::cell::{CellID, Cell};
@@ -360,7 +361,7 @@ impl Session {
         }
 
         // Determine target node
-        let target_node = if trip.allowed_agent_type == crate::agents::AgentType::Bus 
+        let target_node = if trip.allowed_agent_type == AgentType::Bus
             && !trip.transit_cells.is_empty() {
             trip.transit_cells[0] // First transit cell for buses
         } else {
