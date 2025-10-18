@@ -30,6 +30,8 @@ Table of contents
 
 `micro_traffic_sim_core` is a Rust core library for microscopic traffic simulation (NaSch-like cellular automata and agent-based behaviours). The codebase contains utilities for grids, agents, intentions, conflicts, pathfinding, and session simulation.
 
+__Disclaimer__: Repository documentation will have a lot of technical details in text form since this is a computational core which will not be used by end-users directly, but rather integrated into service of some sort (gRPC/REST).
+
 ## Project layout
 
 Top-level modules are exported from [`src/lib.rs`](src/lib.rs).
