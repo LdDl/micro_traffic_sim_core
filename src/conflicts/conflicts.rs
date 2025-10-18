@@ -1,4 +1,5 @@
-use crate::agents::{BehaviourType, VehicleID, VehicleRef};
+use crate::behaviour::BehaviourType;
+use crate::agents::{VehicleID, VehicleRef};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
 use crate::conflicts::resolve_simple_rules;
 use crate::grid::cell::{Cell, CellID};

@@ -30,7 +30,7 @@ impl BehaviourType {
     /// # Examples
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::BehaviourType;
+    /// use micro_traffic_sim_core::behaviour::BehaviourType;
     ///
     /// let ratio_aggressive = 0.7;
     /// let ratio_cooperative = 0.3;
@@ -87,7 +87,7 @@ impl BehaviourParameters {
     /// # Examples
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::{BehaviourType, BehaviourParameters};
+    /// use micro_traffic_sim_core::behaviour::{BehaviourType, BehaviourParameters};
     ///
     /// let behaviour_params = BehaviourParameters::from_behaviour_type(BehaviourType::Aggressive);
     /// ```
@@ -117,7 +117,7 @@ impl BehaviourParameters {
     /// # Examples
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::{BehaviourType, BehaviourParameters};
+    /// use micro_traffic_sim_core::behaviour::{BehaviourType, BehaviourParameters};
     ///
     /// let behaviour_params = BehaviourParameters::new(0.1, 2, 0.4, 1);
     /// ```

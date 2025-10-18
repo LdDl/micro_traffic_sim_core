@@ -4,12 +4,12 @@ use super::*;
 mod tests {
     use super::*;
     use crate::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone, ConflictZoneID};
+    use crate::behaviour::BehaviourType;
     use crate::agents::{Vehicle, VehicleIntention};
     use crate::intentions::{CellIntention, IntentionType, Intentions};
     use crate::grid::cell::{Cell, CellID};
     use crate::grid::road_network::GridRoads;
     use crate::grid::lane_change_type::LaneChangeType;
-    use crate::agents::BehaviourType;
     use std::collections::HashMap;
 
     #[test]

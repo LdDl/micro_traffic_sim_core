@@ -1,6 +1,7 @@
 use super::{process_no_route_found, process_path, NoRouteError};
+use crate::behaviour::BehaviourType;
 use crate::agents::{
-    BehaviourType, TailIntentionManeuver, Vehicle, VehicleRef, VehicleError, VehicleID, VehicleIntention,
+    TailIntentionManeuver, Vehicle, VehicleRef, VehicleError, VehicleID, VehicleIntention,
 };
 use crate::grid::cell::CellState;
 use crate::grid::lane_change_type::LaneChangeType;

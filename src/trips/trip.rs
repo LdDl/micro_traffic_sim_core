@@ -1,4 +1,5 @@
-use crate::agents::{AgentType, BehaviourType};
+use crate::behaviour::{BehaviourType};
+use crate::agents::{AgentType};
 use crate::grid::cell::CellID;
 use std::fmt;
 
@@ -79,7 +80,7 @@ impl Trip {
     ///
     /// ```
     /// use micro_traffic_sim_core::agents::AgentType;
-    /// use micro_traffic_sim_core::agents::BehaviourType;
+    /// use micro_traffic_sim_core::behaviour::BehaviourType;
     /// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
     /// let trip = Trip::new(1, 10, TripType::Constant)
     ///     .with_allowed_agent_type(AgentType::Car)
@@ -184,7 +185,7 @@ impl TripBuilder {
     /// # Example
     ///
     /// ```
-    /// use micro_traffic_sim_core::agents::BehaviourType;
+    /// use micro_traffic_sim_core::behaviour::BehaviourType;
     /// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
     /// let trip = Trip::new(1, 10, TripType::Constant)
     ///     .with_allowed_behaviour_type(BehaviourType::Aggressive)

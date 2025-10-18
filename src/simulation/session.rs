@@ -1,3 +1,4 @@
+use crate::behaviour::BehaviourParameters;
 use crate::agents::{VehicleID, VehicleRef, Vehicle};
 use crate::conflict_zones::{ConflictZone, ConflictZoneID};
 use crate::grid::cell::{CellID, Cell};
@@ -367,7 +368,7 @@ impl Session {
         };
 
         // Create behaviour parameters based on allowed behaviour type
-        let behaviour_params = crate::agents::BehaviourParameters::from_behaviour_type(trip.allowed_behaviour_type);
+        let behaviour_params = BehaviourParameters::from_behaviour_type(trip.allowed_behaviour_type);
 
         // Create vehicle using builder pattern
         let vehicle = Vehicle::new(self.last_vehicle_id)

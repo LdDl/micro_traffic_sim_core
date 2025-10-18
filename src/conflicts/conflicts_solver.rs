@@ -260,7 +260,8 @@ pub fn solve_conflicts<'b>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::{Vehicle, VehicleRef, VehicleIntention, BehaviourType};
+    use crate::behaviour::BehaviourType;
+    use crate::agents::{Vehicle, VehicleRef, VehicleIntention};
     use crate::grid::lane_change_type::LaneChangeType;
     use crate::grid::cell::CellID;
     use crate::conflicts::conflicts::{CellConflict, ConflictType};

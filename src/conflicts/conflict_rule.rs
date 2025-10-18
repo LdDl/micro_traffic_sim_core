@@ -1,4 +1,4 @@
-use crate::agents::BehaviourType;
+use crate::behaviour::BehaviourType;
 use crate::agents::Vehicle;
 use crate::conflicts::ConflictType;
 use crate::grid::lane_change_type::LaneChangeType;

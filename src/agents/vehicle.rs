@@ -1,4 +1,5 @@
-use crate::agents::{AgentType, BehaviourType, VehicleIntention, TailIntentionManeuver};
+use crate::behaviour::BehaviourType;
+use crate::agents::{AgentType, VehicleIntention, TailIntentionManeuver};
 use crate::grid::cell::CellID;
 use crate::grid::lane_change_type::LaneChangeType;
 use crate::grid::road_network::GridRoads;
@@ -489,7 +490,8 @@ impl VehicleBuilder {
     ///
     /// # Example
     /// ```rust
-    /// use micro_traffic_sim_core::agents::{BehaviourType, Vehicle};
+    /// use micro_traffic_sim_core::behaviour::BehaviourType;
+    /// use micro_traffic_sim_core::agents::{Vehicle};
     /// let vehicle = Vehicle::new(1)
     ///     .with_behaviour(BehaviourType::Cooperative)
     ///     .build();

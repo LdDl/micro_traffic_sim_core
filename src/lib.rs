@@ -1,4 +1,5 @@
 //! Export library
+pub mod behaviour;
 pub mod agents;
 pub mod conflict_zones;
 pub mod geom;
