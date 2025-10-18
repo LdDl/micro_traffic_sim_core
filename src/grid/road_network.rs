@@ -84,4 +84,10 @@ impl GridRoads {
     pub fn get_cell_mut(&mut self, id: CellID) -> Option<&mut Cell> {
         self.cells.get_mut(&id)
     }
+
+    /// Return iterator over all cells in the grid.
+    pub fn iter(&self) -> impl Iterator<Item = (&CellID, &Cell)>
+    {
+        self.cells.iter()
+    }
 }

@@ -94,9 +94,55 @@ Every simulation follows this pattern:
 6. **Visualize** - E.g. plot results with gnuplot
 
 ### Creating the grid
-@todo
+
+The grid represents your road network as a collection of connected cells. Each cell is a discrete unit where vehicles can be positioned.
+
 ```rust
+/* ... */
+use micro_traffic_sim_core::geom::new_point;
+use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads, zones::ZoneType};
+/* ... */
+fn main() {
+  /* ... */
+  let mut grid = GridRoads::new();
+  let mut cell_id = 1;
+  let cell = Cell::new(cell_id)
+    .with_point(new_point(1.0, 1.0, None))
+    .with_zone_type(ZoneType::Birth)
+    .with_speed_limit(3)
+    .with_forward_node(2)
+    .with_left_node(7)
+    .with_right_node(-1)
+    .with_meso_link_id(100500)
+    .build();
+  grid.add_cell(cell);
+  cell_id += 1;
+  /* ... */
+}
+/* ... */
 ```
+
+**Cell attributes explained:**
+
+- **`id`**: Unique identifier for referencing this cell from other cells (`CellID` type, which is `i64`) or by vehicles states in the simulation.
+- **`point`**: Physical coordinates in your coordinate system (`PointType` - can be geographic with SRID)
+- **`type_zone`**: Defines the cell's role in traffic flow (`ZoneType` enum). Basic types are:
+  - `Birth` - Vehicles spawn here (start of road)
+  - `Death` - Vehicles despawn here (end of road)  
+  - `Common` - Regular road segment
+
+  All types are described in [`zones.rs`](src/grid/zones.rs).
+- **`speed_limit`**: Maximum velocity in cellular automata units (integer, cells per simulation step)
+- **`left_cell`**: Cell ID for left lane changes (`CellID`, use `-1` if no connection available)
+- **`forward_cell`**: Cell ID for forward movement (`CellID`, use `-1` if no connection available)
+- **`right_cell`**: Cell ID for right lane changes (`CellID`, use `-1` if no connection available)
+- **`meso_link_id`**: Identifier linking the cell to a mesoscopic graph (integer, `-1` if not applicable). Could be used for multi-resolution simulations or aggregated traffic flow analysis.
+
+**Connection rules:**
+- Use `-1` to indicate "no connection available" for any cell reference
+- Left/right connections enable lane changing behavior  
+- Each cell can have only one forward connection, left connection, and right connection.
+- Same time each cell can have multiple incoming connections from other cells, but it is recommended two have only one left/right incoming connection to avoid ambiguity in lane changing (number forward connections is unlimited in that context).
 
 ### Optionally add conflict zones
 @todo

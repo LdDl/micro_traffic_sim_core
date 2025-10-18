@@ -3,14 +3,23 @@ use std::fmt;
 /// ZoneType gives meaning to the cell in terms of its application.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ZoneType {
+    // Default uninitialized state
     Undefined = 0,
+    // Vehicles spawn here
     Birth,
+    // Vehicles despawn here
     Death,
+    // Junction/intersection cell requiring conflict resolution
     Coordination,
+    // Regular road segment
     Common,
+    // Cell that is disconnected from the road network (for future use)
     Isolated,
+    // Dedicated bus lane (for future use)
     LaneForBus,
+    // Relaxation cells (stops basically) for public transport vehicles (for future use)
     Transit,
+    // Pedestrian crossing area (for future use)
     Crosswalk,
 }
 
