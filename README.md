@@ -11,6 +11,19 @@ Table of contents
   - [Run example: NaSch one-lane](#run-example-nasch-one-lane)
   - [Build release binary for example](#build-release-binary-for-example)
   - [Benchmark with hyperfine](#benchmark-with-hyperfine)
+- [Complete workflow guide](#complete-workflow-guide)
+  - [Add crate to your project](#add-crate-to-your-project)
+  - [Basic workflow overview](#basic-workflow-overview)
+  - [Creating the grid](#creating-the-grid)
+  - [Optionally add conflict zones](#optionally-add-conflict-zones)
+  - [Creating vehicles statically](#creating-vehicles-statically)
+  - [Creating vehicles dynamically via trips](#creating-vehicles-dynamically-via-trips)
+  - [Optionally add traffic lights](#optionally-add-traffic-lights)
+  - [Setting up the simulation session](#setting-up-the-simulation-session)
+  - [Running the simulation](#running-the-simulation)
+  - [Extracting results](#extracting-results)
+  - [Analyzing results](#analyzing-results)
+  - [Visualization with gnuplot](#visualization-with-gnuplot)
 - [Key modules / API pointers](#key-modules--api-pointers)
 
 ## Introduction
@@ -59,6 +72,70 @@ cargo build --release --example nasch-one-lane
 ### Benchmark with hyperfine
 ```sh
 hyperfine -i --shell=none --output=pipe --runs 30 --warmup 2 -n "Rust NaSch version" "./target/release/examples/nasch-one-lane"
+```
+
+## Complete workflow guide
+
+### Add crate to your project
+Add to `Cargo.toml`:
+```toml
+[dependencies]
+micro_traffic_sim_core = "0.0.1"
+```
+
+### Basic workflow overview
+
+Every simulation follows this pattern:
+1. **Create Grid** - Build road network with cells
+2. **Create Vehicles/Trips** - Define agents and their routes  
+3. **Setup Session** - Initialize simulation runtime
+4. **Run Simulation** - Execute time steps
+5. **Extract Results** - Collect vehicle states and positions
+6. **Visualize** - E.g. plot results with gnuplot
+
+### Creating the grid
+@todo
+```rust
+```
+
+### Optionally add conflict zones
+@todo
+```rust
+```
+
+### Creating vehicles statically
+@todo
+```rust
+```
+
+### Creating vehicles dynamically via trips
+@todo
+```rust
+```
+
+### Optionally add traffic lights
+@todo
+```rust
+```
+
+### Setting up the simulation session
+@todo
+```rust
+```
+
+### Running the simulation
+@todo
+```rust
+```
+
+### Extracting results
+@todo
+```rust
+```
+
+### Analyzing results
+@todo
+```rust
 ```
 
 ## Key modules / API pointers
