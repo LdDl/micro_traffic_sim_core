@@ -122,6 +122,8 @@ fn main() {
 /* ... */
 ```
 
+The full example for grid basics is in [`examples/grid-basics`](examples/grid-basics).
+
 **Cell attributes explained:**
 
 - **`id`**: Unique identifier for referencing this cell from other cells (`CellID` type, which is `i64`) or by vehicles states in the simulation.
