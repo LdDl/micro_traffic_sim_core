@@ -4,7 +4,7 @@ use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
 use crate::conflicts::resolve_simple_rules;
 use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
-use crate::grid::lane_change_type::LaneChangeType;
+use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::utils::rand::thread_rng;
 use crate::verbose::VerboseLevel;

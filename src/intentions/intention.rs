@@ -4,7 +4,7 @@ use crate::agents::{
     TailIntentionManeuver, Vehicle, VehicleRef, VehicleError, VehicleID, VehicleIntention,
 };
 use crate::grid::cell::CellState;
-use crate::grid::lane_change_type::LaneChangeType;
+use crate::maneuver::LaneChangeType;
 use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;

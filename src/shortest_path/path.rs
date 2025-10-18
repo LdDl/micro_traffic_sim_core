@@ -1,5 +1,5 @@
 use crate::grid::cell::Cell;
-use crate::grid::lane_change_type::LaneChangeType;
+use crate::maneuver::LaneChangeType;
 
 /// Represents a path between two cells.
 #[derive(Debug)]
@@ -28,7 +28,7 @@ impl<'a> Path<'a> {
     /// ```
     /// use micro_traffic_sim_core::shortest_path::path::Path;
     /// use micro_traffic_sim_core::grid::cell::Cell;
-    /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
+    /// use micro_traffic_sim_core::maneuver::LaneChangeType;
     ///
     /// let cell1 = Cell::new(1).build();
     /// let cell2 = Cell::new(2).build();

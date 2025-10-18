@@ -1,6 +1,6 @@
+use crate::maneuver::LaneChangeType;
 use crate::grid::{
     cell::{Cell, CellID},
-    lane_change_type::LaneChangeType,
     road_network::GridRoads,
 };
 use crate::shortest_path::{heuristics::heuristic, path::Path};

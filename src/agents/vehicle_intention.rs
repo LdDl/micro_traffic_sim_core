@@ -1,5 +1,5 @@
 use crate::grid::cell::CellID;
-use crate::grid::lane_change_type::LaneChangeType;
+use crate::maneuver::LaneChangeType;
 
 /// Represents vehicle's intention to perform maneuver and other actions
 #[derive(Debug, Default, Clone, PartialEq)]

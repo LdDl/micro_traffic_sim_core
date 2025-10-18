@@ -9,7 +9,7 @@ mod tests {
     use crate::intentions::{CellIntention, IntentionType, Intentions};
     use crate::grid::cell::{Cell, CellID};
     use crate::grid::road_network::GridRoads;
-    use crate::grid::lane_change_type::LaneChangeType;
+    use crate::maneuver::LaneChangeType;
     use std::collections::HashMap;
 
     #[test]

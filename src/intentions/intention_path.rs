@@ -1,8 +1,8 @@
+use crate::maneuver::LaneChangeType;
 use crate::{
     agents::VehicleID,
     grid::{
         cell::{Cell, CellID, CellState},
-        lane_change_type::LaneChangeType,
     },
     shortest_path::path::Path,
 };
@@ -37,8 +37,9 @@ pub struct ObservablePath<'a> {
 ///
 /// ```
 /// use micro_traffic_sim_core::{
-///    grid::{cell::{Cell, CellState}, lane_change_type::LaneChangeType},
+///    grid::{cell::{Cell, CellState}},
 ///    shortest_path::path::Path,
+///    maneuver::LaneChangeType,
 ///    intentions::{process_path, ObservablePath},
 /// };
 /// use std::collections::HashMap;

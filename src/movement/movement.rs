@@ -3,7 +3,7 @@ use crate::agents::{VehicleID, VehicleRef, AgentType};
 use crate::grid::road_network::GridRoads;
 use crate::grid::cell::CellID;
 use crate::grid::zones::ZoneType;
-use crate::grid::lane_change_type::LaneChangeType;
+use crate::maneuver::LaneChangeType;
 use crate::geom::get_bearing;
 use crate::verbose::*;
 use indexmap::IndexMap;

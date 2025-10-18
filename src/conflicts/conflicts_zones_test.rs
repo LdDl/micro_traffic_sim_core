@@ -10,7 +10,7 @@ mod tests {
     use crate::grid::cell::{Cell};
     use crate::grid::zones::ZoneType;
     use crate::grid::road_network::GridRoads;
-    use crate::grid::lane_change_type::LaneChangeType;
+    use crate::maneuver::LaneChangeType;
     use crate::verbose::VerboseLevel;
     use std::collections::{HashMap, HashSet};
     use crate::utils::test_grids::{

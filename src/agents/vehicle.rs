@@ -1,7 +1,7 @@
 use crate::behaviour::BehaviourType;
 use crate::agents::{AgentType, VehicleIntention, TailIntentionManeuver};
 use crate::grid::cell::CellID;
-use crate::grid::lane_change_type::LaneChangeType;
+use crate::maneuver::LaneChangeType;
 use crate::grid::road_network::GridRoads;
 use crate::trips::trip::TripID;
 use std::fmt;
@@ -285,8 +285,8 @@ impl Vehicle {
     ///
     /// # Example
     /// ```
+    /// use micro_traffic_sim_core::maneuver::LaneChangeType;
     /// use micro_traffic_sim_core::agents::{AgentType, Vehicle, VehicleIntention};
-    /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
     /// let mut vehicle = Vehicle::new(1)
     ///   .with_cell(3)
     ///   .with_destination(100)
@@ -415,7 +415,7 @@ impl Vehicle {
     /// # Example
     /// ```rust
     /// use micro_traffic_sim_core::agents::Vehicle;
-    /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
+    /// use micro_traffic_sim_core::maneuver::LaneChangeType;
     /// 
     /// let mut vehicle = Vehicle::new(1)
     ///     .with_cell(10)
@@ -666,7 +666,7 @@ impl VehicleBuilder {
     /// # Example
     /// ```rust
     /// use micro_traffic_sim_core::agents::Vehicle;
-    /// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
+    /// use micro_traffic_sim_core::maneuver::LaneChangeType;
     /// let vehicle = Vehicle::new(1)
     ///     .with_tail_intention_maneuver(10, 20, LaneChangeType::ChangeRight)
     ///     .build();

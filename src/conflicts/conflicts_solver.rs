@@ -1,6 +1,6 @@
 use crate::conflicts::conflicts::*;
 use crate::agents::{Vehicle, VehicleID};
-use crate::grid::lane_change_type::LaneChangeType;
+use crate::maneuver::LaneChangeType;
 use crate::grid::cell::CellID;
 use crate::verbose::*;
 
@@ -41,7 +41,7 @@ impl fmt::Display for ConflictSolverError {
 /// ```
 /// use micro_traffic_sim_core::conflicts::{CellConflict, ConflictType, solve_conflicts};
 /// use micro_traffic_sim_core::agents::{Vehicle, VehicleRef};
-/// use micro_traffic_sim_core::grid::lane_change_type::LaneChangeType;
+/// use micro_traffic_sim_core::maneuver::LaneChangeType;
 /// use micro_traffic_sim_core::grid::cell::CellID;
 /// use micro_traffic_sim_core::verbose::VerboseLevel;
 /// use std::rc::Rc;
@@ -262,7 +262,7 @@ mod tests {
     use super::*;
     use crate::behaviour::BehaviourType;
     use crate::agents::{Vehicle, VehicleRef, VehicleIntention};
-    use crate::grid::lane_change_type::LaneChangeType;
+    use crate::maneuver::LaneChangeType;
     use crate::grid::cell::CellID;
     use crate::conflicts::conflicts::{CellConflict, ConflictType};
 

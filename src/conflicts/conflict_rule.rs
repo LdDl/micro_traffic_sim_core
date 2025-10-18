@@ -1,7 +1,7 @@
 use crate::behaviour::BehaviourType;
 use crate::agents::Vehicle;
 use crate::conflicts::ConflictType;
-use crate::grid::lane_change_type::LaneChangeType;
+use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType};
 use rand::Rng;
 use crate::utils::rand::thread_rng;
