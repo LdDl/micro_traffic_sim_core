@@ -321,8 +321,8 @@ impl Vehicle {
     /// # Arguments
     /// * `net` - The road network grid
     ///
-    /// # Returns
-    /// Updated lane change type and potential error
+    /// Returns [`VehicleError::TailCellNotFound`] if a tail cell ID doesn't exist in the grid,
+    /// or [`VehicleError::InvalidCell`] if a cell ID is invalid.
     ///
     /// # Example
     /// ```rust
