@@ -4,18 +4,45 @@ use crate::grid::cell::CellID;
 /// Identifier for a conflict zone.
 pub type ConflictZoneID = i32;
 
-/// Types of conflict zones.
+/// Types of conflict zones for different management strategies.
+/// 
+/// Currently only [`Undefined`](ConflictZoneType::Undefined) is implemented, 
+/// but this enum is designed for future extensions.
+///
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictZoneType {
+    /// Default uninitialized state.
     Undefined,
 }
 
-/// Types of conflict winners.
+/// Priority rules determining which traffic flow has precedence in a conflict zone.
+/// 
+/// This enum defines the conflict resolution strategy when two traffic flows
+/// compete for the same space.
+///
+/// # Examples
+/// 
+/// ```rust
+/// use micro_traffic_sim_core::conflict_zones::ConflictWinnerType;
+/// 
+/// // Main road vs side road - main road has priority
+/// let priority = ConflictWinnerType::First;
+/// 
+/// // Four-way stop - equal priority, first arrival wins
+/// let equal_priority = ConflictWinnerType::Equal;
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictWinnerType {
+    /// Priority not yet determined or default state.
     Undefined,
+    /// Both traffic flows have equal priority. 
+    /// Vehicles proceed based on arrival order (first-come, first-served).
     Equal,
+    /// First edge (first traffic flow) has priority over second edge.
+    /// Second edge traffic must yield to first edge traffic.
     First,
+    /// Second edge (second traffic flow) has priority over first edge.
+    /// First edge traffic must yield to second edge traffic.
     Second,
 }
 
