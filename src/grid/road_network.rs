@@ -81,11 +81,50 @@ impl GridRoads {
     }
 
     /// Retrieves a mutable reference to a `Cell` in the grid by its `CellID`.
+    ///
+    /// This method provides mutable access to a cell for modification operations
+    /// like updating cell state or properties.
+    ///
+    /// # Arguments
+    /// - `id`: The `CellID` to look up.
+    ///
+    /// # Returns
+    /// - `Option<&mut Cell>`: `Some(&mut Cell)` if found, `None` otherwise.
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::{cell::{Cell, CellState}, road_network::GridRoads};
+    /// let mut grid = GridRoads::new();
+    /// let cell = Cell::new(1).build();
+    /// grid.add_cell(cell);
+    /// 
+    /// if let Some(cell) = grid.get_cell_mut(1) {
+    ///     cell.set_state(CellState::Banned);
+    /// }
+    /// ```
     pub fn get_cell_mut(&mut self, id: CellID) -> Option<&mut Cell> {
         self.cells.get_mut(&id)
     }
 
-    /// Return iterator over all cells in the grid.
+    /// Returns an iterator over all cells in the grid.
+    ///
+    /// This method provides read-only access to all cells and their IDs
+    /// for iteration and inspection.
+    ///
+    /// # Returns
+    /// An iterator yielding `(&CellID, &Cell)` tuples.
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads};
+    /// let mut grid = GridRoads::new();
+    /// grid.add_cell(Cell::new(1).build());
+    /// grid.add_cell(Cell::new(2).build());
+    /// 
+    /// for (id, cell) in grid.iter() {
+    ///     println!("Cell {}: {:?}", id, cell.get_point());
+    /// }
+    /// ```
     pub fn iter(&self) -> impl Iterator<Item = (&CellID, &Cell)>
     {
         self.cells.iter()
