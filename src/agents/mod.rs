@@ -1,4 +1,3 @@
-// src/agents/mod.rs
 //! # Agents Module
 //! 
 //! This module provides the core agent system for traffic simulation, implementing
