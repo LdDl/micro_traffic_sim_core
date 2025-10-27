@@ -83,7 +83,26 @@ impl SignalType {
 }
 
 impl fmt::Display for SignalType {
-    /// Returns the string representation of the `SignalType`.
+    /// Formats the signal type for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::traffic_lights::signals::SignalType;
+    /// 
+    /// assert_eq!(format!("{}", SignalType::Undefined), "undefined");
+    /// assert_eq!(format!("{}", SignalType::Red), "r");
+    /// assert_eq!(format!("{}", SignalType::Yellow), "y");
+    /// assert_eq!(format!("{}", SignalType::Green), "g");
+    /// assert_eq!(format!("{}", SignalType::GreenPriority), "G");
+    /// assert_eq!(format!("{}", SignalType::GreenRight), "s");
+    /// assert_eq!(format!("{}", SignalType::RedYellow), "u");
+    /// assert_eq!(format!("{}", SignalType::Blinking), "o");
+    /// assert_eq!(format!("{}", SignalType::NoSignal), "O");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let signal_type_str = match self {
             SignalType::Undefined => "undefined",

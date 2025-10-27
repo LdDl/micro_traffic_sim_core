@@ -48,6 +48,22 @@ impl BehaviourType {
 }
 
 impl fmt::Display for BehaviourType {
+    /// Formats the behaviour type for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::behaviour::BehaviourType;
+    /// 
+    /// assert_eq!(format!("{}", BehaviourType::Undefined), "undefined");
+    /// assert_eq!(format!("{}", BehaviourType::Block), "block");
+    /// assert_eq!(format!("{}", BehaviourType::Aggressive), "aggressive");
+    /// assert_eq!(format!("{}", BehaviourType::Cooperative), "cooperative");
+    /// assert_eq!(format!("{}", BehaviourType::LimitSpeedByTrip), "limit_speed");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
             BehaviourType::Undefined => "undefined",

@@ -46,6 +46,28 @@ pub enum ConflictType {
 }
 
 impl fmt::Display for ConflictType {
+    /// Formats the conflict type for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::conflicts::ConflictType;
+    ///
+    /// assert_eq!(format!("{}", ConflictType::Undefined), "undefined");
+    /// assert_eq!(format!("{}", ConflictType::ForwardLaneChange), "forward+lane_change");
+    /// assert_eq!(format!("{}", ConflictType::BlockLaneChange), "block+lane_change");
+    /// assert_eq!(format!("{}", ConflictType::MergeForward), "merge+forward");
+    /// assert_eq!(format!("{}", ConflictType::MergeLaneChange), "merge+lane_change");
+    /// assert_eq!(format!("{}", ConflictType::MergeForwardConflictZone), "merge+forward+conflict_zone");
+    /// assert_eq!(format!("{}", ConflictType::CrossLaneChange), "cross+lane_change");
+    /// assert_eq!(format!("{}", ConflictType::CrossConflictZone), "cross+conflict_zone");
+    /// assert_eq!(format!("{}", ConflictType::Tail), "tail");
+    /// assert_eq!(format!("{}", ConflictType::SelfTail), "self_tail");
+    /// assert_eq!(format!("{}", ConflictType::TailCrossLaneChange), "tail+cross+lane_change");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
             ConflictType::Undefined => "undefined",

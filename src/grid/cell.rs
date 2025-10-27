@@ -14,6 +14,19 @@ pub enum CellState {
 }
 
 impl fmt::Display for CellState {
+    /// Formats the cell state for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::grid::cell::CellState;
+    ///
+    /// assert_eq!(format!("{}", CellState::Free), "free");
+    /// assert_eq!(format!("{}", CellState::Banned), "banned");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             CellState::Free => write!(f, "free"),

@@ -120,6 +120,19 @@ impl Point for PointType {
 }
 
 impl fmt::Display for PointType {
+    /// Formats the point with given SRID for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::geom::{new_point, SRID};
+    ///
+    /// assert_eq!(format!("{}", new_point(4.0, 2.0, None)), "[x: 4.00000 y: 2.00000]");
+    /// assert_eq!(format!("{}", new_point(37.61756, 55.75583, Some(SRID::WGS84))), "[lon: 37.61756 lat: 55.75583]");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Euclidean(p) => write!(f, "[x: {:.5} y: {:.5}]", p.x(), p.y()),

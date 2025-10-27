@@ -15,6 +15,20 @@ pub enum TripType {
 }
 
 impl fmt::Display for TripType {
+    /// Formats the trip type for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::trips::trip::{TripType};
+    /// 
+    /// assert_eq!(format!("{}", TripType::Undefined), "undefined");
+    /// assert_eq!(format!("{}", TripType::Constant), "constant");
+    /// assert_eq!(format!("{}", TripType::Random), "random");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let trip_type_str = match self {
             TripType::Undefined => "undefined",

@@ -21,6 +21,22 @@ pub enum VerboseLevel {
 }
 
 impl fmt::Display for VerboseLevel {
+    /// Formats the verbosity level for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::verbose::VerboseLevel;
+    /// 
+    /// assert_eq!(format!("{}", VerboseLevel::None), "none");
+    /// assert_eq!(format!("{}", VerboseLevel::Main), "main");
+    /// assert_eq!(format!("{}", VerboseLevel::Additional), "additional");
+    /// assert_eq!(format!("{}", VerboseLevel::Detailed), "detailed");
+    /// assert_eq!(format!("{}", VerboseLevel::All), "all");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             VerboseLevel::None => "none",

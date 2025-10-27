@@ -17,6 +17,22 @@ pub enum AgentType {
 }
 
 impl fmt::Display for AgentType {
+    /// Formats the agent type for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// 
+    /// assert_eq!(format!("{}", AgentType::Undefined), "undefined");
+    /// assert_eq!(format!("{}", AgentType::Car), "car");
+    /// assert_eq!(format!("{}", AgentType::Bus), "bus");
+    /// assert_eq!(format!("{}", AgentType::Taxi), "taxi");
+    /// assert_eq!(format!("{}", AgentType::Pedestrian), "pedestrian");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
             AgentType::Undefined => "undefined",

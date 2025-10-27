@@ -15,6 +15,21 @@ pub enum IntentionType {
 }
 
 impl fmt::Display for IntentionType {
+    /// Formats the intention type for display.
+    /// 
+    /// Returns a short, lowercase string representation suitable for
+    /// logging, debugging, and user interfaces.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use micro_traffic_sim_core::intentions::IntentionType;
+    ///
+    /// assert_eq!(format!("{}", IntentionType::Undefined), "undefined");
+    /// assert_eq!(format!("{}", IntentionType::Target), "target");
+    /// assert_eq!(format!("{}", IntentionType::Transit), "transit");
+    /// assert_eq!(format!("{}", IntentionType::Tail), "tail");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let intention_str = match self {
             IntentionType::Undefined => "undefined",
