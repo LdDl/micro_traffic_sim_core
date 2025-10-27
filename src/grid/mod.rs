@@ -6,11 +6,11 @@
 //! ## Key Components
 //! 
 //! ### Core Structures
-//! - [`Cell`] - Individual road segment with position, connections, and properties
-//! - [`GridRoads`] - Container managing the complete road network
-//! - [`CellBuilder`] - Fluent builder pattern for constructing cells
-//! - [`CellState`] - Runtime state of cells (free, banned)
-//! - [`ZoneType`] - Semantic classification of cell purposes
+//! - [`cell::Cell`] - Individual road segment with position, connections, and properties
+//! - [`road_network::GridRoads`] - Container managing the complete road network
+//! - [`cell::CellBuilder`] - Fluent builder pattern for constructing cells
+//! - [`cell::CellState`] - Runtime state of cells (free, banned)
+//! - [`zones::ZoneType`] - Semantic classification of cell purposes
 //!
 //! ### Cell Network System
 //! 

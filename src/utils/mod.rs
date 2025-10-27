@@ -2,7 +2,7 @@
 //! 
 //! Utility functions and test data generators for traffic simulation development and testing.
 //!
-//! ## Components
+//! ## Key Components
 //! 
 //! ### Grid Generators
 //! - [`generators::generate_one_lane_cells`] - Creates multi-lane road segments

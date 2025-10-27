@@ -6,8 +6,8 @@
 //!
 //! ## Key Components
 //! 
-//! - [`Vehicle`] - The primary agent representing vehicles in the simulation
-//! - [`VehicleIntention`] - Captures vehicle's planned actions and maneuvers
+//! - [`vehicle::Vehicle`] - The primary agent representing vehicles in the simulation
+//! - [`vehicle_intention::VehicleIntention`] - Captures vehicle's planned actions and maneuvers
 //!
 //! ## Usage
 //! 

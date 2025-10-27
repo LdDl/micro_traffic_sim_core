@@ -6,16 +6,16 @@
 //! ## Key Components
 //! 
 //! ### Point System
-//! - [`Point`] - Core trait defining point operations
-//! - [`PointType`] - Enum supporting multiple coordinate systems
-//! - [`EuclideanPoint`] - Points in Euclidean space (for grid-based simulations)
-//! - [`WGS84Point`] - Geographic points using WGS84 coordinate system
-//! - [`SRID`] - Spatial Reference System Identifiers
+//! - [`point::Point`] - Core trait defining point operations
+//! - [`point::PointType`] - Enum supporting multiple coordinate systems
+//! - [`point::EuclideanPoint`] - Points in Euclidean space (for grid-based simulations)
+//! - [`point::WGS84Point`] - Geographic points using WGS84 coordinate system
+//! - [`point::SRID`] - Spatial Reference System Identifiers
 //!
 //! ### Spatial Functions
-//! - [`get_bearing`] - Calculate bearing between two geographic points
-//! - [`gc_distance`] / [`gc_distance_pt`] - Great-circle distance calculations
-//! - [`convert_epsg4326_to_3857`] / [`convert_epsg3857_to_4326`] - Coordinate system conversions
+//! - [`spatial::get_bearing`] - Calculate bearing between two geographic points
+//! - [`spatial::gc_distance`] / [`gc_distance_pt`] - Great-circle distance calculations
+//! - [`spatial::convert_epsg4326_to_3857`] / [`convert_epsg3857_to_4326`] - Coordinate system conversions
 //!
 //! ## Coordinate Systems
 //! 

@@ -1,4 +1,4 @@
-//! Export contents of `intentions` folder
+//! Export library
 mod intention_type;
 mod intentions_datastorage;
 mod intention_no_route;

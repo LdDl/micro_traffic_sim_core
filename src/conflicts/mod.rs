@@ -1,4 +1,4 @@
-//! Export contents of `conflicts` folder
+//! Export library
 mod conflicts;
 mod conflicts_test;
 mod conflicts_zones_test;

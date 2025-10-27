@@ -2,9 +2,9 @@
 //! 
 //! Defines vehicle maneuver types for cellular automata traffic simulation.
 //! 
-//! ## Components
+//! ## Key Components
 //! 
-//! - [`LaneChangeType`] - Vehicle movement decisions (straight, left, right, block)
+//! - [`lane_change_type::LaneChangeType`] - Vehicle movement decisions (straight, left, right, block)
 //! 
 //! ## Example
 //! 

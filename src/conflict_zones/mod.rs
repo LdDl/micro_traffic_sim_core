@@ -12,11 +12,11 @@
 //! ## Key Components
 //! 
 //! ### Core Structures
-//! - [`ConflictZone`] - Represents a priority-controlled zone
-//! - [`ConflictEdge`] - Defines a movement path through the zone 
-//! - [`ConflictZoneBuilder`] - Builder API for creating conflict zones
-//! - [`ConflictWinnerType`] - Priority rules (main vs secondary flow)
-//! - [`ConflictZoneType`] - Classification of zones types (future works)
+//! - [`conflict_zones::ConflictZone`] - Represents a priority-controlled zone
+//! - [`conflict_zones::ConflictEdge`] - Defines a movement path through the zone 
+//! - [`conflict_zones::ConflictZoneBuilder`] - Builder API for creating conflict zones
+//! - [`conflict_zones::ConflictWinnerType`] - Priority rules (main vs secondary flow)
+//! - [`conflict_zones::ConflictZoneType`] - Classification of zones types (future works)
 //!
 //! ## Conflict Resolution Model
 //!

@@ -3,14 +3,28 @@ use crate::agents_types::AgentType;
 use crate::grid::cell::CellID;
 use std::fmt;
 
-// Represents trip type generator
+/// Vehicle generation patterns for trip scheduling.
+/// 
+/// Determines how frequently vehicles are spawned during simulation.
+///
+/// # Examples
+/// 
+/// ```rust
+/// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
+/// 
+/// // Predictable traffic flow
+/// let steady_flow = Trip::new(1, 10, TripType::Constant).with_time(5);
+/// 
+/// // Variable traffic flow  
+/// let variable_flow = Trip::new(1, 10, TripType::Random).with_probability(0.3);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TripType {
-    // Uknown
+    /// Default uninitialized state
     Undefined,
-    // For generating vehicles at a given frequency on a regular basis
+    /// Generate vehicles at regular intervals (use `time` field)
     Constant,
-    // For generating vehicles at random moments of time
+    /// Generate vehicles probabilistically each time step (use `probability` field)
     Random,
 }
 
@@ -41,7 +55,30 @@ impl fmt::Display for TripType {
 
 pub type TripID = i64; // Alias for TripID
 
-/// Represents a trip with vehicles generator
+/// Vehicle generator that spawns vehicles along specified routes.
+///
+/// A `Trip` defines a vehicle generation pattern including timing, routing,
+/// and vehicle characteristics. It acts as a factory for creating vehicles
+/// during simulation runtime.
+///
+/// # Generation Modes
+///
+/// - **Constant**: Regular interval spawning using `time` field  
+/// - **Random**: Probabilistic spawning using `probability` field
+/// - **Time-bounded**: Optional `start_time` and `end_time` limits
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
+/// use micro_traffic_sim_core::agents_types::AgentType;
+/// 
+/// // Rush hour traffic: frequent car generation
+/// let rush_hour = Trip::new(1, 50, TripType::Constant)
+///     .with_time(5)  // Every 5 time units
+///     .with_allowed_agent_type(AgentType::Car)
+///     .build();
+/// ```
 #[derive(Debug, Clone)]
 pub struct Trip {
     // Cells which must be traversed in exact given order by the agent
@@ -232,11 +269,11 @@ impl TripBuilder {
         self
     }
 
-    /// Sets the probablity for generating vehicle
+    /// Sets the probability for generating vehicle
     ///
     /// # Arguments
     ///
-    /// * `probablity` - Probability with which vehicles are generated if trip type is TripType::Random
+    /// * `probability` - Probability with which vehicles are generated if trip type is TripType::Random
     ///
     /// # Example
     ///
