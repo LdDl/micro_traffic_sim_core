@@ -8,9 +8,15 @@ use crate::{
 };
 use std::fmt;
 
+/// Error types for handling no-route-found scenarios.
 #[derive(Debug, Clone)]
 pub enum NoRouteError {
-    NoVertexFound { cell_id: CellID },
+    /// Indicates that the destination cell vertex was not found in the graph.
+    NoVertexFound {
+        /// The ID of the cell that could not be found
+        cell_id: CellID
+    },
+    /// Indicates that the there is not exit path
     NoExitPath,
 }
 

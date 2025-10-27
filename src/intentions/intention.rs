@@ -16,17 +16,28 @@ use std::collections::HashMap;
 use std::f64::INFINITY;
 use std::fmt;
 
+/// Error types for intention calculation failures.
 #[derive(Debug, Clone)]
 pub enum IntentionError {
+    /// Source cell not found in the grid.
     NoSourceCell(CellID),
+    /// Target cell not found in the grid.
     NoTargetCell(CellID),
+    /// Left cell not found in the grid.
     NoLeftCell(CellID),
+    /// Right cell not found in the grid.
     NoRightCell(CellID),
+    /// Failed to find alternative path via left cell.
     LeftPathFind(CellID),
+    /// Failed to find alternative path via right cell.
     RightPathFind(CellID),
+    /// Vehicle-related error.
     VehicleError(VehicleError),
+    /// No path found between source and target.
     NoPathFound(AStarError),
+    /// No path found in no-route scenario.
     NoPathForNoRoute(NoRouteError),
+    /// Cell has invalid speed limit.
     BadSpeedLimit(i64, i32),
 }
 
