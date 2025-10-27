@@ -2,6 +2,62 @@ use crate::geom::{new_point};
 use crate::grid::cell::Cell;
 use crate::grid::zones::ZoneType;
 
+/// Generates a multi-lane straight road with lane change connections.
+///
+/// Creates a series of connected lanes with proper forward movement and lane changing
+/// capabilities. Each lane has Birth (start), Common (middle), and Death (end) zones.
+///
+/// # Arguments
+///
+/// - `length_meters` - Total road length in meters
+/// - `step` - Length of each cell in meters  
+/// - `lanes_num` - Number of parallel lanes to create
+///
+/// # Returns
+///
+/// Vector of [`Cell`] objects representing the complete road network with:
+/// - Forward connections within each lane
+/// - Left/right connections between adjacent lanes
+/// - Proper zone types (Birth → Common → Death)
+///
+/// # Layout
+///
+/// ```text
+/// Lane 2: [B] → [C] → [C] → ... → [D]
+///            ↘ ↗   ↘ ↗  ↘ ↗ 
+///            ↗ ↘   ↗ ↘  ↗ ↘       
+/// Lane 1: [B] → [C] → [C] → ... → [D]
+/// 
+/// B = Birth zone, C = Common zone, D = Death zone
+/// → = Forward connection, ↘, ↗ = Lane change connection
+/// ```
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::utils::generators::generate_one_lane_cells;
+/// 
+/// // Single lane, 50m road, 5m per cell = 10 cells
+/// let single_lane = generate_one_lane_cells(50.0, 5.0, 1);
+/// assert_eq!(single_lane.len(), 10);
+/// 
+/// // Two lanes, 100m road, 10m per cell = 20 cells total
+/// let dual_lane = generate_one_lane_cells(100.0, 10.0, 2);
+/// assert_eq!(dual_lane.len(), 20); // 2 lanes × 10 cells each
+/// ```
+///
+/// # Lane Change Connections
+///
+/// - **Left connections**: Right (lower) lane cells can change to left (upper) lane
+/// - **Right connections**: Left (upper) lane cells can change to right (lower) lane
+/// - **No connections at ends**: Birth and Death cells don't allow lane changes
+///
+/// # Cell Properties
+///
+/// - **Cell IDs**: Sequential numbering (1, 2, 3, ...)
+/// - **Coordinates**: (x, y) where x = distance, y = lane number
+/// - **Speed limit**: Fixed at 3 cells/step
+/// - **Meso links**: Each lane gets unique link ID
 pub fn generate_one_lane_cells(length_meters: f64, step: f64, lanes_num: usize) -> Vec<Cell> {
     let single_lane_cells_num = (length_meters / step).ceil() as usize;
     let mut cells_counter: i64 = 1;

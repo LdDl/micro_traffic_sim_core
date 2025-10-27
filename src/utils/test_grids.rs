@@ -3,27 +3,38 @@ use crate::{
     grid::{cell::Cell, road_network::GridRoads, zones::ZoneType},
 };
 
-/// Creates a simple grid for testing purposes
+/// Creates a simple grid for testing purposes with complex lane change patterns.
+///
+/// This grid provides a test case with multiple lanes, merging points,
+/// and various connection types for complex behavior testing.
+///
+/// # Usage
+/// 
+/// ```rust
+/// use micro_traffic_sim_core::utils::test_grids::create_pretty_simple_grid;
+/// 
+/// let grid = create_pretty_simple_grid();
+/// println!("Test grid has {} cells", grid.get_cells_num());
+/// ```
 ///
 /// # Example
+/// ```text
+/// .         (44) ---(55) ---(66)
+/// .            \   /       /
+/// .             \ /       /
+/// .              |       |
+/// .            /   \    /
+/// .           /     \  /
+/// .         (4) ----(5) ----(6)
+/// .            \   /   \   /   \
+/// .             \ /     \ /     \ Forward
+/// .              |       |      (7)
+/// .            /   \    / \     / Forward
+/// .           /     \  /   \   /
+/// . (101) --(1) ----(2) ----(3)
+/// .                             \
+/// .                              (8)
 /// ```
-/// // .         (44) ---(55) ---(66)
-/// // .            \   /       /
-/// // .             \ /       /
-/// // .              |       |
-/// // .            /   \    /
-/// // .           /     \  /
-/// // .         (4) ----(5) ----(6)
-/// // .            \   /   \   /   \
-/// // .             \ /     \ /     \ Forward
-/// // .              |       |      (7)
-/// // .            /   \    / \     / Forward
-/// // .           /     \  /   \   /
-/// // . (101) --(1) ----(2) ----(3)
-/// // .                             \
-/// // .                              (8)
-/// ```
-///
 pub fn create_pretty_simple_grid() -> GridRoads {
     let mut grid = GridRoads::new();
 
@@ -177,6 +188,15 @@ pub fn create_pretty_simple_grid() -> GridRoads {
 
 /// Creates a conflict zones grid for testing purposes
 ///
+/// # Usage
+/// 
+/// ```rust
+/// use micro_traffic_sim_core::utils::test_grids::create_conflict_zones_grid;
+/// 
+/// let grid = create_conflict_zones_grid();
+/// println!("Conflict zones grid has {} cells", grid.get_cells_num());
+/// ```
+/// 
 /// # Example
 /// ```
 /// // .  (7)
@@ -198,7 +218,6 @@ pub fn create_pretty_simple_grid() -> GridRoads {
 /// // .  (1)            (12)
 /// // .
 /// ```
-///
 pub fn create_conflict_zones_grid() -> GridRoads {
     let mut grid = GridRoads::new();
 
@@ -351,6 +370,15 @@ pub fn create_conflict_zones_grid() -> GridRoads {
 
 /// Creates a conflict zones multiple grid for testing purposes
 ///
+/// # Usage
+/// 
+/// ```rust
+/// use micro_traffic_sim_core::utils::test_grids::create_conflict_zones_multiple_grid;
+/// 
+/// let grid = create_conflict_zones_multiple_grid();
+/// println!("Conflict zones multiple grid has {} cells", grid.get_cells_num());
+/// ```
+/// 
 /// # Example
 /// ```
 /// // .  (7)
@@ -551,6 +579,15 @@ pub fn create_conflict_zones_multiple_grid() -> GridRoads {
 
 /// Creates a simple cross shape grid for testing purposes
 ///
+/// # Usage
+/// 
+/// ```rust
+/// use micro_traffic_sim_core::utils::test_grids::create_simple_cross_shape_grid;
+/// 
+/// let grid = create_simple_cross_shape_grid();
+/// println!("Simple cross shape grid has {} cells", grid.get_cells_num());
+/// ```
+/// 
 /// # Example
 /// ```
 /// // . (1)             (9)

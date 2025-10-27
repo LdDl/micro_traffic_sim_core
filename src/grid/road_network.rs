@@ -129,4 +129,22 @@ impl GridRoads {
     {
         self.cells.iter()
     }
+
+    /// Returns the total number of cells in the grid.
+    /// 
+    /// # Returns
+    /// The number of cells as a `usize`.
+    /// 
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::grid::cell::Cell;
+    /// use micro_traffic_sim_core::grid::road_network::GridRoads;
+    /// let mut grid = GridRoads::new();
+    /// grid.add_cell(Cell::new(1).build());
+    /// grid.add_cell(Cell::new(2).build());
+    /// assert_eq!(grid.get_cells_num(), 2);
+    /// ```
+    pub fn get_cells_num(&self) -> usize {
+        self.cells.len()
+    }
 }

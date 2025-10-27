@@ -1,3 +1,8 @@
+//! Deterministic random number generation for testing.
+//! 
+//! This module provides a drop-in replacement for `rand::thread_rng()` that uses
+//! a fixed seed during testing to ensure reproducible results.
+
 use rand::Rng;
 
 #[cfg(not(test))]
