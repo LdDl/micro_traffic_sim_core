@@ -4,19 +4,36 @@ use std::sync::OnceLock;
 use tracing::{info, debug, trace, warn, error, Level};
 use tracing_subscriber::{fmt as tracing_fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-/// VerboseLevel is just distinction between very detailed debug information and not that detailed
+/// Hierarchical logging levels for simulation debugging.
+///
+/// Each level includes all lower levels, providing increasingly detailed output.
+/// Uses JSON structured logging via the `tracing` crate.
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::verbose::{VerboseLevel, set_verbose_level};
+/// 
+/// // Set logging level
+/// set_verbose_level(VerboseLevel::Main);
+/// 
+/// // Check current level
+/// if VerboseLevel::Main.is_at_least(VerboseLevel::Additional) {
+///     println!("Will log additional details");
+/// }
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum VerboseLevel {
     /// No debug at all
     None = 0,
-    /// Just print before each main function
+    /// Major simulation phases - `info` level
     Main = 1,
-    /// Nested output inside of each main function
+    /// Function-level details - `debug` level  
     Additional = 2,
-    /// Loop debug
+    /// Loop iterations and fine operations - `debug` level
     Detailed = 3,
-    /// Log everything
+    /// Everything including traces - `trace` level
     All = 4,
 }
 
