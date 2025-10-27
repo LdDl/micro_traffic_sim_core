@@ -55,6 +55,11 @@ impl fmt::Display for IntentionError {
     }
 }
 
+/// Calculates all vehicle intentions for the current simulation step.
+///
+/// For each vehicle, determines the desired maneuver and target cell,
+/// handling blocked vehicles and alternate maneuvers if needed.
+/// Returns a storage of all intentions for conflict resolution.
 pub fn prepare_intentions<'a, 'b>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
@@ -76,6 +81,10 @@ pub fn prepare_intentions<'a, 'b>(
     Ok(intentions)
 }
 
+/// Computes the movement intention for a single vehicle.
+///
+/// Determines the best maneuver (forward, lane change, block, etc.)
+/// and target cell, considering speed, acceleration, obstacles, and pathfinding.
 pub fn find_intention<'a>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
@@ -293,6 +302,10 @@ pub fn find_intention<'a>(
 /* @todo: should be an argument in further  */
 const UNDEFINED_MANEUVER: LaneChangeType = LaneChangeType::ChangeRight;
 
+/// Attempts to find an alternate maneuver (lane change) for a blocked vehicle.
+///
+/// If the vehicle cannot move forward, tries left or right lane changes
+/// and selects the best available option.
 pub fn find_alternate_intention<'a>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,

@@ -198,7 +198,7 @@ pub fn create_pretty_simple_grid() -> GridRoads {
 /// ```
 /// 
 /// # Example
-/// ```
+/// ```text
 /// // .  (7)
 /// // .     \
 /// // .      \               ---(6)
@@ -380,7 +380,7 @@ pub fn create_conflict_zones_grid() -> GridRoads {
 /// ```
 /// 
 /// # Example
-/// ```
+/// ```text
 /// // .  (7)
 /// // .     \
 /// // .      \               ---(6)
@@ -589,7 +589,7 @@ pub fn create_conflict_zones_multiple_grid() -> GridRoads {
 /// ```
 /// 
 /// # Example
-/// ```
+/// ```text
 /// // . (1)             (9)
 /// // .    \           /
 /// // .     \         /

@@ -41,10 +41,12 @@ impl fmt::Display for IntentionType {
     }
 }
 
-/// Represents the intention of the agent for the cell
+/// Associates a vehicle with its intention type for a cell.
 #[derive(Debug, Clone)]
 pub struct CellIntention{
+    /// Reference to the vehicle that has the intention
     pub vehicle: VehicleRef,
+    /// Type of intention for the cell
     pub int_type: IntentionType,
 }
 

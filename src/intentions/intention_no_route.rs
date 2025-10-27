@@ -31,6 +31,10 @@ impl fmt::Display for NoRouteError {
     }
 }
 
+/// Handles cases where no route to the destination is found.
+///
+/// Returns a single-step path in a possible direction (forward, left, or right),
+/// or an error if no exit is possible.
 pub fn process_no_route_found<'a>(
     current_cell: &'a Cell,
     net: &'a GridRoads,

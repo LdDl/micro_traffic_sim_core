@@ -8,7 +8,10 @@ use crate::{
 };
 use std::collections::HashMap;
 
-/// Represents an observable path with movement details
+/// Contains details about a vehicle's observable movement along a path.
+///
+/// Includes the desired maneuver, last cell state, trimmed path,
+/// and flags for obstacles, speed limits, and maneuvers.
 #[derive(Debug, Clone)]
 pub struct ObservablePath<'a> {
     /// Desired lane change maneuver
@@ -17,13 +20,20 @@ pub struct ObservablePath<'a> {
     pub last_cell_state: CellState,
     /// Path vertices (cells) after trimming
     pub trimmed_path: Vec<&'a Cell>,
+    /// Indicates if another vehicle is on the path
     pub has_vehicle_on_path: bool,
+    /// Indicates if speed limit was reached
     pub speed_limit_reached: bool,
+    /// Indicates if movement was stopped due to a maneuver
     pub stopped_on_maneuver: bool,
+    /// Indicates if movement was stopped due to speed restrictions
     pub stopped_speed_possible: bool,
 }
 
-/// Process path by trimming and analyzing possible movement
+/// Analyzes a path and determines how far a vehicle can move.
+///
+/// Trims the path based on speed, obstacles, maneuvers, and cell states.
+/// Returns details about the possible movement and any stopping conditions.
 ///
 /// # Arguments
 /// * `shortest_path` - Reference to path to process

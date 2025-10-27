@@ -3,7 +3,9 @@ use crate::grid::cell::CellID;
 use crate::intentions::{CellIntention, IntentionType};
 use std::collections::HashMap;
 
-/// Storage for cell intentions, mapping CellID to a vector of intentions and storing vehicle intentions.
+/// Stores all cell intentions for the current simulation step.
+///
+/// Maps each cell to a list of intentions (target, transit, tail) for conflict resolution.
 #[derive(Debug, Default)]
 pub struct Intentions {
     cells_intentions: HashMap<CellID, Vec<CellIntention>>,
