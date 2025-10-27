@@ -38,6 +38,8 @@ lazy_static! {
 }
 
 /// Represents the different states of traffic lights.
+/// Reference for signal states based on SUMO definitions:
+/// https://sumo.dlr.de/docs/Simulation/Traffic_Lights.html#signal_state_definitions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SignalType {
     /// Undefined signal type.

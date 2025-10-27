@@ -1,4 +1,4 @@
-use crate::geom::{Point, PointType};
+use crate::geom::PointType;
 use crate::grid::cell::CellID;
 use crate::traffic_lights::signals::SignalType;
 
