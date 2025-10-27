@@ -125,7 +125,7 @@
 //!
 //! ### Cell State Management
 //!
-//! End-developer most of time do not need to manage cell states directly,
+//! **End-developer most of time do not need to manage cell states directly**,
 //! but in some scenarios it can be useful to temporarily ban a cell.
 //! Current engine internally changes some cell states during simulation, when
 //! traffic lights have red signal.

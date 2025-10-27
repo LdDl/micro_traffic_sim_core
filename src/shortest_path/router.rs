@@ -409,7 +409,7 @@ pub fn shortest_path<'a>(
 /// 1. Calculates tentative g_score (current g_cost + edge cost)
 /// 2. Compares with existing best cost to neighbor
 /// 3. If better path found, updates data structures and adds to open set
-/// 4. Uses geometric distance as edge cost (currently, can be changed in future, see mod.rs of this module) between cells.
+/// 4. Uses geometric distance as edge cost (currently, can be changed in future, see [`mod.rs`](crate::shortest_path) of this module) between cells.
 fn process_neighbor<'a>(
     goal: &Cell,
     // current_node: AStarNode<'a>,

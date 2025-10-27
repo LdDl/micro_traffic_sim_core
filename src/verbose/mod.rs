@@ -5,8 +5,8 @@
 //! This module provides hierarchical logging levels and structured event tracking
 //! using the `tracing` crate with JSON output format.
 //!
-//! Most of time end-developer should not use this module directly, except
-//! for setting the global logging level and using logging macros.
+//! **Most of time end-developer should not use this module directly, except
+//! for setting the global logging level and using logging macros.**
 //! 
 //! ## Components
 //! 
