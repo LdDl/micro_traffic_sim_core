@@ -319,7 +319,7 @@ macro_rules! verbose_log {
     };
 }
 
-/// Global tracing-native macros for more idiomatic usage
+/// Global tracing-native macros for more idiomatic usage. Corresponds to [`VerboseLevel::Main`].
 #[macro_export]
 macro_rules! log_main {
     ($event:expr, $msg:literal, $($key:ident = $value:expr),*) => {
@@ -333,6 +333,10 @@ macro_rules! log_main {
     };
 }
 
+/// Logs a debug-level message if the global verbose level is [`VerboseLevel::Additional`] or higher.
+///
+/// Use for function-level details and intermediate simulation events.
+/// Example: logging vehicle maneuvers, conflict detection, or intention processing.
 #[macro_export]
 macro_rules! log_additional {
     ($event:expr, $msg:literal, $($key:ident = $value:expr),*) => {
@@ -346,6 +350,9 @@ macro_rules! log_additional {
     };
 }
 
+/// Logs a debug-level message if the global verbose level is [`VerboseLevel::Detailed`] or higher.
+///
+/// Use for fine-grained details such as loop iterations.
 #[macro_export]
 macro_rules! log_detailed {
     ($event:expr, $msg:literal, $($key:ident = $value:expr),*) => {
@@ -359,6 +366,9 @@ macro_rules! log_detailed {
     };
 }
 
+/// Logs a trace-level message if the global verbose level is [`VerboseLevel::All`].
+///
+/// Use for the most verbose output, including every simulation event and internal state change.
 #[macro_export]
 macro_rules! log_all {
     ($event:expr, $msg:literal, $($key:ident = $value:expr),*) => {
