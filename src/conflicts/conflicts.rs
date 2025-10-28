@@ -13,7 +13,9 @@ use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::{fmt, vec};
 
-/// Different types of conflicts that can occur between vehicles
+/// Describes the type of conflict detected between vehicles trying to move to the same cell or whose paths intersect.
+///
+/// Used to classify and resolve different traffic situations, such as merges, lane changes, tail blocking, and conflict zones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictType {
     /// Just undefined conflict
@@ -86,7 +88,10 @@ impl fmt::Display for ConflictType {
     }
 }
 
-/// Represents a conflict between vehicles
+/// Represents a conflict between vehicles for a specific cell or trajectory.
+///
+/// Contains the cell where the conflict occurs, the involved vehicles, which vehicle has priority, and the conflict type.
+/// Used for further resolution and movement decision.
 #[derive(Debug)]
 pub struct CellConflict {
     /// Cell ID where the conflict occurs
@@ -115,9 +120,15 @@ impl fmt::Display for CellConflict {
     }
 }
 
+/// Errors that can occur during conflict detection or resolution.
+///
+/// - `CellNotFound`: A referenced cell does not exist in the grid network.
+/// - `InvalidVehicle`: A vehicle reference is invalid or inconsistent (e.g., missing tail).
 #[derive(Debug, Clone)]
 pub enum ConflictError {
+    /// The specified cell does not exist in the grid.
     CellNotFound(CellID),
+    /// The vehicle reference is invalid or inconsistent.
     InvalidVehicle(String),
 }
 
@@ -130,17 +141,24 @@ impl std::fmt::Display for ConflictError {
     }
 }
 
-/// Information about detected trajectory conflict (to avoid borrowing issues)
-#[derive(Debug)]
+/// Represents information about a detected trajectory conflict between two vehicles.
+///
+/// Used to avoid borrow checker issues when reporting crossing or tail conflicts.#[derive(Debug)]
 pub struct TrajectoryConflictInfo {
+    /// ID of the vehicle initiating the conflict
     pub vehicle_id: u64,
+    /// ID of the vehicle on the side
     pub side_vehicle_id: u64,
+    /// Type of the conflict detected
     pub conflict_type: ConflictType,
+    /// ID of the vehicle that has priority in the conflict
     pub priority_vehicle_id: u64,
 }
 
-/// Find crossing trajectories conflicts (naive implementation)
-/// Returns TrajectoryConflictInfo to avoid borrowing complexity
+/// Scans for crossing trajectory conflicts between a vehicle's intention and others.
+///
+/// Checks if a vehicle's intended maneuver (especially lane changes) will intersect with another vehicle's path or tail.
+/// Returns details about the conflict and which vehicle has priority, or None if no conflict is found.
 pub fn find_cross_trajectories_conflict_naive(
     cell_intention: &CellIntention,
     intention_cell: &Cell,
@@ -295,8 +313,9 @@ pub fn find_cross_trajectories_conflict_naive(
     Ok(None)
 }
 
-/// Helper function to create actual CellConflict from TrajectoryConflictInfo
-/// This would be called by the collect_conflicts function with proper mutable references
+/// Converts a trajectory conflict info into a CellConflict struct.
+///
+/// Used to create a conflict record for further resolution.
 impl CellConflict {
     pub fn from_trajectory_conflict_info(
         info: TrajectoryConflictInfo,
@@ -321,6 +340,10 @@ impl CellConflict {
     }
 }
 
+/// Checks if two intentions for the same cell are in a conflict zone and determines the winner.
+///
+/// Uses the conflict zone's priority rules to decide which vehicle gets to move.
+/// Returns the cell ID of the vehicle with priority, or None if no conflict zone applies.
 pub fn find_zone_conflict_for_two_intentions(
     intention_cell_id: CellID,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
@@ -361,8 +384,9 @@ pub fn find_zone_conflict_for_two_intentions(
 }
 
 
-/// Find conflicts in conflict zones
-/// This handles trajectory conflicts within predefined conflict zones
+/// Finds trajectory conflicts within predefined conflict zones.
+///
+/// Looks for special intersection scenarios defined by conflict zones, and returns a CellConflict and zone ID if found.
 pub fn find_conflicts_in_conflict_zones(
     cell_intention: &CellIntention,
     intention_cell: &Cell,
@@ -507,8 +531,9 @@ pub fn find_conflicts_in_conflict_zones(
     Ok(Some((conflict, cell_b_conflict_zone_id)))
 }
 
-/// Find conflict type between two intentions
-/// Returns the winning intention and the conflict type
+/// Determines the conflict type and which vehicle wins between two intentions for the same cell.
+///
+/// Handles tail, transit, and conflict zone scenarios, and falls back to simple rules if needed.
 pub fn find_conflict_type<'a>(
     intention_cell_id: CellID,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
@@ -588,6 +613,9 @@ fn find_elem_in_slice(target: CellID, slice: &[CellID]) -> Option<usize> {
     slice.iter().position(|&x| x == target)
 }
 
+/// Creates a CellConflict for multiple vehicles targeting the same cell.
+///
+/// Deduplicates vehicles, determines which has priority, and sets the conflict type.
 pub fn new_conflict_multiple(
     cell: &Cell,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
@@ -659,7 +687,9 @@ pub fn new_conflict_multiple(
     Ok(conflict)
 }
 
-/// Collect all conflicts from collected intentions
+/// Collects all conflicts from the current set of vehicle intentions for this simulation step.
+///
+/// Iterates over all intentions, detects conflicts (including merges, crossings, and tails), and returns a list of CellConflict records for resolution.
 pub fn collect_conflicts(
     collected_intentions: &Intentions,
     net: &GridRoads,

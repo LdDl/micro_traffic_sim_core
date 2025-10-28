@@ -1,17 +1,19 @@
 use crate::conflicts::conflicts::*;
-use crate::agents::{Vehicle, VehicleID};
 use crate::maneuver::LaneChangeType;
 use crate::grid::cell::CellID;
 use crate::verbose::*;
 
 use std::fmt;
 
+/// Error type for conflict resolution failures.
 #[derive(Debug, Clone)]
 pub enum ConflictSolverError {
+    /// The conflict data is inconsistent or invalid.
     InvalidConflict(String),
+    /// Not enough participants in the conflict to resolve it.
     InsufficientParticipants(CellID, String),
+    /// The priority participant index is invalid.
     InvalidPriorityIndex(CellID, usize, usize),
-
 }
 
 impl fmt::Display for ConflictSolverError {
@@ -28,7 +30,7 @@ impl fmt::Display for ConflictSolverError {
     }
 }
 
-/// Solves conflicts between vehicles based on their intentions and priority
+/// Solves conflicts between vehicles based on their intentions and priority for the current simulation step.
 ///
 /// # Arguments
 /// * `conflicts_data` - A vector of `CellConflict` containing conflicts to be resolved

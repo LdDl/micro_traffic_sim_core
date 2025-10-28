@@ -8,9 +8,13 @@ use crate::utils::rand::thread_rng;
 
 const EPS_COOP_LEVEL: f64 = 0.0001;
 
-// Define the structure with function pointers
+/// Defines a rule for resolving a conflict between two vehicles.
+///
+/// Each rule consists of a condition (when the rule applies) and a resolver (how to pick the winner and conflict type).
 struct ConflictRule {
+    /// Returns true if this rule applies to the given pair of vehicles.
     condition: fn(&Vehicle, &Vehicle) -> bool,
+    /// Resolves the conflict and returns the winning intention and conflict type.
     resolver: for<'a> fn(
         &'a CellIntention,
         &'a CellIntention,
@@ -128,7 +132,9 @@ static CONFLICT_RULES: &[ConflictRule] = conflict_rules![
 //     },
 // ];
 
-// Function to resolve conflicts
+/// Applies all simple conflict rules to a pair of intentions and returns the winner and conflict type.
+///
+/// Rules cover lane changes, merges, blocking, and forward movement.
 pub fn resolve_simple_rules<'a>(
     intention_one: &'a CellIntention,
     intention_two: &'a CellIntention,
@@ -143,18 +149,40 @@ pub fn resolve_simple_rules<'a>(
     panic!("Unexpected conflict type")
 }
 
-/// Checks if the vehicle is changing lane
+/// Checks if the vehicle wants to perform a lane change maneuver.
+///
+/// # Visualization
+/// ```text
+/// Lane 1: →→→[Cell]
+/// Lane 2: →→→↗
+///            ↑
+///        [Lane Change]
+/// ```
 pub fn changing_lane(agent: &Vehicle) -> bool {
     agent.intention.intention_maneuver == LaneChangeType::ChangeLeft
         || agent.intention.intention_maneuver == LaneChangeType::ChangeRight
 }
 
-/// Checks if one vehicle has aggressive strategy and another has cooperative
+/// Returns true if the first vehicle is aggressive and the second is cooperative.
+/// Future works: aggressive vehicles may win conflicts even against traffic rules.
 pub fn has_agressive_level_advantage(vehicle_one: &Vehicle, vehicle_two: &Vehicle) -> bool {
     vehicle_one.strategy_type == BehaviourType::Aggressive
         && vehicle_two.strategy_type == BehaviourType::Cooperative
 }
 
+/// Resolves a merge conflict where both vehicles are changing lanes into the same cell.
+///
+/// Priority is given to aggressive vehicles, or to the vehicle performing a left maneuver (simulating right-hand traffic).
+/// 
+/// # Visualization
+/// ```text
+/// Lane 1: →→→↘
+///              [Cell]
+/// Lane 2: →→→↗  ↑
+///               ↑
+///        [Merge Point]
+/// Priority: Aggressive > Left Maneuver (right-hand traffic)
+/// ```
 pub fn resolve_merge_lane_change<'a>(
     intention_one: &'a CellIntention,
     intention_two: &'a CellIntention,
@@ -190,6 +218,17 @@ pub fn resolve_merge_lane_change<'a>(
     }
 }
 
+/// Resolves a merge conflict by comparing speed and cooperativity.
+///
+/// Used when both vehicles have the same intention type (target or transit).
+///
+/// # Visualization
+/// ```text
+/// Road A: →→→ (speed 5, coop 0.3) ↘
+///                                 [Cell]
+/// Road B: →→→ (speed 3, coop 0.8) ↗
+/// Priority: Faster > Less cooperative > Random
+/// ```
 pub fn resolve_by_speed_and_cooperativity<'a>(
     intention_one: &'a CellIntention,
     intention_two: &'a CellIntention,
@@ -225,6 +264,20 @@ pub fn resolve_by_speed_and_cooperativity<'a>(
     (intention_one, ConflictType::MergeForward)
 }
 
+/// Resolves a merge conflict where both vehicles are moving forward into the same cell.
+///
+/// Priority is given to aggressive vehicles, then to the vehicle with higher speed, then to the less cooperative vehicle.
+/// If all else is equal, the winner is chosen randomly.
+///
+/// # Visualization
+/// ```text
+/// Road A: →→→
+///             ↘
+///              [Merge Cell]
+///             ↗
+/// Road B: →→→
+/// Priority: Aggressive > Faster > Less cooperative > Random
+/// ```
 pub fn resolve_merge_forward<'a>(
     intention_one: &'a CellIntention,
     intention_two: &'a CellIntention,
