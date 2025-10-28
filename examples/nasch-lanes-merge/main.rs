@@ -5,6 +5,7 @@ use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
 use micro_traffic_sim_core::verbose::init_logger;
 use micro_traffic_sim_core::verbose::VerboseLevel;
+
 use std::rc::Rc;
 use std::cell::RefCell;
 

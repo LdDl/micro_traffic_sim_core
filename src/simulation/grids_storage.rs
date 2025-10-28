@@ -28,12 +28,14 @@ impl fmt::Display for GridsStorageError {
 
 impl std::error::Error for GridsStorageError {}
 
+/// Storage for TLS and various grids used in the simulation, such as the vehicle road network.
+///
+/// **Future works**: Implement pedestrian network, crosswalks, and other relevant grids.
 #[derive(Debug)]
 pub struct GridsStorage {
-    // The grid intented for vehicles only
+    /// The grid intented for vehicles only
     vehicles_net: GridRoads,
-    // @future: there will be other grids and data: for pedestrian network, for crosswalks, for
-    // traffic lights and etc.
+    /// traffic lights and etc.
     tls: HashMap<TrafficLightID, TrafficLight>,
 }
 
@@ -116,6 +118,7 @@ impl GridsStorage {
         &mut self.tls
     }
 
+    /// Advances the state of all traffic lights by one tick, updating their phases and cell states accordingly.
     pub fn tick_traffic_lights(&mut self, verbose: VerboseLevel) -> Result<HashMap<TrafficLightID, Vec<TrafficLightGroupState>>, GridsStorageError> {
         if verbose.is_at_least(VerboseLevel::Main) {
             verbose.log_with_fields(
@@ -200,6 +203,34 @@ impl GridsStorageBuilder {
     /// ```
     pub fn with_vehicles_net(mut self, vehicles_grid: GridRoads) -> Self {
         self.storage.vehicles_net = vehicles_grid;
+        self
+    }
+
+    /// Puts the traffic lights into the storage
+    /// 
+    /// # Arguments
+    /// * `tls` - HashMap of traffic lights to be stored
+    ///
+    /// # Example
+    /// 
+    /// ```
+    /// use micro_traffic_sim_core::traffic_lights::lights::TrafficLight;
+    /// use micro_traffic_sim_core::traffic_lights::lights::TrafficLightID;
+    /// use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
+    /// 
+    /// let mut tls = std::collections::HashMap::new();
+    /// let tl1 = TrafficLight::new(TrafficLightID(1)).build();
+    /// let tl2 = TrafficLight::new(TrafficLightID(2)).build();
+    /// tls.insert(tl1.get_id(), tl1);
+    /// tls.insert(tl2.get_id(), tl2);
+    /// 
+    /// let storage = GridsStorage::new()
+    ///     .with_tls(tls)
+    ///     .build();
+    /// println!("{:?}", storage);
+    /// ```
+    pub fn with_tls(mut self, tls: HashMap<TrafficLightID, TrafficLight>) -> Self {
+        self.storage.tls = tls;
         self
     }
 

@@ -481,6 +481,19 @@ impl Session {
         }
     }
 
+    /// Main simulation step function
+    /// 
+    /// Pipeline is:
+    /// ```text
+    /// 1. Generate vehicles (trips)
+    /// 2. Update positions
+    /// 3. Traffic light updates
+    /// 4. Prepare intentions      ← intentions module
+    /// 5. Collect conflicts       ← conflicts module
+    /// 6. Solve conflicts         ← conflicts module
+    /// 7. Execute movement        ← movement module
+    /// 8. Collect state dump
+    /// ```
     pub fn step(&mut self) -> Result<AutomataState, SessionError> {
         self.verbose.log_with_fields(
             EVENT_STEP,

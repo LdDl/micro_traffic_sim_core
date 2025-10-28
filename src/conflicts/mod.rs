@@ -37,7 +37,7 @@
 //!
 //! ## Conflict types
 //!
-//! All of the following conflict types are described by the [`ConflictType`](crate::conflicts::ConflictType) enum:
+//! All of the following conflict types are described by the [`conflicts::ConflictType`](ConflictType) enum:
 //! - **ForwardLaneChange**: Forward vs. lane change maneuver.
 //! - **MergeForward**: Multiple vehicles merging forward.
 //! - **MergeLaneChange**: Multiple vehicles merging via lane change.

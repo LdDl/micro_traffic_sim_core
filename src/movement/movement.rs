@@ -104,7 +104,7 @@ impl std::error::Error for MovementError {}
 ///
 /// ## 4. Vehicle removal
 /// Vehicles are removed from simulation when:
-/// - **Despawn zone reached**: Vehicle enters [`ZoneType::Death`](crate::grid::zones::ZoneType::Death) cell.
+/// - **Despawn zone reached**: Vehicle enters [`ZoneType::Death`](ZoneType::Death) cell.
 /// - **Destination reached**: Vehicle arrives at intended destination.
 ///
 /// # Performance Characteristics
