@@ -95,6 +95,10 @@ Every simulation follows this pattern:
 5. **Extract Results** - Collect vehicle states and positions
 6. **Visualize** - E.g. plot results with gnuplot
 
+The full example for grid basics is in [`examples/grid-basics`](examples/grid-basics).
+
+The full example for whole simulation is in [`examples/tutorial`](examples/tutorial).
+
 ### Creating the grid
 
 The grid represents your road network as a collection of connected cells. Each cell is a discrete unit where vehicles can be positioned.
@@ -123,8 +127,6 @@ fn main() {
 }
 /* ... */
 ```
-
-The full example for grid basics is in [`examples/grid-basics`](examples/grid-basics).
 
 **Cell attributes explained:**
 
