@@ -215,12 +215,11 @@ impl GridsStorageBuilder {
     /// 
     /// ```
     /// use micro_traffic_sim_core::traffic_lights::lights::TrafficLight;
-    /// use micro_traffic_sim_core::traffic_lights::lights::TrafficLightID;
     /// use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
     /// 
     /// let mut tls = std::collections::HashMap::new();
-    /// let tl1 = TrafficLight::new(TrafficLightID(1)).build();
-    /// let tl2 = TrafficLight::new(TrafficLightID(2)).build();
+    /// let tl1 = TrafficLight::new(1).build();
+    /// let tl2 = TrafficLight::new(2).build();
     /// tls.insert(tl1.get_id(), tl1);
     /// tls.insert(tl2.get_id(), tl2);
     /// 

@@ -10,6 +10,7 @@ use crate::intentions::{IntentionError, prepare_intentions};
 use crate::conflicts::{ConflictError, ConflictSolverError, collect_conflicts, solve_conflicts};
 use crate::movement::{MovementError, movement};
 use crate::simulation::states::{AutomataState, VehicleState};
+use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
 use crate::verbose::*;
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -225,6 +226,11 @@ impl Session {
     /// Returns a reference to the cell with the given ID if it exists in the vehicles grid.
     pub fn get_cell(&self, cell_id: &CellID) -> Option<&Cell> {
         self.grids_storage.get_cell(cell_id)
+    }
+
+    /// Returns a reference to the traffic light with the given ID if it exists in the traffic lights storage.
+    pub fn get_tls_ref(&self, ) -> &HashMap<TrafficLightID, TrafficLight> {
+        self.grids_storage.get_tls_ref()
     }
 
     /// Adds given trip to the session. It also checks if trip's end time is valid and returns '0' if it is not.

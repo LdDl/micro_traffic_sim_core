@@ -83,7 +83,7 @@
 //!     .build();
 //! 
 //! // Create traffic light with timing
-//! let mut intersection = TrafficLight::new(TrafficLightID(1))
+//! let mut intersection = TrafficLight::new(1)
 //!     .with_coordinates(new_point(100.0, 200.0, None))
 //!     .with_groups(vec![north_south_group, east_west_group])
 //!     .with_phases_times(vec![15, 3, 15])  // Green: 15s, Yellow: 3s, Red: 15s

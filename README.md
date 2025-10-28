@@ -149,38 +149,198 @@ The full example for grid basics is in [`examples/grid-basics`](examples/grid-ba
 - Same time each cell can have multiple incoming connections from other cells, but it is recommended two have only one left/right incoming connection to avoid ambiguity in lane changing (number forward connections is unlimited in that context).
 
 ### Optionally add conflict zones
-@todo
-```rust
-```
 
-### Creating vehicles statically
-@todo
-```rust
-```
+Conflict zones handle situations where vehicle paths intersect, defining priority rules for resolution.
 
-### Creating vehicles dynamically via trips
-@todo
 ```rust
+use micro_traffic_sim_core::conflict_zones::{ConflictWinnerType, ConflictEdge, ConflictZone};
+use std::collections::HashMap;
+
+fn main() {
+    // ... grid setup code ...
+    // Create conflict zones storage
+    let mut conflict_zones = HashMap::new();
+    // Example: define a conflict where horizontal and vertical traffic intersect
+    let conflict_zone = ConflictZone::new(
+            1, // Conflict zone ID
+            ConflictEdge {
+                source: 3,  // Horizontal approach (cell 3)
+                target: 4,  // Horizontal exit (cell 4)
+            },
+            ConflictEdge {
+                source: 13, // Vertical approach (cell 13)
+                target: 14, // Vertical exit (cell 14)
+            },
+        )
+        // V1 has priority over H
+        .with_winner_type(ConflictWinnerType::Second)
+        .build();
+    conflict_zones.insert(conflict_zone.get_id(), conflict_zone);
+    // ... rest of simulation setup ...
+}
 ```
 
 ### Optionally add traffic lights
-@todo
+
+Traffic lights control vehicle flow through signal groups that manage different approaches.
+
 ```rust
+use micro_traffic_sim_core::traffic_lights::lights::TrafficLight;
+use micro_traffic_sim_core::traffic_lights::groups::TrafficLightGroup;
+use micro_traffic_sim_core::traffic_lights::signals::SignalType;
+use micro_traffic_sim_core::geom::new_point;
+use std::collections::HashMap;
+
+fn main() {
+    // ... grid setup code ...
+    let mut tls = HashMap::new();
+    // Create signal groups for horizontal and vertical approaches
+    let group_h = TrafficLightGroup::new(100) // Horizontal group ID
+        .with_cells_ids(vec![6])              // Control cell 6
+        .with_label("Group block H".to_string())
+        .with_signal(vec![SignalType::Green, SignalType::Red]) // Start green
+        .build();
+    let group_v2 = TrafficLightGroup::new(200) // Vertical group ID  
+        .with_cells_ids(vec![23])              // Control cell 23
+        .with_label("Group block V2".to_string())
+        .with_signal(vec![SignalType::Red, SignalType::Green]) // Start red (opposite)
+        .build();
+    // Create traffic light with timing
+    let tl = TrafficLight::new(1)
+        .with_coordinates(new_point(7.0, 4.0, None)) // Physical location
+        .with_phases_times(vec![5, 5])                // 5 steps green, 5 steps red
+        .with_groups(vec![group_h, group_v2])
+        .build();
+    tls.insert(tl.get_id(), tl);
+    // ... rest of simulation setup ...
+}
+```
+
+### Creating vehicles statically
+
+Create individual vehicles with specific starting positions and routes.
+
+```rust
+use micro_traffic_sim_core::agents::{Vehicle, VehicleRef};
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+fn main() {
+    // ... grid setup code ...
+    // Create a single vehicle
+    let vehicle = Vehicle::new(0)           // Vehicle ID
+        .with_speed(1)                      // Current speed
+        .with_speed_limit(1)                // Maximum speed
+        .with_cell(4)                       // Starting cell
+        .with_destination(9)                // Goal cell
+        .build();
+    // Convert to reference-counted format for simulation
+    let vehicles: Vec<VehicleRef> = vec![Rc::new(RefCell::new(vehicle))];
+    // ... rest of simulation setup ...
+}
+```
+
+### Creating vehicles dynamically via trips
+
+Create trip generators that spawn vehicles probabilistically during simulation.
+
+```rust
+use micro_traffic_sim_core::trips::trip::{Trip, TripType};
+use micro_traffic_sim_core::agents_types::AgentType;
+use micro_traffic_sim_core::behaviour::BehaviourType;
+
+fn main() {
+    // ... grid setup code ...
+    
+    // Create trips for different roads
+    let trips_h = Trip::new(1, 9, TripType::Random)  // From cell 1 to cell 9
+        .with_allowed_agent_type(AgentType::Car)
+        .with_allowed_behaviour_type(BehaviourType::Cooperative)
+        .with_probability(0.1)                        // 10% chance per step
+        .build();
+        
+    let trips_v1 = Trip::new(10, 19, TripType::Random) // Vertical road 1
+        .with_allowed_agent_type(AgentType::Car)
+        .with_allowed_behaviour_type(BehaviourType::Cooperative)
+        .with_probability(0.1)
+        .build();
+        
+    let trips_v2 = Trip::new(20, 29, TripType::Random) // Vertical road 2
+        .with_allowed_agent_type(AgentType::Car)
+        .with_allowed_behaviour_type(BehaviourType::Cooperative)
+        .with_probability(0.1)
+        .build();
+        
+    let trips: Vec<Trip> = vec![trips_h, trips_v1, trips_v2];
+    // ... rest of simulation setup ...
+}
 ```
 
 ### Setting up the simulation session
-@todo
+
+When the grid, vehicles, trips, and traffic lights are ready, initialize the simulation session.
 ```rust
+use micro_traffic_sim_core::grid::road_network::GridRoads;
+use micro_traffic_sim_core::agents::VehicleRef;
+use micro_traffic_sim_core::trips::trip::Trip;
+use micro_traffic_sim_core::traffic_lights::lights::{TrafficLight, TrafficLightID};
+use micro_traffic_sim_core::simulation::session::Session;
+use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
+use micro_traffic_sim_core::verbose::VerboseLevel;
+use std::collections::HashMap;
+
+fn main () {
+  let mut grid = GridRoads::new();
+  // Populate grid with cells
+  // ...
+  let vehicles: Vec<VehicleRef> = vec![/* ... vehicles ... */];
+  // Prepare vehicles or use generator
+  // ...
+  let trips: Vec<Trip> = vec![/* ... trips ... */];
+  // Prepare trips
+  // ...
+  let tls: HashMap<TrafficLightID, TrafficLight> = HashMap::new();
+  // Prepare traffic lights
+  // ...
+  let grids_storage = GridsStorage::new()
+    .with_vehicles_net(grid)
+    .with_tls(tls)
+    .build();
+  let mut session = Session::new(grids_storage, None);
+  session.set_verbose_level(VerboseLevel::Main);
+  session.add_vehicles(vehicles);
+  for trip in trips.iter() {
+    session.add_trip(trip.clone());
+  }
+}
 ```
 
-### Running the simulation
-@todo
-```rust
-```
+### Running the simulation and collecting the data
 
-### Extracting results
-@todo
+Run the simulation for a defined number of steps, collecting vehicle states at each step.
 ```rust
+let steps = 10;
+for step in 0..steps {
+  match session.step() {
+    Ok(automata_state) => {
+      for v in automata_state.vehicles {
+        println!(
+          "{};{};{};{};{:.5};{}",
+          step,
+          v.id,
+          v.vehicle_type,
+          v.last_speed,
+          v.last_angle,
+          v.last_cell,
+        );
+      }
+    }
+    Err(e) => {
+      eprintln!("Error during simulation step {}: {:?}", step, e);
+    }
+  };
+}
 ```
 
 ### Analyzing results

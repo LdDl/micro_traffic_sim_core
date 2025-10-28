@@ -73,8 +73,8 @@
 //! let steps = 10;
 //! for step in 0..steps {
 //!     match session.step() {
-//!          Ok(updated_vehicles) => {
-//!             for v in updated_vehicles.vehicles {
+//!          Ok(automata_state) => {
+//!             for v in automata_state.vehicles {
 //!                 println!(
 //!                     "{};{};{};{};{:.5};{}",
 //!                     step,

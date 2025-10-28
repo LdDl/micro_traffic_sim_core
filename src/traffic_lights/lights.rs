@@ -2,8 +2,8 @@ use crate::geom::{PointType, new_point};
 use crate::traffic_lights::groups::TrafficLightGroup;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TrafficLightID(pub i64);
+/// Type alias for TrafficLight identifiers.
+pub type TrafficLightID = i64;
 
 /// Error types for TrafficLight operations.
 #[derive(Debug)]
@@ -99,6 +99,11 @@ impl TrafficLight {
     pub fn get_groups(&self) -> &Vec<TrafficLightGroup> {
         &self.groups
     }
+
+    /// Return coordinates of the traffic light
+    pub fn get_coordinates(&self) -> PointType {
+        self.coordinates
+    }
 }
 
 /// A builder for constructing `TrafficLight` instances.
@@ -179,7 +184,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut traffic_light = TrafficLight::new(TrafficLightID(1))
+        let mut traffic_light = TrafficLight::new(1)
             .with_groups(groups)
             .with_phases_times(vec![2, 3, 10])
             .with_active_phase(0)
