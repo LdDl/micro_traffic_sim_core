@@ -1,5 +1,6 @@
 use crate::grid::cell::CellID;
 use crate::maneuver::LaneChangeType;
+use std::fmt;
 
 /// Represents vehicle's intention to perform maneuver and other actions
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -23,6 +24,24 @@ pub struct VehicleIntention {
     pub tail_maneuver: TailIntentionManeuver,
     /// Flag to stop vehicle. @todo: move it to intention?
     pub should_stop: bool,
+}
+
+impl fmt::Display for VehicleIntention {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "VehicleIntention {{ intention_maneuver: {:?}, intention_speed: {}, destination: {:?}, confusion: {:?}, intention_cell_id: {}, tail_intention_cells: {:?}, intermediate_cells: {:?}, tail_maneuver: {:?}, should_stop: {} }}",
+            self.intention_maneuver,
+            self.intention_speed,
+            self.destination,
+            self.confusion,
+            self.intention_cell_id,
+            self.tail_intention_cells,
+            self.intermediate_cells,
+            self.tail_maneuver,
+            self.should_stop
+        )
+    }
 }
 
 /// Represents vehicle's tail intention

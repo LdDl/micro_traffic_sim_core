@@ -119,7 +119,7 @@ fn main() {
     // ==============================================================
     // STEP 2: ADD CONFLICT ZONES [OPTIONAL]
     // ==============================================================
-    let mut conflict_zones = HashMap::new();
+    let mut conflict_zones = vec![];
     let conflict_zone = ConflictZone::new(
             1,
             ConflictEdge {
@@ -134,7 +134,7 @@ fn main() {
         // V1 has priority over H
         .with_winner_type(ConflictWinnerType::Second)
         .build();
-    conflict_zones.insert(conflict_zone.get_id(), conflict_zone);
+    conflict_zones.push(conflict_zone);
 
     // ==============================================================
     // STEP 3: ADD TRAFFIC LIGHTS [OPTIONAL]
@@ -166,8 +166,8 @@ fn main() {
         .with_speed_limit(1)
         .with_cell(4)
         .with_destination(9)
-        .build();
-    let vehicles: Vec<VehicleRef> = vec![Rc::new(RefCell::new(vehicle))];
+        .build_ref();
+    let vehicles: Vec<VehicleRef> = vec![vehicle];
 
     // ==============================================================
     // STEP 5: Add vehicles dynamically via trips
@@ -175,12 +175,12 @@ fn main() {
     let trips_h = Trip::new(1, 9, TripType::Random)
         .with_allowed_agent_type(AgentType::Car)
         .with_allowed_behaviour_type(BehaviourType::Cooperative)
-        .with_probability(0.1)
+        .with_probability(0.2)
         .build();
     let trips_v1 = Trip::new(10, 19, TripType::Random)
         .with_allowed_agent_type(AgentType::Car)
         .with_allowed_behaviour_type(BehaviourType::Cooperative)
-        .with_probability(0.1)
+        .with_probability(0.3)
         .build();
     let trips_v2 = Trip::new(20, 29, TripType::Random)
         .with_allowed_agent_type(AgentType::Car)
@@ -198,10 +198,13 @@ fn main() {
         .with_tls(tls)
         .build();
     let mut session = Session::new(grids_storage, None);
-    session.set_verbose_level(VerboseLevel::Main);
-    // session.add_vehicles(vehicles);
+    session.set_verbose_level(VerboseLevel::Additional);
+    session.add_vehicles(vehicles);
     for trip in trips.iter() {
         session.add_trip(trip.clone());
+    }
+    for cz in conflict_zones {
+        session.add_conflict_zone(cz);
     }
     
     // ==============================================================
@@ -209,8 +212,9 @@ fn main() {
     // and STEP 8: Collect data
     // ==============================================================
     let steps_num = 50;
-    println!("step;vehicle_id;vehicle_type;last_speed;last_angle;intermediate_cells;last_cell;x;y");
-    // Print initial state
+    let mut tls_states = vec![];
+    let mut vehicles_states = vec![];
+    // Initial state
     for (vid, veh) in session.get_vehicles() {
         let v = veh.borrow();
         let (x, y) = if let Some(cell) = session.get_cell(&v.cell_id) {
@@ -219,19 +223,18 @@ fn main() {
         } else {
             (f64::NAN, f64::NAN)
         };
-        println!(
-            "-1;{};{};{};{:.5};{};{};{:.5};{:.5}",
+        vehicles_states.push((
+            -1,
             v.id,
             v.vehicle_type,
             v.speed,
             0.0,
-            "",
+            "".to_string(),
             v.cell_id,
             x,
-            y
-        );
+            y,
+        ));
     }
-    let mut tls_states = vec![];
     for step in 0..steps_num {
         match session.step() {
             Ok(automata_state) => {
@@ -249,8 +252,7 @@ fn main() {
                         .map(|cell| cell.to_string())
                         .collect::<Vec<_>>()
                         .join(",");
-                    println!(
-                        "{};{};{};{};{:.5};{};{};{:.5};{:.5}",
+                    vehicles_states.push((
                         step,
                         v.id,
                         v.vehicle_type,
@@ -259,8 +261,8 @@ fn main() {
                         intermediate_cells,
                         v.last_cell,
                         x,
-                        y
-                    );
+                        y,
+                    ));
                 }
                 for tl in automata_state.tls {
                     // let tls_ref = session.get_tls_ref();
@@ -277,6 +279,10 @@ fn main() {
                 break;
             }
         }
+    }
+    println!("step;vehicle_id;vehicle_type;last_speed;last_angle;intermediate_cells;last_cell;x;y");
+    for (step, vehicle_id, vehicle_type, last_speed, last_angle, intermediate_cells, last_cell, x, y) in vehicles_states {
+        println!("{};{};{};{:.5};{:.5};{};{};{:.5};{:.5}", step, vehicle_id, vehicle_type, last_speed, last_angle, intermediate_cells, last_cell, x, y);
     }
     println!("tl_step;tl_id;group_id;cell_id;x;y;signal");
     let tls_ref = session.get_tls_ref();

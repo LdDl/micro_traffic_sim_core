@@ -261,7 +261,9 @@ impl Session {
         for vehicle in vehicles {
             let vehicle_id = vehicle.borrow().id;
             self.vehicles.insert(vehicle_id, vehicle);
-            self.last_vehicle_id = vehicle_id;
+            if vehicle_id >= self.last_vehicle_id {
+                self.last_vehicle_id = vehicle_id + 1;
+            }
         }
     }
 
@@ -522,7 +524,7 @@ impl Session {
         let tl_states_dump = self.grids_storage.tick_traffic_lights(self.verbose)?;
 
         // 4. Create intentions for all vehicles
-        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles)?;
+        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, self.verbose)?;
 
         // 5. Collect conflicts
         let conflicts_data = collect_conflicts(

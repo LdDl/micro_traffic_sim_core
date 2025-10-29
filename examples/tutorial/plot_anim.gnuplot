@@ -38,8 +38,8 @@ do for [i=first_step:last_step] {
         '< grep "right" examples/tutorial/output.txt' using 2:3:($4-$2):($5-$3) with vectors head filled size screen 0.03,15,45 lc rgb "red" lw 2 title "Right maneuver", \
         '< sed -n "/^tl_id;x;y/,/^tl_id;controlled_cell/p" examples/tutorial/output.txt | tail -n +2 | head -n -1' using 2:3 with points pt 13 ps 3 lc rgb "0x7b1085" title "Traffic Light", \
         '< sed -n "/^tl_id;controlled_cell/,/^cell_id/p" examples/tutorial/output.txt | tail -n +2 | head -n -1' using 3:4:(0.4) with circles dashtype 2 lw 2 lc rgb "#2bdfd0" title "TL Control Zone", \
-        sprintf('< sed -n "/^tl_step;tl_id;group_id;cell_id;x;y;signal/,\$p" examples/tutorial/output.txt | tail -n +2 | grep "^%d;.*g$"', i) using 5:6:(0.5) with circles dashtype 2 lw 3 lc rgb "0x00FF00" title "TL Signal (GREEN)", \
-        sprintf('< sed -n "/^tl_step;tl_id;group_id;cell_id;x;y;signal/,\$p" examples/tutorial/output.txt | tail -n +2 | grep "^%d;.*r$"', i) using 5:6:(0.5) with circles dashtype 2 lw 3 lc rgb "0xFF0000" title "TL Signal (RED)", \
+        sprintf('< sed -n "/^tl_step;tl_id;group_id;cell_id;x;y;signal/,\$p" examples/tutorial/output.txt | tail -n +2 | grep "^%d;.*g$"', i) using 5:6:(0.5) with circles dashtype 2 lw 3 lc rgb "0x00FF00" title "Signal group (GREEN)", \
+        sprintf('< sed -n "/^tl_step;tl_id;group_id;cell_id;x;y;signal/,\$p" examples/tutorial/output.txt | tail -n +2 | grep "^%d;.*r$"', i) using 5:6:(0.5) with circles dashtype 2 lw 3 lc rgb "0xFF0000" title "Signal group (RED)", \
         '< sed -n "/^step;vehicle_id/,/^tl_step;/p" examples/tutorial/output.txt | tail -n +2 | head -n -1' using ($1==i ? $8 : 1/0):($1==i ? $9 : 1/0):(int($2) % 10) with points pt 7 ps 5 lc palette notitle, \
         '< sed -n "/^step;vehicle_id/,/^tl_step;/p" examples/tutorial/output.txt | tail -n +2 | head -n -1' using ($1==i ? $8 : 1/0):($1==i ? $9 : 1/0):(sprintf("id=%d", int($2))) with labels offset 0,0.5 font ",8" notitle
 }

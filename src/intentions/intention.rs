@@ -10,6 +10,7 @@ use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
 use crate::shortest_path::router::shortest_path;
 use crate::shortest_path::router::AStarError;
+use crate::verbose::*;
 use indexmap::IndexMap;
 use rand::random;
 use std::collections::HashMap;
@@ -74,18 +75,43 @@ impl fmt::Display for IntentionError {
 pub fn prepare_intentions<'a, 'b>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
-    vehicles: &'b mut IndexMap<VehicleID, VehicleRef>, 
+    vehicles: &'b mut IndexMap<VehicleID, VehicleRef>,
+    verbose: VerboseLevel,
 ) -> Result<Intentions, IntentionError> {
     let mut intentions = Intentions::new();
+    verbose.log_with_fields(
+        EVENT_INTENTIONS_CREATE,
+        "Collect intentions for vehicles",
+        &[
+            ("vehicles_num", &vehicles.len()),
+        ]
+    );
     for (_, vehicle_ref) in vehicles.iter_mut() {
-        let possible_intention = find_intention(net, current_state, &vehicle_ref.borrow())?;
+        verbose.log_with_fields(
+            EVENT_INTENTION_VEHICLE,
+            &format!("Processing vehicle {}", vehicle_ref.borrow().id),
+            &[
+                ("vehicle_id", &vehicle_ref.borrow().id),
+                ("current_cell_id", &vehicle_ref.borrow().cell_id),
+                ("speed", &vehicle_ref.borrow().speed),
+                ("destination", &vehicle_ref.borrow().destination),
+            ]
+        );
+        let possible_intention = find_intention(net, current_state, &vehicle_ref.borrow(), verbose)?;
         if possible_intention.should_stop {
-            let alternate_possible_intention =
-                find_alternate_intention(net, current_state, &vehicle_ref.borrow())?;
+            let alternate_possible_intention = find_alternate_intention(net, current_state, &vehicle_ref.borrow())?;
             vehicle_ref.borrow_mut().set_intention(alternate_possible_intention);
             intentions.add_intention(vehicle_ref.clone(), IntentionType::Target);
             continue;
         }
+        verbose.log_with_fields(
+            EVENT_INTENTION_ADD,
+            &format!("Adding intentions with vehicle {}", vehicle_ref.borrow().id),
+            &[
+                ("vehicle_id", &vehicle_ref.borrow().id),
+                ("intention", &possible_intention),
+            ]
+        );
         vehicle_ref.borrow_mut().set_intention(possible_intention);
         intentions.add_intention(vehicle_ref.clone(), IntentionType::Target);
     }
@@ -100,6 +126,7 @@ pub fn find_intention<'a>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
     vehicle: &'a Vehicle,
+    verbose: VerboseLevel,
 ) -> Result<VehicleIntention, IntentionError> {
     if vehicle.strategy_type == BehaviourType::Block {
         let result = VehicleIntention {
@@ -473,7 +500,7 @@ mod tests {
             .with_speed(1)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 1,
             intention_speed: 1,
@@ -489,7 +516,7 @@ mod tests {
             .with_speed(3)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 3,
             intention_speed: 3,
@@ -508,7 +535,7 @@ mod tests {
             .with_speed(4)
             .with_destination(8)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 3,
             intention_speed: 3,
@@ -525,7 +552,7 @@ mod tests {
             .with_speed(3)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 101,
             intention_speed: 0,
@@ -542,7 +569,7 @@ mod tests {
             .with_speed(3)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 2,
             intention_speed: 2,
@@ -559,7 +586,7 @@ mod tests {
             .with_speed(3)
             .with_destination(2)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 2,
             intention_speed: 2,
@@ -576,7 +603,7 @@ mod tests {
             .with_speed(4)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 7,
             intention_speed: 4,

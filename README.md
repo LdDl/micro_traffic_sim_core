@@ -95,9 +95,9 @@ Every simulation follows this pattern:
 5. **Extract Results** - Collect vehicle states and positions
 6. **Visualize** - E.g. plot results with gnuplot
 
-The full example for grid basics is in [`examples/grid-basics`](examples/grid-basics).
+**The full example for grid basics is in [`examples/grid-basics`](examples/grid-basics).**
 
-The full example for whole simulation is in [`examples/tutorial`](examples/tutorial).
+**The full example for whole simulation is in [`examples/tutorial`](examples/tutorial).**
 
 ### Creating the grid
 
@@ -337,6 +337,21 @@ for step in 0..steps {
           v.last_cell,
         );
       }
+      for tl in automata_state.tls {
+        for group in tl.1 {
+          let group_id = group.group_id;
+          let signal = group.last_signal;
+          println!(
+            "tl_step;{};{};{};{:.5};{:.5};{}",
+            step,
+            tl.0,
+            group_id,
+            group.last_position.x,
+            group.last_position.y,
+            signal
+          );
+        }
+      }
     }
     Err(e) => {
       eprintln!("Error during simulation step {}: {:?}", step, e);
@@ -346,9 +361,14 @@ for step in 0..steps {
 ```
 
 ### Analyzing results
-@todo
-```rust
-```
+
+You can analyze the output data using various tools.
+
+In the basic tutorial [`examples/tutorial`](examples/tutorial) states are aggregated in CSV-like format (with semicolon delimiter) and then visualized with `gnuplot`(http://www.gnuplot.info/).
+
+<img src="examples/tutorial/example.gif" alt="Simulation output" width="840px"/>
+
+In the future, I plan to add example with visualization in the browser using gRPC/WebSockets for integration with server-side.
 
 ## Key modules / API pointers
 
