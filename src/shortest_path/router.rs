@@ -491,6 +491,146 @@ fn reconstruct_path<'a>(current_node: &Rc<RefCell<AStarNode<'a>>>) -> Path<'a> {
     Path::new(vertices, maneuvers, cost)
 }
 
+/// Finds a path of exactly `depth` steps starting from `start`, ignoring any goal.
+///
+/// This function attempts to build a path of a specified length by moving forward
+/// through the grid. If `maneuver_allowed` is true, it will also consider left
+/// and right lane changes when forward movement is not possible.
+///
+/// # Arguments
+///
+/// * `start` - The starting cell for the path
+/// * `net` - The road network containing all cells and connections
+/// * `maneuver_allowed` - Whether to consider lane change maneuvers (left/right connections)
+/// * `depth` - The exact number of steps to take in the path
+///
+/// # Returns
+///
+/// * `Ok(Path)` - A valid path of the specified depth
+/// * `Err(AStarError)` - If a path of the specified depth cannot be constructed or if a referenced cell is missing
+///
+/// # Errors
+///
+/// Returns `AStarError::BadData` if a referenced cell ID does not exist in the grid.
+/// Returns `AStarError::NoPathFound` if a path of the specified depth cannot be constructed.
+///
+/// # Example
+/// ```rust
+/// use micro_traffic_sim_core::shortest_path::router::shortest_path_depth;
+/// use micro_traffic_sim_core::grid::{road_network::GridRoads, cell::Cell};
+/// use micro_traffic_sim_core::geom::new_point;
+/// 
+/// let mut grid = GridRoads::new();
+/// let cell1 = Cell::new(1)
+///     .with_point(new_point(1.0, 1.0, None))
+///     .with_forward_node(2)
+///     .build();
+/// let cell2 = Cell::new(2)
+///     .with_point(new_point(2.0, 3.0, None))
+///     .with_forward_node(3)
+///     .build();
+/// let cell3 = Cell::new(3)
+///     .with_point(new_point(3.0, 3.0, None))
+///     .with_forward_node(4)
+///     .build();
+/// let cell4 = Cell::new(4)
+///     .with_point(new_point(4.0, 1.0, None))
+///     .with_forward_node(1) // Loop back to create a cycle
+///     .build();
+///  
+/// grid.add_cell(cell1.clone());
+/// grid.add_cell(cell2.clone());
+/// grid.add_cell(cell3.clone());
+/// grid.add_cell(cell4.clone());
+/// 
+/// // Find path of depth 5 starting from cell #1
+/// let result = shortest_path_depth(&cell1, &grid, true, 5);
+/// match result {
+///    Ok(path) => {
+///       println!("Found path with {} vertices", path.vertices().len());
+///       println!("Total cost: {}", path.cost());
+///       assert!(path.vertices().len() == 6); // depth + 1
+///       assert!(path.maneuvers().len() == 5); // depth
+///   },
+///   Err(e) => println!("Pathfinding failed: {}", e),
+/// }
+/// ```
+pub fn path_no_goal<'a>(
+    start: &'a Cell,
+    net: &'a GridRoads,
+    maneuver_allowed: bool,
+    depth: usize,
+) -> Result<Path<'a>, AStarError> {
+    let mut vertices = Vec::with_capacity(depth + 1);
+    let mut maneuvers = Vec::with_capacity(depth);
+    let mut current_cell = start;
+    vertices.push(current_cell);
+
+    for _ in 0..depth {
+        let mut next_cell: Option<&Cell> = None;
+        let mut next_maneuver = LaneChangeType::NoChange;
+
+        // Try forward first
+        let forward_id = current_cell.get_forward_id();
+        if forward_id > -1 {
+            match net.get_cell(&forward_id) {
+                Some(cell) => {
+                    next_cell = Some(cell);
+                    next_maneuver = LaneChangeType::NoChange;
+                }
+                None => return Err(AStarError::BadData { cell_id: forward_id }),
+            }
+        }
+
+        // If forward is blocked or not allowed, try left/right if allowed
+        if next_cell.is_none() && maneuver_allowed {
+            let left_id = current_cell.get_left_id();
+            if left_id > -1 {
+                match net.get_cell(&left_id) {
+                    Some(cell) => {
+                        next_cell = Some(cell);
+                        next_maneuver = LaneChangeType::ChangeLeft;
+                    }
+                    None => return Err(AStarError::BadData { cell_id: left_id }),
+                }
+            }
+            let right_id = current_cell.get_right_id();
+            if right_id > -1 && next_cell.is_none() {
+                match net.get_cell(&right_id) {
+                    Some(cell) => {
+                        next_cell = Some(cell);
+                        next_maneuver = LaneChangeType::ChangeRight;
+                    }
+                    None => return Err(AStarError::BadData { cell_id: right_id }),
+                }
+            }
+        }
+
+        // If no move possible, break early
+        let cell = match next_cell {
+            Some(c) => c,
+            None => break,
+        };
+        vertices.push(cell);
+        maneuvers.push(next_maneuver);
+        current_cell = cell;
+    }
+
+    if vertices.len() == depth + 1 {
+        // Calculate cost as sum of heuristic costs
+        let mut cost = 0.0;
+        for i in 1..vertices.len() {
+            cost += heuristic(vertices[i - 1], vertices[i]);
+        }
+        Ok(Path::new(vertices, maneuvers, cost))
+    } else {
+        Err(AStarError::NoPathFound {
+            start_id: start.get_id(),
+            end_id: -1,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -880,5 +1020,38 @@ mod tests {
                 i
             );
         }
+    }
+
+    #[test]
+    fn test_spath_no_goal_circle() {
+        use crate::geom::new_point;
+        use crate::grid::cell::Cell;
+        use crate::grid::road_network::GridRoads;
+        // Build a ring: 1 → 2 → 3 → 4 → 1
+        let mut grid = GridRoads::new();
+        for i in 1..=4 {
+            let next = if i == 4 { 1 } else { i + 1 };
+            grid.add_cell(
+                Cell::new(i)
+                    .with_point(new_point(i as f64, 0.0, None))
+                    .with_forward_node(next)
+                    .build(),
+            );
+        }
+        let start_cell = grid.get_cell(&1).unwrap();
+        // Traverse 5 steps forward (should wrap around)
+        let observe = 5;
+        let path_opt = path_no_goal(start_cell, &grid, false, observe);
+        assert!(path_opt.is_ok(), "Path should exist");
+        let path = path_opt.unwrap();
+        let ids: Vec<i64> = path.vertices().iter().map(|c| c.get_id()).collect();
+        // Since we observe 5 steps in a 4-cell ring:
+        // 1 → 2 → 3 → 4
+        // ↑   ↑↑   ↑   ↑
+        // ↑   ↑1   2   3
+        // ↑   ↑
+        // 4   5
+        // Therefore path should be:
+        assert_eq!(ids, vec![1, 2, 3, 4, 1, 2], "Incorrect circular path traversal");
     }
 }

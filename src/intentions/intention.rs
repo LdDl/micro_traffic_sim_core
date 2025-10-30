@@ -223,7 +223,12 @@ pub fn find_intention<'a>(
     //     slow_down_factor,
     //     if isSlowdown { " (slowdown)" } else { "" }
     // );
-    let mut path = match shortest_path(
+    // Handle case when vehicle has no destination,
+    // therefore it should be considered as keep going where possible
+    if vehicle.destination < 0 {
+        // @todo
+    }
+    let mut path: shortest_path::path::Path<'_> = match shortest_path(
         source_cell,
         target_cell,
         net,
