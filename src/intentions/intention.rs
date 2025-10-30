@@ -5,10 +5,10 @@ use crate::agents::{
 };
 use crate::grid::cell::CellState;
 use crate::maneuver::LaneChangeType;
-use crate::grid::{cell::CellID, road_network::GridRoads};
+use crate::grid::{cell::CellID, cell::Cell, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
-use crate::shortest_path::router::shortest_path;
+use crate::shortest_path::router::{shortest_path, path_no_goal};
 use crate::shortest_path::router::AStarError;
 use crate::verbose::*;
 use indexmap::IndexMap;
@@ -223,37 +223,54 @@ pub fn find_intention<'a>(
     //     slow_down_factor,
     //     if isSlowdown { " (slowdown)" } else { "" }
     // );
-    // Handle case when vehicle has no destination,
-    // therefore it should be considered as keep going where possible
-    if vehicle.destination < 0 {
-        // @todo
-    }
-    let mut path: shortest_path::path::Path<'_> = match shortest_path(
-        source_cell,
-        target_cell,
-        net,
-        maneuvers_allowed,
-        Some(observe_distance + 1),
-    ) {
-        Ok(path) => path,
-        Err(e)
-            if e != shortest_path::router::AStarError::NoPathFound {
-                start_id: source_cell.get_id(),
-                end_id: target_cell.get_id(),
-            } =>
-        {
-            return Err(IntentionError::NoPathFound(e));
-        }
-        Err(_) => {
-            let new_path = match process_no_route_found(source_cell, net) {
+
+    let mut path = match vehicle.destination {
+        // Handle case when vehicle has no destination,H
+        // therefore it should be considered as keep going where possible
+        dest if dest < 0 => {
+            // println!(
+            //     "  -> Vehicle {} has no destination, finding path without goal",
+            //     vehicle.id
+            // );
+            match path_no_goal(
+                source_cell,
+                net,
+                maneuvers_allowed,
+                observe_distance + 1,
+            ) {
                 Ok(path) => path,
-                Err(e) => return Err(IntentionError::NoPathForNoRoute(e)),
-            };
-            destination = Some(new_path.vertices()[new_path.vertices().len() - 1].get_id());
-            intention_speed = 1;
-            speed_possible = intention_speed;
-            confusion = Some(true);
-            new_path
+                Err(e) => return Err(IntentionError::NoPathFound(e)),
+            }
+        },
+        _ => {
+            match shortest_path(
+                source_cell,
+                target_cell,
+                net,
+                maneuvers_allowed,
+                Some(observe_distance + 1),
+            ) {
+                Ok(path) => path,
+                Err(e)
+                    if e != shortest_path::router::AStarError::NoPathFound {
+                        start_id: source_cell.get_id(),
+                        end_id: target_cell.get_id(),
+                    } =>
+                {
+                    return Err(IntentionError::NoPathFound(e));
+                }
+                Err(_) => {
+                    let new_path = match process_no_route_found(source_cell, net) {
+                        Ok(path) => path,
+                        Err(e) => return Err(IntentionError::NoPathForNoRoute(e)),
+                    };
+                    destination = Some(new_path.vertices()[new_path.vertices().len() - 1].get_id());
+                    intention_speed = 1;
+                    speed_possible = intention_speed;
+                    confusion = Some(true);
+                    new_path
+                }
+            }
         }
     };
 

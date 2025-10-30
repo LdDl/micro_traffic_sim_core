@@ -559,10 +559,10 @@ pub fn path_no_goal<'a>(
     start: &'a Cell,
     net: &'a GridRoads,
     maneuver_allowed: bool,
-    depth: usize,
+    depth: i32,
 ) -> Result<Path<'a>, AStarError> {
-    let mut vertices = Vec::with_capacity(depth + 1);
-    let mut maneuvers = Vec::with_capacity(depth);
+    let mut vertices = Vec::with_capacity(depth as usize + 1);
+    let mut maneuvers = Vec::with_capacity(depth as usize);
     let mut current_cell = start;
     vertices.push(current_cell);
 
@@ -616,7 +616,7 @@ pub fn path_no_goal<'a>(
         current_cell = cell;
     }
 
-    if vertices.len() == depth + 1 {
+    if vertices.len() == depth as usize + 1 {
         // Calculate cost as sum of heuristic costs
         let mut cost = 0.0;
         for i in 1..vertices.len() {
