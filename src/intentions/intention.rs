@@ -151,9 +151,6 @@ pub fn find_intention<'a>(
     let source_cell = net
         .get_cell(&vehicle.cell_id)
         .ok_or(IntentionError::NoSourceCell(vehicle.cell_id))?;
-    let target_cell = net
-        .get_cell(&vehicle.destination)
-        .ok_or(IntentionError::NoTargetCell(vehicle.destination))?;
 
     let speed_limit = source_cell.get_speed_limit().min(vehicle.speed_limit);
 
@@ -218,7 +215,7 @@ pub fn find_intention<'a>(
     //     source_cell.get_id(),
     //     intention_speed,
     //     speed_possible,
-    //     target_cell.get_id(),
+    //     vehicle.destination,
     //     observe_distance,
     //     slow_down_factor,
     //     if isSlowdown { " (slowdown)" } else { "" }
@@ -243,6 +240,9 @@ pub fn find_intention<'a>(
             }
         },
         _ => {
+            let target_cell = net
+                .get_cell(&vehicle.destination)
+                .ok_or(IntentionError::NoTargetCell(vehicle.destination))?;
             match shortest_path(
                 source_cell,
                 target_cell,

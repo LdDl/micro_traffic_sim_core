@@ -27,8 +27,22 @@ Table of contents
 - [Key modules / API pointers](#key-modules--api-pointers)
 
 ## Introduction
-У
+
 `micro_traffic_sim_core` is a Rust core library for microscopic traffic simulation (NaSch-like cellular automata and agent-based behaviours). The codebase contains utilities for grids, agents, intentions, conflicts, pathfinding, and session simulation.
+
+Simple coordinated zone | Simple ring-like grid
+:-------------------------:|:-------------------------:
+<img src="examples/tutorial/example.gif" width="480">  |  <img src="examples/ring/output.gif" width="400">
+
+NaSch one-lane road | NaSch two-lane road
+:-------------------------:|:-------------------------:
+<img src="examples/nasch-one-lane/output.gif" width="480">  |  <img src="examples/nasch-two-lanes/output.gif" width="480">
+
+<center>
+  <b>Merging roads</b>
+  
+  <img src="examples/nasch-roads-merge/output.gif" width="480"><br>
+</center>
 
 __Disclaimer__: Repository documentation will have a lot of technical details in text form since this is a computational core which will not be used by end-users directly, but rather integrated into service of some sort (gRPC/REST).
 
