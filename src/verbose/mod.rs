@@ -38,8 +38,9 @@
 //!
 //! **Note**: This module may be refactored (completely!) in future versions.
 pub mod verbose;
+pub mod logger;
 
-pub use self::{verbose::*};
+pub use self::{verbose::*, logger::*};
 
 // Initialize logger when module is loaded
 use std::sync::Once;

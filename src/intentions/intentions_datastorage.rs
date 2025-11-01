@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_add_to_empty_intentions() {
         let mut intentions = Intentions::new();
-        let mut vehicle = Vehicle::new(1).with_type(AgentType::Car).build_ref();
+        let vehicle = Vehicle::new(1).with_type(AgentType::Car).build_ref();
         let intention = VehicleIntention {
             intention_cell_id: 1,
             ..Default::default()
@@ -311,7 +311,7 @@ mod tests {
         let mut intentions = Intentions::new();
 
         // Add first vehicle
-        let mut vehicle1 = Vehicle::new(1).with_type(AgentType::Car).build_ref();
+        let vehicle1 = Vehicle::new(1).with_type(AgentType::Car).build_ref();
         let intention1 = VehicleIntention {
             intention_cell_id: 1,
             ..Default::default()
@@ -320,7 +320,7 @@ mod tests {
         intentions.add_intention(vehicle1, IntentionType::Target);
 
         // Add second vehicle
-        let mut vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build_ref();
+        let vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build_ref();
         let intention2 = VehicleIntention {
             intention_cell_id: 1,
             ..Default::default()
@@ -360,7 +360,7 @@ mod tests {
         let mut intentions = Intentions::new();
 
         // Add to first cell
-        let mut vehicle1 = Vehicle::new(1).with_type(AgentType::Car).build_ref();
+        let vehicle1 = Vehicle::new(1).with_type(AgentType::Car).build_ref();
         let intention1 = VehicleIntention {
             intention_cell_id: 1,
             ..Default::default()
@@ -369,7 +369,7 @@ mod tests {
         intentions.add_intention(vehicle1, IntentionType::Target);
 
         // Add to second cell
-        let mut vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build_ref();
+        let vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build_ref();
         let intention2 = VehicleIntention {
             intention_cell_id: 2,
             ..Default::default()
@@ -410,7 +410,7 @@ mod tests {
         let mut intentions = Intentions::new();
 
         // Setup first vehicle with tail
-        let mut vehicle1 = Vehicle::new(1)
+        let vehicle1 = Vehicle::new(1)
             .with_cell(10)
             .with_tail_size(2, vec![8, 9])
             .build_ref();
@@ -422,7 +422,7 @@ mod tests {
         intentions.add_intention(vehicle1, IntentionType::Target);
 
         // Add second vehicle
-        let mut vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build_ref();
+        let vehicle2 = Vehicle::new(2).with_type(AgentType::Car).build_ref();
         let intention2 = VehicleIntention {
             intention_cell_id: 10,
             ..Default::default()

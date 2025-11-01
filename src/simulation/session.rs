@@ -115,7 +115,7 @@ pub struct Session {
 
     /// Cells under traffic lights control
     /// It could be just Cell, but we'll use CellID for now
-    coordination_cells: HashMap<CellID, CellID>,
+    _coordination_cells: HashMap<CellID, CellID>,
 
     /// Information about conflicts zones and corresponding cells
     conflict_zones: HashMap<ConflictZoneID, ConflictZone>,
@@ -131,13 +131,13 @@ pub struct Session {
     last_vehicle_id: VehicleID,
 
     /// Debugging information level
-    verbose: VerboseLevel,
+    verbose: LocalLogger,
 
     /// Time when this session has been created or updated (nanoseconds)
-    updated_at: i64,
+    _updated_at: i64,
 
     /// Time when to destroy this session (nanoseconds)
-    expire_at: i64,
+    _expire_at: i64,
 
     /// Defines the SRID of the world
     world_srid: SRID,
@@ -147,22 +147,24 @@ impl Session {
     /// Creates new session with default values for provided cell grid
     pub fn default(srid: Option<SRID>) -> Self {
         let picked_srid = srid.unwrap_or(SRID::Euclidean);
+        let session_id = Uuid::new_v4();
+        let verbose = LocalLogger::with_session(VerboseLevel::None, session_id.to_string());
         Session {
-            id: Uuid::new_v4(),
+            id: session_id,
             last_vehicle_id: 1,
             vehicles: IndexMap::new(),
             grids_storage: GridsStorage::new().build(),
             trips_data: HashMap::new(),
-            verbose: VerboseLevel::None,
-            coordination_cells: HashMap::new(),
+            verbose,
+            _coordination_cells: HashMap::new(),
             conflict_zones: HashMap::new(),
             cells_conflicts_zones: HashMap::new(),
             current_position: HashMap::new(),
-            updated_at: SystemTime::now()
+            _updated_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos() as i64,
-            expire_at: 0,
+            _expire_at: 0,
             steps: 0,
             world_srid: picked_srid,
         }
@@ -171,23 +173,25 @@ impl Session {
     /// Creates new session for cellular automata for provided cell grid
     pub fn new(grids_storage: GridsStorage, srid: Option<SRID>) -> Self {
         let picked_srid = srid.unwrap_or(SRID::Euclidean);
-        
+        let session_id = Uuid::new_v4();
+        let verbose = LocalLogger::with_session(VerboseLevel::None, session_id.to_string());
+
         Session {
             id: Uuid::new_v4(),
             last_vehicle_id: 1,
             vehicles: IndexMap::new(),
             grids_storage,
             trips_data: HashMap::new(),
-            verbose: VerboseLevel::None,
-            coordination_cells: HashMap::new(),
+            verbose,
+            _coordination_cells: HashMap::new(),
             conflict_zones: HashMap::new(),
             cells_conflicts_zones: HashMap::new(),
             current_position: HashMap::new(),
-            updated_at: SystemTime::now()
+            _updated_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos() as i64,
-            expire_at: 0,
+            _expire_at: 0,
             steps: 0,
             world_srid: picked_srid,
         }
@@ -215,12 +219,12 @@ impl Session {
 
     /// Gets the verbose level
     pub fn get_verbose_level(&self) -> VerboseLevel {
-        self.verbose
+        self.verbose.level()
     }
 
     /// Sets verbose level for the session
     pub fn set_verbose_level(&mut self, verbose: VerboseLevel) {
-        self.verbose = verbose;
+        self.verbose.set_level(verbose);
     }
 
     /// Returns a reference to the cell with the given ID if it exists in the vehicles grid.
@@ -527,10 +531,10 @@ impl Session {
         self.update_current_positions();
 
         // 3. Update and collect TLS state
-        let tl_states_dump = self.grids_storage.tick_traffic_lights(self.verbose)?;
+        let tl_states_dump = self.grids_storage.tick_traffic_lights(&self.verbose)?;
 
         // 4. Create intentions for all vehicles
-        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, self.verbose)?;
+        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose)?;
 
         // 5. Collect conflicts
         let conflicts_data = collect_conflicts(
@@ -538,15 +542,15 @@ impl Session {
             self.grids_storage.get_vehicles_net_ref(),
             &self.conflict_zones,
             &self.cells_conflicts_zones,
-            self.verbose,
+            &self.verbose,
         )?;
 
         // 6. Solve conflicts
-        solve_conflicts(conflicts_data, self.verbose)?;
+        solve_conflicts(conflicts_data, &self.verbose)?;
 
         // 7. Move vehicles
         let vehicles_grid = self.grids_storage.get_vehicles_net_ref();
-        movement(vehicles_grid, &mut self.vehicles, self.verbose)?;
+        movement(vehicles_grid, &mut self.vehicles, &self.verbose)?;
 
         // 8. Collect current vehicles positions for state dump
         let mut states_dump: Vec<VehicleState> = Vec::with_capacity(self.vehicles.len());

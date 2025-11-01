@@ -44,27 +44,27 @@ static CONFLICT_RULES: &[ConflictRule] = conflict_rules![
     [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && v2.intention.intention_maneuver == LaneChangeType::NoChange, resolve_merge_forward ],
 
     // First vehicle is moving forward, second is changing lane
-    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2), |cin1, cin2| {
+    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2), |cin1, _cin2| {
         // First vehicle is not doing maneuver, when the second one is doing lane change.
         // Therefore the second vehicle should give way to the first one
         (cin1, ConflictType::ForwardLaneChange)
     } ],
 
     // First vehicle is changing lane, second is moving forward
-    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange, |cin1, cin2| {
+    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange, |_cin1, cin2| {
         // Second vehicle is not doing maneuver, when the first one is doing lane change.
         // Therefore the first vehicle should give way to the second one
         (cin2, ConflictType::ForwardLaneChange)
     } ],
 
     // First vehicle is changing lane, second is blocking its lane
-    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::Block, |cin1, cin2| {
+    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::Block, |_cin1, cin2| {
         // Second vehicle is not moving therefore it holds the position
         (cin2, ConflictType::BlockLaneChange)
     } ],
 
     // First vehicle is blocking its lane, second is changing lane
-    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::Block && changing_lane(v2), |cin1, cin2| {
+    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::Block && changing_lane(v2), |cin1, _cin2| {
         // First vehicle is not moving therefore it holds the position
         (cin1, ConflictType::BlockLaneChange)
     } ]
@@ -346,7 +346,7 @@ mod tests {
         );
 
         // Case 2: Vehicle doing LEFT maneuver should win
-        let mut vehicle_one = Vehicle::new(1)
+        let vehicle_one = Vehicle::new(1)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(1)
             .build_ref();
@@ -354,7 +354,7 @@ mod tests {
             intention_maneuver: LaneChangeType::ChangeLeft,
             ..Default::default()
         });
-        let mut vehicle_two = Vehicle::new(2)
+        let vehicle_two = Vehicle::new(2)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(3)
             .build_ref();
@@ -526,7 +526,7 @@ mod tests {
         // Case 1: both vehicles are changing lane on a single road
         // Two source lanes on one road is going to merge into single lane on another road
         // Winner: vehicle who is doing LEFT maneuver
-        let mut vehicle_one = Vehicle::new(1)
+        let vehicle_one = Vehicle::new(1)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -534,7 +534,7 @@ mod tests {
             intention_maneuver: LaneChangeType::ChangeRight,
             ..Default::default()
         });
-        let mut vehicle_two = Vehicle::new(2)
+        let vehicle_two = Vehicle::new(2)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -559,7 +559,7 @@ mod tests {
         // Case 2: both vehicles are moving forward on different lanes of different roads
         // Differet roads are going to merge into single road
         // Winner: vehicle who is moving faster
-        let mut vehicle_three = Vehicle::new(3)
+        let vehicle_three = Vehicle::new(3)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(5)
             .build_ref();
@@ -567,7 +567,7 @@ mod tests {
             intention_maneuver: LaneChangeType::NoChange,
             ..Default::default()
         });
-        let mut vehicle_four = Vehicle::new(4)
+        let vehicle_four = Vehicle::new(4)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -591,7 +591,7 @@ mod tests {
 
         // Case 3: First vehicle is moving forward, second is changing lane
         // Winner: first vehicle (who is moving forward)
-        let mut vehicle_five = Vehicle::new(5)
+        let vehicle_five = Vehicle::new(5)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -599,7 +599,7 @@ mod tests {
             intention_maneuver: LaneChangeType::NoChange,
             ..Default::default()
         });
-        let mut vehicle_six = Vehicle::new(6)
+        let vehicle_six = Vehicle::new(6)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -623,7 +623,7 @@ mod tests {
 
         // Case 4: First vehicle is changing lane, second is moving forward
         // Winner: second vehicle (who is moving forward)
-        let mut vehicle_seven = Vehicle::new(7)
+        let vehicle_seven = Vehicle::new(7)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -631,7 +631,7 @@ mod tests {
             intention_maneuver: LaneChangeType::ChangeRight,
             ..Default::default()
         });
-        let mut vehicle_eight = Vehicle::new(8)
+        let vehicle_eight = Vehicle::new(8)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -655,7 +655,7 @@ mod tests {
 
         // Case 5: First vehicle is changing lane, second is blocking its lane
         // Winner: second vehicle (who is blocking the lane)
-        let mut vehicle_nine = Vehicle::new(9)
+        let vehicle_nine = Vehicle::new(9)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -663,7 +663,7 @@ mod tests {
             intention_maneuver: LaneChangeType::ChangeLeft,
             ..Default::default()
         });
-        let mut vehicle_ten = Vehicle::new(10)
+        let vehicle_ten = Vehicle::new(10)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -687,7 +687,7 @@ mod tests {
 
         // Case 6: First vehicle is blocking its lane, second is changing lane
         // Winner: first vehicle (who is blocking the lane)
-        let mut vehicle_eleven = Vehicle::new(11)
+        let vehicle_eleven = Vehicle::new(11)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();
@@ -695,7 +695,7 @@ mod tests {
             intention_maneuver: LaneChangeType::Block,
             ..Default::default()
         });
-        let mut vehicle_twelve = Vehicle::new(12)
+        let vehicle_twelve = Vehicle::new(12)
             .with_behaviour(BehaviourType::Undefined)
             .with_speed(3)
             .build_ref();

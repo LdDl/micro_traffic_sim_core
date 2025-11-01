@@ -141,7 +141,7 @@ impl std::error::Error for MovementError {}
 pub fn movement(
     net: &GridRoads,
     vehicles: &mut IndexMap<VehicleID, VehicleRef>,
-    verbose: VerboseLevel,
+    verbose: &LocalLogger,
 ) -> Result<(), MovementError> {
     if verbose.is_at_least(VerboseLevel::Main) {
         verbose.log_with_fields(

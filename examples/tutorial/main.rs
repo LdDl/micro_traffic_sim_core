@@ -12,8 +12,6 @@ use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
 use micro_traffic_sim_core::verbose::init_logger;
 use micro_traffic_sim_core::verbose::VerboseLevel;
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::collections::HashMap;
 
 fn main() {
@@ -198,7 +196,7 @@ fn main() {
         .with_tls(tls)
         .build();
     let mut session = Session::new(grids_storage, None);
-    session.set_verbose_level(VerboseLevel::Additional);
+    session.set_verbose_level(VerboseLevel::Main);
     session.add_vehicles(vehicles);
     for trip in trips.iter() {
         session.add_trip(trip.clone());
@@ -215,7 +213,7 @@ fn main() {
     let mut tls_states = vec![];
     let mut vehicles_states = vec![];
     // Initial state
-    for (vid, veh) in session.get_vehicles() {
+    for (_vid, veh) in session.get_vehicles() {
         let v = veh.borrow();
         let (x, y) = if let Some(cell) = session.get_cell(&v.cell_id) {
             let pt = cell.get_point();
@@ -308,13 +306,12 @@ pub fn print_grid_tls(grid: &GridRoads, tls: &HashMap<i64, TrafficLight>) {
     // STEP 9: Print data for visualization
     // ==============================================================
     println!("tl_id;x;y");
-    for (tl_id, tl) in tls.iter() {
+    for (_tl_id, tl) in tls.iter() {
         let pt = tl.get_coordinates();
         println!("{};{:.5};{:.5}", tl.get_id(), pt.x(), pt.y());
     }
     println!("tl_id;controlled_cell;x;y");
-    for (tl_id, tl) in tls.iter() {
-        let pt = tl.get_coordinates();
+    for (_tl_id, tl) in tls.iter() {
         for group in tl.get_groups() {
             let cells_ids = group.get_cells_ids();
             for &cell_id in cells_ids {

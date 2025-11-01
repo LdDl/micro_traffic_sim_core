@@ -12,9 +12,9 @@ fn main() {
     init_logger();
 
     // 1. Create a two-lane road with N cells per lane
-    let N = 20;
+    let n = 20;
     let mut grid = GridRoads::new();
-    let lane_length = N;
+    let lane_length = n;
     let last_cell_id_lane0 = (lane_length - 1) as i64;
     let last_cell_id_lane1 = (lane_length - 1 + lane_length) as i64;
 
@@ -82,10 +82,10 @@ fn main() {
     session.add_vehicles(vehicles);
 
     // 4. Simulate steps
-    let steps = N - 1;
+    let steps = n - 1;
     println!("step;vehicle_id;vehicle_type;last_speed;last_angle;intermediate_cells;last_cell;x;y");
     // Print initial state
-    for (vid, veh) in session.get_vehicles() {
+    for (_vid, veh) in session.get_vehicles() {
         let v = veh.borrow();
         let (x, y) = if let Some(cell) = session.get_cell(&v.cell_id) {
             let pt = cell.get_point();

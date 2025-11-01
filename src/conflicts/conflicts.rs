@@ -7,7 +7,7 @@ use crate::grid::road_network::GridRoads;
 use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::utils::rand::thread_rng;
-use crate::verbose::VerboseLevel;
+use crate::verbose::{LocalLogger, VerboseLevel};
 use rand::Rng;
 
 use std::collections::{HashMap, HashSet};
@@ -695,7 +695,7 @@ pub fn collect_conflicts(
     net: &GridRoads,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
     cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
-    verbose: VerboseLevel,
+    verbose: &LocalLogger,
 ) -> Result<Vec<CellConflict>, ConflictError> {
     if verbose.is_at_least(crate::verbose::VerboseLevel::Main) {
         verbose.log_with_fields(

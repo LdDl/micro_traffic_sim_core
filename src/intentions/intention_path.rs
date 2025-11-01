@@ -104,7 +104,7 @@ pub fn process_path<'a>(
     let mut has_vehicle_on_path = false;
     let mut speed_limit_reached = false;
     let mut stopped_on_maneuver = false;
-    let mut stopped_speed_possible = false;
+    let stopped_speed_possible = false;
 
     for (i, cell) in vertices.iter().enumerate() {
         let maneuver = maneuvers[i];
@@ -117,7 +117,7 @@ pub fn process_path<'a>(
         }
 
         // Check if cell is occupied by another vehicle
-        if let Some(&vehicle_id) = current_state.get(&cell.get_id()) {
+        if let Some(_vehicle_id) = current_state.get(&cell.get_id()) {
             has_vehicle_on_path = true;
             break;
         }

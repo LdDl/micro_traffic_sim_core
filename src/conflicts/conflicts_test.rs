@@ -33,7 +33,7 @@ mod tests {
     #[test]
     fn test_find_cross_trajectories_no_right_maneuver() {
         // Case: Vehicle at cell with no right maneuver should return None
-        let mut vehicle = Vehicle::new(1)
+        let vehicle = Vehicle::new(1)
             .with_cell(10)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn test_find_cross_trajectories_no_forward_cell() {
         // Case: Vehicle at cell with no forward node should return None
-        let mut vehicle = Vehicle::new(1)
+        let vehicle = Vehicle::new(1)
             .with_cell(10)
             .with_behaviour(BehaviourType::Cooperative)
             .with_speed(2)

@@ -45,7 +45,7 @@ impl fmt::Display for ConflictSolverError {
 /// use micro_traffic_sim_core::agents::{Vehicle, VehicleRef};
 /// use micro_traffic_sim_core::maneuver::LaneChangeType;
 /// use micro_traffic_sim_core::grid::cell::CellID;
-/// use micro_traffic_sim_core::verbose::VerboseLevel;
+/// use micro_traffic_sim_core::verbose::LocalLogger;
 /// use std::rc::Rc;
 /// use std::cell::RefCell;
 /// let mut vehicle1 = Vehicle::new(1).with_speed(2).build();
@@ -57,11 +57,11 @@ impl fmt::Display for ConflictSolverError {
 ///    priority_participant_index: 0,
 ///   conflict_type: ConflictType::ForwardLaneChange,
 /// }];
-/// let result = solve_conflicts(conflicts, VerboseLevel::None);
+/// let result = solve_conflicts(conflicts, &LocalLogger::none());
 /// assert!(result.is_ok(), "Conflict resolution failed");
 pub fn solve_conflicts<'b>(
     conflicts_data: Vec<CellConflict>,
-    verbose: VerboseLevel,
+    verbose: &LocalLogger,
 ) -> Result<(), ConflictSolverError> {
     if verbose.is_at_least(VerboseLevel::Main) {
         verbose.log_with_fields(
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn test_solve_conflicts_empty_conflicts_list() {
         let conflicts: Vec<CellConflict> = vec![];
-        let result = solve_conflicts(conflicts, VerboseLevel::None);
+        let result = solve_conflicts(conflicts, &LocalLogger::none());
         assert!(result.is_ok(), "solve_conflicts should handle empty conflicts list");
     }
 
@@ -328,7 +328,7 @@ mod tests {
             conflict_type: ConflictType::MergeForward,
         }];
 
-        let result = solve_conflicts(conflicts,VerboseLevel::None);
+        let result = solve_conflicts(conflicts, &LocalLogger::none());
         assert!(result.is_err(), "solve_conflicts should return error for conflicts with insufficient participants");
         
         match result {
@@ -351,7 +351,7 @@ mod tests {
             conflict_type: ConflictType::MergeForward,
         }];
 
-        let result = solve_conflicts(conflicts, VerboseLevel::None);
+        let result = solve_conflicts(conflicts, &LocalLogger::none());
         assert!(result.is_err(), "solve_conflicts should return error for invalid priority index");
         
         match result {
@@ -376,7 +376,7 @@ mod tests {
             conflict_type: ConflictType::ForwardLaneChange,
         }];
 
-        let result = solve_conflicts(conflicts, VerboseLevel::None);
+        let result = solve_conflicts(conflicts, &LocalLogger::none());
         assert!(result.is_ok(), "solve_conflicts should handle common conflicts");
         
         // After solving, we can check the vehicle states
@@ -397,7 +397,7 @@ mod tests {
             conflict_type: ConflictType::CrossLaneChange,
         }];
 
-        let result = solve_conflicts(conflicts, VerboseLevel::None);
+        let result = solve_conflicts(conflicts, &LocalLogger::none());
         assert!(result.is_ok(), "solve_conflicts should handle trajectories conflicts");
         
         // Check that right vehicle is blocked (right maneuver loses to left maneuver)
@@ -417,7 +417,7 @@ mod tests {
             conflict_type: ConflictType::CrossConflictZone,
         }];
 
-        let result = solve_conflicts(conflicts, VerboseLevel::None);
+        let result = solve_conflicts(conflicts, &LocalLogger::none());
         assert!(result.is_ok(), "solve_conflicts should handle conflict zone conflicts");
         
         // In conflict zones, blocked vehicles get speed 1 (not 0)
@@ -446,7 +446,7 @@ mod tests {
             },
         ];
 
-        let result = solve_conflicts(conflicts, VerboseLevel::None);
+        let result = solve_conflicts(conflicts, &LocalLogger::none());
         assert!(result.is_ok(), "solve_conflicts should handle multiple conflicts");
         
         // Check first conflict resolution

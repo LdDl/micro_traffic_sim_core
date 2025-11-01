@@ -119,7 +119,7 @@ impl GridsStorage {
     }
 
     /// Advances the state of all traffic lights by one tick, updating their phases and cell states accordingly.
-    pub fn tick_traffic_lights(&mut self, verbose: VerboseLevel) -> Result<HashMap<TrafficLightID, Vec<TrafficLightGroupState>>, GridsStorageError> {
+    pub fn tick_traffic_lights(&mut self, verbose: &LocalLogger) -> Result<HashMap<TrafficLightID, Vec<TrafficLightGroupState>>, GridsStorageError> {
         if verbose.is_at_least(VerboseLevel::Main) {
             verbose.log_with_fields(
                 EVENT_TL_TICK,

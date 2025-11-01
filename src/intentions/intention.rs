@@ -5,7 +5,7 @@ use crate::agents::{
 };
 use crate::grid::cell::CellState;
 use crate::maneuver::LaneChangeType;
-use crate::grid::{cell::CellID, cell::Cell, road_network::GridRoads};
+use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
 use crate::shortest_path::router::{shortest_path, path_no_goal};
@@ -76,7 +76,7 @@ pub fn prepare_intentions<'a, 'b>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
     vehicles: &'b mut IndexMap<VehicleID, VehicleRef>,
-    verbose: VerboseLevel,
+    verbose: &LocalLogger,
 ) -> Result<Intentions, IntentionError> {
     let mut intentions = Intentions::new();
     if verbose.is_at_least(VerboseLevel::Main) {
@@ -132,7 +132,7 @@ pub fn find_intention<'a>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
     vehicle: &'a Vehicle,
-    verbose: VerboseLevel,
+    _verbose: &LocalLogger,
 ) -> Result<VehicleIntention, IntentionError> {
     if vehicle.strategy_type == BehaviourType::Block {
         let result = VehicleIntention {
@@ -193,7 +193,7 @@ pub fn find_intention<'a>(
     }
 
     // Random slowdown
-    let mut isSlowdown = false;
+    let mut _is_slowdown = false;
     let slowdown_allowed = vehicle.timer_non_slowdown <= 0;
     // tmp code:
     let slow_down_factor = vehicle.slow_down_factor;
@@ -201,7 +201,7 @@ pub fn find_intention<'a>(
         // @todo: consider to switch two lines below.
         speed_possible = intention_speed;
         intention_speed = (intention_speed - 1).max(0);
-        isSlowdown = true;
+        _is_slowdown = true;
     }
 
     // Considering that vehicle always wants to accelerate:
@@ -224,7 +224,7 @@ pub fn find_intention<'a>(
     //     vehicle.destination,
     //     observe_distance,
     //     slow_down_factor,
-    //     if isSlowdown { " (slowdown)" } else { "" }
+    //     if _is_slowdown { " (slowdown)" } else { "" }
     // );
 
     let mut path = match vehicle.destination {
@@ -526,9 +526,10 @@ mod tests {
         let vehicle_1 = Vehicle::new(1)
             .with_cell(101)
             .with_speed(1)
+            .with_speed_limit(1)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, &LocalLogger::none()).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 1,
             intention_speed: 1,
@@ -542,9 +543,10 @@ mod tests {
         let vehicle_1 = Vehicle::new(1)
             .with_cell(101)
             .with_speed(3)
+            .with_speed_limit(3)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, &LocalLogger::none()).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 3,
             intention_speed: 3,
@@ -563,7 +565,7 @@ mod tests {
             .with_speed(4)
             .with_destination(8)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, &LocalLogger::none()).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 3,
             intention_speed: 3,
@@ -580,7 +582,7 @@ mod tests {
             .with_speed(3)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, &LocalLogger::none()).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 101,
             intention_speed: 0,
@@ -597,7 +599,7 @@ mod tests {
             .with_speed(3)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, &LocalLogger::none()).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 2,
             intention_speed: 2,
@@ -614,7 +616,7 @@ mod tests {
             .with_speed(3)
             .with_destination(2)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, &LocalLogger::none()).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 2,
             intention_speed: 2,
@@ -631,7 +633,7 @@ mod tests {
             .with_speed(4)
             .with_destination(7)
             .build();
-        let intention = find_intention(&net, &current_state, &vehicle_1, VerboseLevel::None).unwrap();
+        let intention = find_intention(&net, &current_state, &vehicle_1, &LocalLogger::none()).unwrap();
         let correct_intention = VehicleIntention {
             intention_cell_id: 7,
             intention_speed: 4,
@@ -743,7 +745,7 @@ mod tests {
         let source_cell = net.get_cell(&2).unwrap();
         let blocked_cell = net.get_cell(&3).unwrap();
         let dest_cell = net.get_cell(&12).unwrap();
-        let mut vehicle = Vehicle::new(42)
+        let vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_speed(3)
             .with_destination(dest_cell.get_id())
@@ -762,7 +764,7 @@ mod tests {
         intentions.add_intention(vehicle, IntentionType::Target);
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
-        let mut correct_vehicle = Vehicle::new(42)
+        let correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_destination(dest_cell.get_id())
             .build_ref();
@@ -778,7 +780,7 @@ mod tests {
             intentions.len(),
             "Incorrect number of intentions"
         );
-        for (i, corr_int) in correct_intentions.iter() {
+        for (i, _corr_int) in correct_intentions.iter() {
             assert_eq!(
                 intentions.get(i).is_some(),
                 true,
@@ -787,7 +789,7 @@ mod tests {
                 intentions.get(i)
             );
         }
-        for (i, int) in intentions.iter() {
+        for (i, _int) in intentions.iter() {
             assert_eq!(
                 correct_intentions.get(i).is_some(),
                 true,
@@ -848,7 +850,7 @@ mod tests {
         let source_cell = net.get_cell(&2).unwrap();
         let blocked_cell = net.get_cell(&3).unwrap();
         let dest_cell = net.get_cell(&500).unwrap();
-        let mut vehicle = Vehicle::new(42)
+        let vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_speed(3)
             .with_destination(dest_cell.get_id())
@@ -867,7 +869,7 @@ mod tests {
         intentions.add_intention(vehicle, IntentionType::Target);
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
-        let mut correct_vehicle = Vehicle::new(42)
+        let correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_destination(dest_cell.get_id())
             .build_ref();
@@ -883,7 +885,7 @@ mod tests {
             intentions.len(),
             "Incorrect number of intentions"
         );
-        for (i, corr_int) in correct_intentions.iter() {
+        for (i, _corr_int) in correct_intentions.iter() {
             assert_eq!(
                 intentions.get(i).is_some(),
                 true,
@@ -892,7 +894,7 @@ mod tests {
                 intentions.get(i)
             );
         }
-        for (i, int) in intentions.iter() {
+        for (i, _int) in intentions.iter() {
             assert_eq!(
                 correct_intentions.get(i).is_some(),
                 true,
@@ -953,7 +955,7 @@ mod tests {
         let source_cell = net.get_cell(&2).unwrap();
         let blocked_cell = net.get_cell(&3).unwrap();
         let dest_cell = net.get_cell(&500).unwrap();
-        let mut vehicle = Vehicle::new(42)
+        let vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_speed(3)
             .with_destination(dest_cell.get_id())
@@ -977,7 +979,7 @@ mod tests {
 
         // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
         // Vehicle could not move either forward or right
-        let mut correct_vehicle = Vehicle::new(42)
+        let correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_destination(dest_cell.get_id())
             .build_ref();
@@ -993,7 +995,7 @@ mod tests {
             intentions.len(),
             "Incorrect number of intentions"
         );
-        for (i, corr_int) in correct_intentions.iter() {
+        for (i, _corr_int) in correct_intentions.iter() {
             assert_eq!(
                 intentions.get(i).is_some(),
                 true,
@@ -1002,7 +1004,7 @@ mod tests {
                 intentions.get(i)
             );
         }
-        for (i, int) in intentions.iter() {
+        for (i, _int) in intentions.iter() {
             assert_eq!(
                 correct_intentions.get(i).is_some(),
                 true,

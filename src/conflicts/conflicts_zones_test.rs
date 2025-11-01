@@ -11,7 +11,7 @@ mod tests {
     use crate::grid::zones::ZoneType;
     use crate::grid::road_network::GridRoads;
     use crate::maneuver::LaneChangeType;
-    use crate::verbose::VerboseLevel;
+    use crate::verbose::{LocalLogger, VerboseLevel};
     use std::collections::{HashMap, HashSet};
     use crate::utils::test_grids::{
         create_conflict_zones_grid, create_conflict_zones_multiple_grid, create_simple_cross_shape_grid,
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn test_conflict_zones_trajectories() {
         // Based on TestConflictZonesTrajectories
-        let verbose = VerboseLevel::None;
+        let verbose = LocalLogger::new(VerboseLevel::None);
         let grid = create_conflict_zones_grid();
 
         let vehicle1 = Vehicle::new(1)
@@ -590,7 +590,7 @@ mod tests {
             &grid, 
             &conflict_zones, 
             &cells_conflicts_zones, 
-            verbose
+            &verbose
         );
 
         assert!(conflicts_data.is_ok());
@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn test_conflict_zones_trajectories_invalidated() {
         // Based on TestConflictZonesTrajectoriesInvalidated
-        let verbose = VerboseLevel::None;
+        let verbose = LocalLogger::new(VerboseLevel::None);
         let grid = create_conflict_zones_multiple_grid();
 
         let vehicle1 = Vehicle::new(1)
@@ -690,7 +690,7 @@ mod tests {
             &grid, 
             &conflict_zones, 
             &cells_conflicts_zones, 
-            verbose
+            &verbose
         );
 
         assert!(conflicts_data.is_ok());
@@ -718,14 +718,14 @@ mod tests {
                 idx, correct_conflicts[idx].priority_participant_id, priority_participant_id);
         }
 
-        let solve_result = solve_conflicts(conflicts, verbose);
+        let solve_result = solve_conflicts(conflicts, &verbose);
         assert!(solve_result.is_ok(), "Can't solve conflicts");
     }
 
     #[test]
     fn test_conflict_zones_cross_grid() {
         // Based on TestConflictZonesCrossGrid
-        let verbose = VerboseLevel::None;
+        let verbose = LocalLogger::new(VerboseLevel::None);
         let grid = create_simple_cross_shape_grid();
 
         let vehicle1 = Vehicle::new(1)
@@ -782,7 +782,7 @@ mod tests {
             &grid, 
             &conflict_zones, 
             &cells_conflicts_zones, 
-            verbose
+            &verbose
         );
 
         assert!(conflicts_data.is_ok());
@@ -810,14 +810,14 @@ mod tests {
                 idx, correct_conflicts[idx].priority_participant_id, priority_participant_id);
         }
 
-        let solve_result = solve_conflicts(conflicts, verbose);
+        let solve_result = solve_conflicts(conflicts, &verbose);
         assert!(solve_result.is_ok(), "Can't solve conflicts");
     }
 
     #[test]
     fn test_conflict_zones_cross_tail() {
         // Based on TestConflictZonesCrossTail
-        let verbose = VerboseLevel::None;
+        let verbose = LocalLogger::new(VerboseLevel::None);
 
         // Generate 3x7 grid
         let cells_set = generate_one_lane_cells(31.5, 4.5, 3);
@@ -887,7 +887,7 @@ mod tests {
             &grid, 
             &conflict_zones, 
             &cells_conflicts_zones, 
-            verbose
+            &verbose
         );
 
         assert!(conflicts_data.is_ok());
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn test_conflict_zones_cross_tail_forward() {
         // Based on TestConflictZonesCrossTailForward
-        let verbose = VerboseLevel::None;
+        let verbose = LocalLogger::new(VerboseLevel::None);
 
         let cells_set = vec![
             Cell::new(1)
@@ -1110,7 +1110,7 @@ mod tests {
             &grid, 
             &conflict_zones, 
             &cells_conflicts_zones, 
-            verbose
+            &verbose
         );
 
         assert!(conflicts_data.is_ok());

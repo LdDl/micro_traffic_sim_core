@@ -14,6 +14,7 @@ Table of contents
 - [Complete workflow guide](#complete-workflow-guide)
   - [Add crate to your project](#add-crate-to-your-project)
   - [Basic workflow overview](#basic-workflow-overview)
+  - [Verbose logging](#verbose-logging)
   - [Creating the grid](#creating-the-grid)
   - [Optionally add conflict zones](#optionally-add-conflict-zones)
   - [Creating vehicles statically](#creating-vehicles-statically)
@@ -112,6 +113,27 @@ Every simulation follows this pattern:
 **The full example for grid basics is in [`examples/grid-basics`](examples/grid-basics).**
 
 **The full example for whole simulation is in [`examples/tutorial`](examples/tutorial).**
+
+### Verbose logging
+Before we continue it is worth to mention that the simulation session supports verbose logging at different levels. This can be very useful for debugging and understanding the simulation flow.
+
+Currently supported levels are:
+- `VerboseLevel::None` - No logging
+- `VerboseLevel::Main` - Main simulation pipeline steps.
+- `VerboseLevel::Additional` - More detailed logging: loops of main steps.
+- `VerboseLevel::Detailed` - Additional detailed logging: internal computations.
+
+How to set verbose level:
+```rust
+use micro_traffic_sim_core::verbose::VerboseLevel;
+/* ... */
+fn main () {
+  /* ... */
+  let mut session = Session::new(grids_storage, None); // Internal session's logger will be set to None automatically
+  session.set_verbose_level(VerboseLevel::Main); // Set desired level here
+  /* ... */
+}
+```
 
 ### Creating the grid
 

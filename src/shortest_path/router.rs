@@ -478,7 +478,7 @@ fn reconstruct_path<'a>(current_node: &Rc<RefCell<AStarNode<'a>>>) -> Path<'a> {
     let cost = current_node.borrow().g_cost;
     while let Some(node) = current {
         vertices.push(node.borrow().cell);
-        if let Some(parent) = &node.borrow().parent {
+        if let Some(_parent) = &node.borrow().parent {
             maneuvers.push(node.borrow().maneuver);
         }
         current = node.borrow().parent.clone();
@@ -516,7 +516,7 @@ fn reconstruct_path<'a>(current_node: &Rc<RefCell<AStarNode<'a>>>) -> Path<'a> {
 ///
 /// # Example
 /// ```rust
-/// use micro_traffic_sim_core::shortest_path::router::shortest_path_depth;
+/// use micro_traffic_sim_core::shortest_path::router::path_no_goal;
 /// use micro_traffic_sim_core::grid::{road_network::GridRoads, cell::Cell};
 /// use micro_traffic_sim_core::geom::new_point;
 /// 
@@ -544,7 +544,7 @@ fn reconstruct_path<'a>(current_node: &Rc<RefCell<AStarNode<'a>>>) -> Path<'a> {
 /// grid.add_cell(cell4.clone());
 /// 
 /// // Find path of depth 5 starting from cell #1
-/// let result = shortest_path_depth(&cell1, &grid, true, 5);
+/// let result = path_no_goal(&cell1, &grid, true, 5);
 /// match result {
 ///    Ok(path) => {
 ///       println!("Found path with {} vertices", path.vertices().len());

@@ -73,7 +73,7 @@ fn main() {
     let steps_num = 50;
     let mut vehicles_states = vec![];
     // Initial state
-    for (vid, veh) in session.get_vehicles() {
+    for (_vid, veh) in session.get_vehicles() {
         let v = veh.borrow();
         let (x, y) = if let Some(cell) = session.get_cell(&v.cell_id) {
             let pt = cell.get_point();
