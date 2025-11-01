@@ -196,7 +196,7 @@ fn main() {
         .with_tls(tls)
         .build();
     let mut session = Session::new(grids_storage, None);
-    session.set_verbose_level(VerboseLevel::Main);
+    session.set_verbose_level(VerboseLevel::None);
     session.add_vehicles(vehicles);
     for trip in trips.iter() {
         session.add_trip(trip.clone());

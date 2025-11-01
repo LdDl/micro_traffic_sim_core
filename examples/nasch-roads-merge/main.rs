@@ -93,7 +93,7 @@ fn main() {
         .with_vehicles_net(grid)
         .build();
     let mut session = Session::new(grids_storage, None);
-    session.set_verbose_level(VerboseLevel::Main);
+    session.set_verbose_level(VerboseLevel::None);
     session.add_vehicles(vehicles);
 
     // 4. Simulate steps
