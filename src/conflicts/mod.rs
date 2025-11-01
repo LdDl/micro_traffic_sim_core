@@ -68,9 +68,12 @@
 //! let result = session.step();
 //! ```
 mod conflicts;
-mod conflicts_test;
-mod conflicts_zones_test;
 mod conflict_rule;
 mod conflicts_solver;
+
+#[cfg(test)]
+mod conflicts_test;
+#[cfg(test)]
+mod conflicts_zones_test;
 
 pub use self::{conflicts::*, conflict_rule::*, conflicts_solver::*};

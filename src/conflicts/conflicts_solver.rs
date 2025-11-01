@@ -268,7 +268,7 @@ mod tests {
     use crate::grid::cell::CellID;
     use crate::conflicts::conflicts::{CellConflict, ConflictType};
 
-    fn create_test_vehicle(
+    fn _create_test_vehicle(
         id: u64,
         speed: i32,
         maneuver: LaneChangeType,

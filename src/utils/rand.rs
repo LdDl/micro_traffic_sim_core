@@ -2,7 +2,7 @@
 //! 
 //! This module provides a drop-in replacement for `rand::thread_rng()` that uses
 //! a fixed seed during testing to ensure reproducible results.
-
+#[cfg(test)]
 use rand::Rng;
 
 #[cfg(not(test))]
