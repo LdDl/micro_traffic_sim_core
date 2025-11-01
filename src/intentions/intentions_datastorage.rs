@@ -105,7 +105,7 @@ impl Intentions {
     ///     println!("Cell {} has {} intentions", cell_id, ints.len());
     /// }
     /// ```
-    pub fn iter(&self) -> std::collections::hash_map::Iter<CellID, Vec<CellIntention>> {
+    pub fn iter(&self) -> impl Iterator<Item = (&CellID, &Vec<CellIntention>)> {
         self.cells_intentions.iter()
     }
 

@@ -193,15 +193,15 @@ pub fn find_intention<'a>(
     }
 
     // Random slowdown
-    let mut _is_slowdown = false;
+    // let mut _is_slowdown = false;
     let slowdown_allowed = vehicle.timer_non_slowdown <= 0;
     // tmp code:
     let slow_down_factor = vehicle.slow_down_factor;
     if slowdown_allowed && intention_speed > 0 && random::<f64>() < slow_down_factor {
         // @todo: consider to switch two lines below.
         speed_possible = intention_speed;
-        intention_speed = (intention_speed - 1).max(0);
-        _is_slowdown = true;
+        // intention_speed = (intention_speed - 1).max(0);
+        // _is_slowdown = true;
     }
 
     // Considering that vehicle always wants to accelerate:

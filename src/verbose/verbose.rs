@@ -1,7 +1,7 @@
 // src/verbose/verbose.rs
 use std::fmt;
 use std::sync::OnceLock;
-use tracing::{info, debug, trace, warn, error, Level};
+use tracing::{info, debug, trace, Level};
 use tracing_subscriber::{fmt as tracing_fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, reload};
 
 /// Hierarchical logging levels for simulation debugging.
