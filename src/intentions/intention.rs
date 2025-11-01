@@ -79,24 +79,28 @@ pub fn prepare_intentions<'a, 'b>(
     verbose: VerboseLevel,
 ) -> Result<Intentions, IntentionError> {
     let mut intentions = Intentions::new();
-    verbose.log_with_fields(
-        EVENT_INTENTIONS_CREATE,
-        "Collect intentions for vehicles",
-        &[
-            ("vehicles_num", &vehicles.len()),
-        ]
-    );
-    for (_, vehicle_ref) in vehicles.iter_mut() {
+    if verbose.is_at_least(VerboseLevel::Main) {
         verbose.log_with_fields(
-            EVENT_INTENTION_VEHICLE,
-            &format!("Processing vehicle {}", vehicle_ref.borrow().id),
+            EVENT_INTENTIONS_CREATE,
+            "Collect intentions for vehicles",
             &[
-                ("vehicle_id", &vehicle_ref.borrow().id),
-                ("current_cell_id", &vehicle_ref.borrow().cell_id),
-                ("speed", &vehicle_ref.borrow().speed),
-                ("destination", &vehicle_ref.borrow().destination),
+                ("vehicles_num", &vehicles.len()),
             ]
         );
+    }
+    for (_, vehicle_ref) in vehicles.iter_mut() {
+        if verbose.is_at_least(VerboseLevel::Additional) {
+            verbose.log_with_fields(
+                EVENT_INTENTION_VEHICLE,
+                &format!("Processing vehicle {}", vehicle_ref.borrow().id),
+                &[
+                    ("vehicle_id", &vehicle_ref.borrow().id),
+                    ("current_cell_id", &vehicle_ref.borrow().cell_id),
+                    ("speed", &vehicle_ref.borrow().speed),
+                    ("destination", &vehicle_ref.borrow().destination),
+                ]
+            );
+        }
         let possible_intention = find_intention(net, current_state, &vehicle_ref.borrow(), verbose)?;
         if possible_intention.should_stop {
             let alternate_possible_intention = find_alternate_intention(net, current_state, &vehicle_ref.borrow())?;
@@ -104,14 +108,16 @@ pub fn prepare_intentions<'a, 'b>(
             intentions.add_intention(vehicle_ref.clone(), IntentionType::Target);
             continue;
         }
-        verbose.log_with_fields(
-            EVENT_INTENTION_ADD,
-            &format!("Adding intentions with vehicle {}", vehicle_ref.borrow().id),
-            &[
-                ("vehicle_id", &vehicle_ref.borrow().id),
-                ("intention", &possible_intention),
-            ]
-        );
+        if verbose.is_at_least(VerboseLevel::Additional) {
+            verbose.log_with_fields(
+                EVENT_INTENTION_ADD,
+                &format!("Adding intentions with vehicle {}", vehicle_ref.borrow().id),
+                &[
+                    ("vehicle_id", &vehicle_ref.borrow().id),
+                    ("intention", &possible_intention),
+                ]
+            );
+        }
         vehicle_ref.borrow_mut().set_intention(possible_intention);
         intentions.add_intention(vehicle_ref.clone(), IntentionType::Target);
     }

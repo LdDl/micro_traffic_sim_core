@@ -1,4 +1,4 @@
-# micro_traffic_sim_core — core for traffic simulation via cellular automata
+# micro_traffic_sim_core - core for traffic simulation via cellular automata
 
 Under development. API may change.
 
@@ -49,10 +49,12 @@ __Disclaimer__: Repository documentation will have a lot of technical details in
 Top-level modules are exported from [`src/lib.rs`](src/lib.rs).
 
 Examples live under the `examples/` directory. Notable examples:
-- [`examples/nasch-one-lane/main.rs`](examples/nasch-one-lane/main.rs) — minimal one-lane NaSch example
-- [`examples/nasch-two-lanes/main.rs`](examples/nasch-two-lanes/main.rs)
-- [`examples/nasch-lanes-merge/main.rs`](examples/nasch-lanes-merge/main.rs)
-- [`examples/nasch-roads-merge/main.rs`](examples/nasch-roads-merge/main.rs)
+- [`examples/nasch-one-lane/main.rs`](examples/nasch-one-lane/main.rs) - minimal one-lane NaSch example
+- [`examples/nasch-two-lanes/main.rs`](examples/nasch-two-lanes/main.rs) - minimal two-lane NaSch example
+- [`examples/nasch-lanes-merge/main.rs`](examples/nasch-lanes-merge/main.rs) - merging two lanes into one
+- [`examples/nasch-roads-merge/main.rs`](examples/nasch-roads-merge/main.rs) - merging two roads into one
+- [`examples/ring/main.rs`](examples/ring/main.rs) - ring-like road network
+- [`examples/tutorial/main.rs`](examples/tutorial/main.rs) - complete tutorial with grid creation, trips, traffic lights, and CSV-like output
 
 Benchmarks:
 - [`benches/shortest_path_benchmark.rs`](benches/shortest_path_benchmark.rs)

@@ -401,15 +401,17 @@ impl Session {
 
     /// Generates vehicles based on the trips data
     pub fn generate_vehicles(&mut self) {
-        self.verbose.log_with_fields(
-            EVENT_GEN_VEHICLES,
-            "Generate vehicles",
-            &[
-                ("step", &self.steps),
-                ("vehicles_num", &self.vehicles.len()),
-                ("trips_num", &self.trips_data.len()),
-            ]
-        );
+        if self.verbose.is_at_least(VerboseLevel::Main) {
+            self.verbose.log_with_fields(
+                EVENT_GEN_VEHICLES,
+                "Generate vehicles",
+                &[
+                    ("step", &self.steps),
+                    ("vehicles_num", &self.vehicles.len()),
+                    ("trips_num", &self.trips_data.len()),
+                ]
+            );
+        }
         for (trip_id, trip) in &self.trips_data {
             // Check if there's already a vehicle at the source node
             let mut create = true;
@@ -447,15 +449,17 @@ impl Session {
 
     /// Updates current position mapping
     fn update_current_positions(&mut self) {
-        self.verbose.log_with_fields(
-            EVENT_UPD_POS,
-            "Update positions",
-            &[
-                ("step", &self.steps),
-                ("vehicles_num", &self.vehicles.len()),
-                ("trips_num", &self.trips_data.len()),
-            ]
-        );
+        if self.verbose.is_at_least(VerboseLevel::Main) {
+            self.verbose.log_with_fields(
+                EVENT_UPD_POS,
+                "Update positions",
+                &[
+                    ("step", &self.steps),
+                    ("vehicles_num", &self.vehicles.len()),
+                    ("trips_num", &self.trips_data.len()),
+                ]
+            );
+        }
         self.current_position.clear();
         for vehicle_ref in self.vehicles.values() {
             let vehicle = vehicle_ref.borrow();
@@ -503,16 +507,18 @@ impl Session {
     /// 8. Collect state dump
     /// ```
     pub fn step(&mut self) -> Result<AutomataState, SessionError> {
-        self.verbose.log_with_fields(
-            EVENT_STEP,
-            "Run Step",
-            &[
-                ("step", &self.steps),
-                ("vehicles_num", &self.vehicles.len()),
-                ("trips_num", &self.trips_data.len()),
-                ("tls_num", &self.grids_storage.tls_num()),
-            ]
-        );
+        if self.verbose.is_at_least(VerboseLevel::Main) {
+            self.verbose.log_with_fields(
+                EVENT_STEP,
+                "Run Step",
+                &[
+                    ("step", &self.steps),
+                    ("vehicles_num", &self.vehicles.len()),
+                    ("trips_num", &self.trips_data.len()),
+                    ("tls_num", &self.grids_storage.tls_num()),
+                ]
+            );
+        }
         
         // 1. Generate vehicles for given trips
         self.generate_vehicles();
