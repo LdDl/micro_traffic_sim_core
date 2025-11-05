@@ -1,8 +1,6 @@
 # micro_traffic_sim_core - core for traffic simulation via cellular automata
 
-Under development. API may change.
-
-I've not even published this crate on crates.io yet.
+API may change since project is in early stages.
 
 Table of contents
 - [Introduction](#introduction)
