@@ -2,6 +2,13 @@
 name = "micro_traffic_sim_core"
 version = "0.1.0"
 edition = "2024"
+description = "Core library for microscopic traffic simulation via cellular automata."
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/LdDl/micro_traffic_sim_core"
+documentation = "https://docs.rs/micro_traffic_sim_core"
+homepage = "https://github.com/LdDl/micro_traffic_sim_core"
+keywords = ["traffic", "simulation", "automata", "grid", "pathfinding"]
 
 [dependencies]
 rand = "0.9.2"
