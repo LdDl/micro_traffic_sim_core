@@ -30,6 +30,7 @@
 //!
 //! - [`grids_storage::GridsStorage`] – Stores the vehicle grid and traffic lights
 //! - [`session::Session`] – Main simulation controller, manages vehicles, trips, and simulation steps
+//! - [`sessions_storage::SessionsStorage`] – Optional manager for multiple sessions with TTL-based expiration (server-side use)
 //! - [`states::AutomataState`] – Snapshot of the simulation state at each step
 //! - [`states::VehicleState`] – State of each vehicle at a given timestamp
 //! - [`states::TrafficLightGroupState`] – State of each traffic light group at a given timestamp
@@ -103,3 +104,4 @@
 pub mod grids_storage;
 pub mod session;
 pub mod states;
+pub mod sessions_storage;
