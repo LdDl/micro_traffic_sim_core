@@ -6,7 +6,7 @@ use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
 use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType, Intentions};
-use crate::utils::rand::thread_rng;
+use crate::utils::rand::rng;
 use crate::verbose::{LocalLogger, VerboseLevel};
 use rand::Rng;
 
@@ -374,8 +374,8 @@ pub fn find_zone_conflict_for_two_intentions(
             _ => {}
         }
         // Random selection (coin flip)
-        let mut rng = thread_rng();
-        if rng.gen_bool(0.5) {
+        let mut rng = rng();
+        if rng.random_bool(0.5) {
             return Some(first_edge.source);
         }
         return Some(second_edge.source);
@@ -509,8 +509,8 @@ pub fn find_conflicts_in_conflict_zones(
             _ => {
                 // Random selection (50/50)
                 use rand::Rng;
-                let mut rng = thread_rng();
-                if rng.gen_bool(0.5) {
+                let mut rng = rng();
+                if rng.random_bool(0.5) {
                     // First vehicle has priority
                     (vec![vehicle_ref.clone(), second_cell_intention.vehicle.clone()], 0)
                 } else {

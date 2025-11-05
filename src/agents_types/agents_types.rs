@@ -56,8 +56,8 @@ impl AgentType {
     /// let random_agent = AgentType::random();
     /// ```
     pub fn random() -> Self {
-        let mut rng = rand::thread_rng();
-        match rng.gen_range(1..=4) {
+        let mut rng = rand::rng();
+        match rng.random_range(1..=4) {
             1 => AgentType::Car,
             2 => AgentType::Bus,
             3 => AgentType::Taxi,
