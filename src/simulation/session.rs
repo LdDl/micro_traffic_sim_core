@@ -177,7 +177,7 @@ impl Session {
         let verbose = LocalLogger::with_session(VerboseLevel::None, session_id.to_string());
 
         Session {
-            id: Uuid::new_v4(),
+            id: session_id,
             last_vehicle_id: 1,
             vehicles: IndexMap::new(),
             grids_storage,
@@ -590,5 +590,25 @@ impl Session {
             vehicles: states_dump,
             tls: tl_states_dump,
         })
+    }
+
+    /// Gets the expiration time of the session
+    pub fn get_expire_at(&self) -> i64 {
+        self._expire_at
+    }
+
+    /// Sets the expiration time of the session
+    pub fn set_expire_at(&mut self, expire_at: i64) {
+        self._expire_at = expire_at;
+    }
+
+    /// Gets the last updated time of the session
+    pub fn get_updated_at(&self) -> i64 {
+        self._updated_at
+    }
+
+    /// Sets the last updated time of the session
+    pub fn set_updated_at(&mut self, updated_at: i64) {
+        self._updated_at = updated_at;
     }
 }
