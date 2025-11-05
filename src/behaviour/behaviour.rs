@@ -37,8 +37,8 @@ impl BehaviourType {
     /// let random_behaviour = BehaviourType::random_vehicle_behaviour_type(ratio_aggressive, ratio_cooperative);
     /// ```
     pub fn random_vehicle_behaviour_type(ratio_a: f64, ratio_b: f64) -> Self {
-        let mut rng = rand::thread_rng();
-        let random_number = rng.gen_range(0.0..(ratio_a + ratio_b));
+        let mut rng = rand::rng();
+        let random_number = rng.random_range(0.0..(ratio_a + ratio_b));
         if random_number < ratio_a {
             BehaviourType::Aggressive
         } else {

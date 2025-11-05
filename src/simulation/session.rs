@@ -349,8 +349,8 @@ impl Session {
             }
             TripType::Random => {
                 // Generate vehicle based on probability
-                let mut rng = rand::thread_rng();
-                let norm_value: f64 = rng.gen();
+                let mut rng = rand::rng();
+                let norm_value: f64 = rng.random();
                 norm_value < trip.probability
             }
             _ => {
