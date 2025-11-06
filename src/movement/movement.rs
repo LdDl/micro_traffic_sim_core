@@ -1,6 +1,6 @@
 // In src/movement/mod.rs or src/movement/movement.rs
 use crate::agents_types::AgentType;
-use crate::agents::{VehicleID, VehicleRef};
+use crate::agents::{VehicleID, Vehicle};
 use crate::grid::road_network::GridRoads;
 use crate::grid::cell::CellID;
 use crate::grid::zones::ZoneType;
@@ -140,7 +140,7 @@ impl std::error::Error for MovementError {}
 /// - **Detailed**: Tail cell updates and timer changes.
 pub fn movement(
     net: &GridRoads,
-    vehicles: &mut IndexMap<VehicleID, VehicleRef>,
+    vehicles: &mut IndexMap<VehicleID, Vehicle>,
     verbose: &LocalLogger,
 ) -> Result<(), MovementError> {
     if verbose.is_at_least(VerboseLevel::Main) {
@@ -154,8 +154,7 @@ pub fn movement(
     // Collect vehicles to remove (to avoid borrowing issues during iteration)
     let mut vehicles_to_remove = Vec::new();
 
-    for (vehicle_id, vehicle_ref) in vehicles.iter() {
-        let mut vehicle = vehicle_ref.borrow_mut();
+    for (vehicle_id, vehicle) in vehicles.iter_mut() {
         
         if verbose.is_at_least(VerboseLevel::Additional) {
             verbose.log_with_fields(
@@ -265,7 +264,7 @@ pub fn movement(
         vehicle.travel_time += 1;
 
         // Check for vehicle removal conditions
-        if zone_type == ZoneType::Death && vehicle.cell_id != vehicle.destination {
+    if zone_type == ZoneType::Death && vehicle.cell_id != vehicle.destination {
             // Vehicle has reached the death zone
             if verbose.is_at_least(VerboseLevel::Main) {
                 verbose.log_with_fields(
@@ -276,7 +275,7 @@ pub fn movement(
             }
             vehicles_to_remove.push(*vehicle_id);
         }
-        if vehicle.cell_id == vehicle.destination {
+    if vehicle.cell_id == vehicle.destination {
             // Vehicle has reached the destination
             if verbose.is_at_least(VerboseLevel::Main) {
                 verbose.log_with_fields(

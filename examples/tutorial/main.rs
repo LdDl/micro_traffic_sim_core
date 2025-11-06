@@ -4,7 +4,7 @@ use micro_traffic_sim_core::conflict_zones::{ConflictWinnerType, ConflictEdge, C
 use micro_traffic_sim_core::traffic_lights::lights::TrafficLight;
 use micro_traffic_sim_core::traffic_lights::groups::TrafficLightGroup;
 use micro_traffic_sim_core::traffic_lights::signals::SignalType;
-use micro_traffic_sim_core::agents::{Vehicle, VehicleRef};
+use micro_traffic_sim_core::agents::Vehicle;
 use micro_traffic_sim_core::agents_types::AgentType;
 use micro_traffic_sim_core::behaviour::BehaviourType;
 use micro_traffic_sim_core::trips::trip::{Trip, TripType};
@@ -164,8 +164,8 @@ fn main() {
         .with_speed_limit(1)
         .with_cell(4)
         .with_destination(9)
-        .build_ref();
-    let vehicles: Vec<VehicleRef> = vec![vehicle];
+        .build();
+    let vehicles: Vec<Vehicle> = vec![vehicle];
 
     // ==============================================================
     // STEP 5: Add vehicles dynamically via trips
@@ -213,8 +213,7 @@ fn main() {
     let mut tls_states = vec![];
     let mut vehicles_states = vec![];
     // Initial state
-    for (_vid, veh) in session.get_vehicles() {
-        let v = veh.borrow();
+    for (_vid, v) in session.get_vehicles() {
         let (x, y) = if let Some(cell) = session.get_cell(&v.cell_id) {
             let pt = cell.get_point();
             (pt.x(), pt.y())
