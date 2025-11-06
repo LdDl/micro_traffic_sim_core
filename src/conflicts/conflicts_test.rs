@@ -5,7 +5,7 @@ mod tests {
     use super::*;
     use crate::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone, ConflictZoneID};
     use crate::behaviour::BehaviourType;
-    use crate::agents::{Vehicle, VehicleIntention, VehicleID, VehiclesStorage};
+    use crate::agents::{Vehicle, VehicleIntention, VehiclesStorage};
     use crate::intentions::{CellIntention, IntentionType, Intentions};
     use crate::grid::cell::{Cell, CellID};
     use crate::grid::road_network::GridRoads;
