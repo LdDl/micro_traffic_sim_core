@@ -1,6 +1,6 @@
 use crate::behaviour::BehaviourParameters;
 use crate::agents_types::AgentType;
-use crate::agents::{VehicleID, VehicleRef, Vehicle};
+use crate::agents::{VehicleID, Vehicle, VehiclesStorage};
 use crate::conflict_zones::{ConflictZone, ConflictZoneID};
 use crate::grid::cell::{CellID, Cell};
 use crate::trips::trip::{Trip, TripID, TripType};
@@ -12,7 +12,6 @@ use crate::movement::{MovementError, movement};
 use crate::simulation::states::{AutomataState, VehicleState};
 use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
 use crate::verbose::*;
-use indexmap::IndexMap;
 use std::collections::HashMap;
 use uuid::Uuid;
 use std::fmt;
@@ -111,7 +110,7 @@ pub struct Session {
     trips_data: HashMap<TripID, Trip>,
 
     /// Vehicles storage
-    vehicles: IndexMap<VehicleID, VehicleRef>,
+    vehicles: VehiclesStorage,
 
     /// Cells under traffic lights control
     /// It could be just Cell, but we'll use CellID for now
@@ -152,7 +151,7 @@ impl Session {
         Session {
             id: session_id,
             last_vehicle_id: 1,
-            vehicles: IndexMap::new(),
+            vehicles: VehiclesStorage::new(),
             grids_storage: GridsStorage::new().build(),
             trips_data: HashMap::new(),
             verbose,
@@ -179,7 +178,7 @@ impl Session {
         Session {
             id: session_id,
             last_vehicle_id: 1,
-            vehicles: IndexMap::new(),
+            vehicles: VehiclesStorage::new(),
             grids_storage,
             trips_data: HashMap::new(),
             verbose,
@@ -261,9 +260,9 @@ impl Session {
     }
 
     /// Adds given vehicles to the session vehicles storage
-    pub fn add_vehicles(&mut self, vehicles: Vec<VehicleRef>) {
+    pub fn add_vehicles(&mut self, vehicles: Vec<Vehicle>) {
         for vehicle in vehicles {
-            let vehicle_id = vehicle.borrow().id;
+            let vehicle_id = vehicle.id;
             self.vehicles.insert(vehicle_id, vehicle);
             if vehicle_id >= self.last_vehicle_id {
                 self.last_vehicle_id = vehicle_id + 1;
@@ -272,9 +271,7 @@ impl Session {
     }
 
     /// Returns a reference to the vehicles storage
-    pub fn get_vehicles(&self) -> &IndexMap<VehicleID, VehicleRef> {
-        &self.vehicles
-    }
+    pub fn get_vehicles(&self) -> &VehiclesStorage { &self.vehicles }
 
     /// Adds cells to the grids. It is shortcut to GridsStorage's add_cells method
     pub fn add_cells(&mut self, cells_data: Vec<crate::grid::cell::Cell>) {
@@ -331,7 +328,7 @@ impl Session {
     }
 
     /// Generates a single vehicle based on trip parameters
-    fn generate_vehicle(&self, trip: &Trip, trip_id: TripID) -> Option<VehicleRef> {
+    fn generate_vehicle(&self, trip: &Trip, trip_id: TripID) -> Option<Vehicle> {
         // Check if current time step is within trip time bounds
         if self.steps < trip.start_time || self.steps > trip.end_time {
             return None;
@@ -398,7 +395,7 @@ impl Session {
             .with_tail_size(trip.vehicle_tail_size, vec![]) // Empty tail cells initially
             .with_transit_cells(trip.transit_cells.clone())
             .with_relax_time(trip.relax_time)
-            .build_ref();
+            .build();
 
         Some(vehicle)
     }
@@ -420,7 +417,7 @@ impl Session {
             // Check if there's already a vehicle at the source node
             let mut create = true;
             for vehicle in self.vehicles.values() {
-                if vehicle.borrow().cell_id == trip.from_node {
+                if vehicle.cell_id == trip.from_node {
                     create = false;
                     break;
                 }
@@ -439,12 +436,12 @@ impl Session {
                             ("vehicles_num", &self.vehicles.len()),
                             ("trips_num", &self.trips_data.len()),
                             ("trip_id", trip_id),
-                            ("vehicle_id", &generated_vehicle.borrow().id),
+                            ("vehicle_id", &generated_vehicle.id),
                         ]
                     );
                 }
 
-                let vehicle_id = generated_vehicle.borrow().id;
+                let vehicle_id = generated_vehicle.id;
                 self.vehicles.insert(vehicle_id, generated_vehicle);
                 self.last_vehicle_id = vehicle_id + 1; // Increment for next vehicle
             }
@@ -465,8 +462,7 @@ impl Session {
             );
         }
         self.current_position.clear();
-        for vehicle_ref in self.vehicles.values() {
-            let vehicle = vehicle_ref.borrow();
+        for vehicle in self.vehicles.values() {
             if self.verbose.is_at_least(VerboseLevel::Detailed) {
                 self.verbose.log_with_fields(
                     EVENT_UPD_POS,
@@ -534,7 +530,7 @@ impl Session {
         let tl_states_dump = self.grids_storage.tick_traffic_lights(&self.verbose)?;
 
         // 4. Create intentions for all vehicles
-        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose)?;
+    let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose)?;
 
         // 5. Collect conflicts
         let conflicts_data = collect_conflicts(
@@ -543,19 +539,19 @@ impl Session {
             &self.conflict_zones,
             &self.cells_conflicts_zones,
             &self.verbose,
+            &mut self.vehicles,
         )?;
 
         // 6. Solve conflicts
-        solve_conflicts(conflicts_data, &self.verbose)?;
+    solve_conflicts(conflicts_data, &mut self.vehicles, &self.verbose)?;
 
         // 7. Move vehicles
         let vehicles_grid = self.grids_storage.get_vehicles_net_ref();
-        movement(vehicles_grid, &mut self.vehicles, &self.verbose)?;
+    movement(vehicles_grid, &mut self.vehicles, &self.verbose)?;
 
         // 8. Collect current vehicles positions for state dump
         let mut states_dump: Vec<VehicleState> = Vec::with_capacity(self.vehicles.len());
-        for vehicle_ref in self.vehicles.values() {
-            let vehicle = vehicle_ref.borrow();
+        for vehicle in self.vehicles.values() {
             let pt = vehicles_grid.get_cell(&vehicle.cell_id)
                 .ok_or(SessionError::CellNotFound(vehicle.cell_id))?
                 .get_point();

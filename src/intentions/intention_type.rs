@@ -1,4 +1,4 @@
-use crate::agents::VehicleRef;
+use crate::agents::VehicleID;
 
 use std::fmt;
 
@@ -44,8 +44,8 @@ impl fmt::Display for IntentionType {
 /// Associates a vehicle with its intention type for a cell.
 #[derive(Debug, Clone)]
 pub struct CellIntention{
-    /// Reference to the vehicle that has the intention
-    pub vehicle: VehicleRef,
+    /// ID of the vehicle that has the intention
+    pub vehicle_id: VehicleID,
     /// Type of intention for the cell
     pub int_type: IntentionType,
 }
@@ -55,7 +55,7 @@ impl CellIntention {
     ///
     /// # Arguments
     ///
-    /// * `vehicle` - A reference to the vehicle that has the intention
+    /// * `vehicle_id` - An ID of the vehicle that has the intention
     /// * `int_type` - The type of intention for the cell (target, transit, or tail)
     ///
     /// # Example
@@ -67,20 +67,19 @@ impl CellIntention {
     ///
     /// let vehicle = Vehicle::new(1)
     ///     .with_type(AgentType::Car)
-    ///     .build_ref();
-    /// let cell_intention = CellIntention::new(vehicle, IntentionType::Target);
+    ///     .build();
+    /// let cell_intention = CellIntention::new(vehicle.id, IntentionType::Target);
     /// println!("Cell intention: {:?}", cell_intention);
     /// ```
-    pub fn new(vehicle: VehicleRef, int_type: IntentionType) -> Self {
-        CellIntention { vehicle, int_type }
+    pub fn new(vehicle_id: VehicleID, int_type: IntentionType) -> Self {
+        CellIntention { vehicle_id, int_type }
     }
 
     /// Returns a reference to the associated vehicle if present.
     ///
     /// # Returns
     ///
-    /// * `Some(&Vehicle)` - Reference to the vehicle if one exists
-    /// * `None` - If no vehicle is associated with this intention
+    /// Returns the vehicle id associated with this intention
     ///
     /// # Example
     ///
@@ -91,12 +90,12 @@ impl CellIntention {
     ///
     /// let vehicle = Vehicle::new(1)
     ///     .with_type(AgentType::Car)
-    ///     .build_ref();
-    /// let cell_intention = CellIntention::new(vehicle, IntentionType::Target);
+    ///     .build();
+    /// let cell_intention = CellIntention::new(vehicle.id, IntentionType::Target);
     /// println!("Cell intention: {:?}", cell_intention);
     /// println!("Associated vehicle ID: {}", cell_intention.get_vehicle_id());
     /// ```
     pub fn get_vehicle_id(&self) -> u64 {
-        self.vehicle.borrow().id
+        self.vehicle_id
     }
 }

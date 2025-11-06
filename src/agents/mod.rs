@@ -7,6 +7,7 @@
 //! 
 //! - [`vehicle::Vehicle`] - The primary agent representing vehicles in the simulation
 //! - [`vehicle_intention::VehicleIntention`] - Captures vehicle's planned actions and maneuvers
+//! - [`vehicles_storage::VehiclesStorage`] - Storage and management of multiple vehicles
 //!
 //! ## Usage
 //! 
@@ -29,5 +30,6 @@
 //! - **Builder pattern**: API for vehicle construction
 mod vehicle_intention;
 mod vehicle;
+mod vehicles_storage;
 
-pub use self::{vehicle_intention::*, vehicle::*};
+pub use self::{vehicle_intention::*, vehicle::*, vehicles_storage::VehiclesStorage};

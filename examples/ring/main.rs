@@ -1,6 +1,6 @@
 use micro_traffic_sim_core::geom::{Point, new_point};
 use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads, zones::ZoneType};
-use micro_traffic_sim_core::agents::{Vehicle, VehicleRef};
+use micro_traffic_sim_core::agents::Vehicle;
 use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
 use micro_traffic_sim_core::verbose::init_logger;
@@ -33,32 +33,32 @@ fn main() {
         .with_speed_limit(3)
         .with_cell(0)
         .with_destination(-1) // No specific destination, just keep moving
-        .build_ref();
+        .build();
     let vehicle2 = Vehicle::new(10)
         .with_speed(1)
         .with_speed_limit(2)
         .with_cell(7)
         .with_destination(-1)
-        .build_ref();
+        .build();
     let vehicle3 = Vehicle::new(20)
         .with_speed(1)
         .with_speed_limit(4)
         .with_cell(19)
         .with_destination(-1)
-        .build_ref();
+        .build();
     let vehicle4 = Vehicle::new(30)
         .with_speed(1)
         .with_speed_limit(4)
         .with_cell(34)
         .with_destination(-1)
-        .build_ref();
+        .build();
     let vehicle5 = Vehicle::new(40)
         .with_speed(1)
         .with_speed_limit(1)
         .with_cell(42)
         .with_destination(-1)
-        .build_ref();
-    let vehicles: Vec<VehicleRef> = vec![vehicle1, vehicle2, vehicle3, vehicle4, vehicle5];
+        .build();
+    let vehicles: Vec<Vehicle> = vec![vehicle1, vehicle2, vehicle3, vehicle4, vehicle5];
 
     // Setup simulation
     print_grid(&grid); // Print grid before borrow
@@ -73,8 +73,7 @@ fn main() {
     let steps_num = 50;
     let mut vehicles_states = vec![];
     // Initial state
-    for (_vid, veh) in session.get_vehicles() {
-        let v = veh.borrow();
+    for (_vid, v) in session.get_vehicles() {
         let (x, y) = if let Some(cell) = session.get_cell(&v.cell_id) {
             let pt = cell.get_point();
             (pt.x(), pt.y())

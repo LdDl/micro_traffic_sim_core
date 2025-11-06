@@ -257,23 +257,20 @@ fn main() {
 Create individual vehicles with specific starting positions and routes.
 
 ```rust
-use micro_traffic_sim_core::agents::{Vehicle, VehicleRef};
-use std::rc::Rc;
-use std::cell::RefCell;
-use std::collections::HashMap;
+use micro_traffic_sim_core::agents::Vehicle;
 
 fn main() {
-    // ... grid setup code ...
-    // Create a single vehicle
-    let vehicle = Vehicle::new(0)           // Vehicle ID
-        .with_speed(1)                      // Current speed
-        .with_speed_limit(1)                // Maximum speed
-        .with_cell(4)                       // Starting cell
-        .with_destination(9)                // Goal cell
-        .build();
-    // Convert to reference-counted format for simulation
-    let vehicles: Vec<VehicleRef> = vec![Rc::new(RefCell::new(vehicle))];
-    // ... rest of simulation setup ...
+  // ... grid setup code ...
+  // Create a single vehicle
+  let vehicle = Vehicle::new(0)           // Vehicle ID
+    .with_speed(1)                      // Current speed
+    .with_speed_limit(1)                // Maximum speed
+    .with_cell(4)                       // Starting cell
+    .with_destination(9)                // Goal cell
+    .build();
+  // Pass owned vehicles to the session
+  let vehicles: Vec<Vehicle> = vec![vehicle];
+  // ... rest of simulation setup ...
 }
 ```
 
@@ -318,7 +315,7 @@ fn main() {
 When the grid, vehicles, trips, and traffic lights are ready, initialize the simulation session.
 ```rust
 use micro_traffic_sim_core::grid::road_network::GridRoads;
-use micro_traffic_sim_core::agents::VehicleRef;
+use micro_traffic_sim_core::agents::Vehicle;
 use micro_traffic_sim_core::trips::trip::Trip;
 use micro_traffic_sim_core::traffic_lights::lights::{TrafficLight, TrafficLightID};
 use micro_traffic_sim_core::simulation::session::Session;
@@ -330,7 +327,7 @@ fn main () {
   let mut grid = GridRoads::new();
   // Populate grid with cells
   // ...
-  let vehicles: Vec<VehicleRef> = vec![/* ... vehicles ... */];
+  let vehicles: Vec<Vehicle> = vec![/* ... vehicles ... */];
   // Prepare vehicles or use generator
   // ...
   let trips: Vec<Trip> = vec![/* ... trips ... */];
@@ -422,6 +419,7 @@ In the future, I plan to add example with visualization in the browser using gRP
 - Agents and related functionality:
   - Agents' behaviour types - [`src/agents/behaviour.rs`](src/agents/behaviour.rs)
   - Vehicle agents - [`src/agents/vehicle.rs`](src/agents/vehicle.rs)
+  - Vehicles storage wrapper - [`src/agents/vehicles_storage.rs`](src/agents/vehicles_storage.rs)
 - Trips
   - Trips generation - [`src/trips/trip.rs`](src/trips/trip.rs)
 - Intentions:

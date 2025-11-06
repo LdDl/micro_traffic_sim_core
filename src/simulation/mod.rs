@@ -41,7 +41,7 @@
 //! Create a session, add trips, vehicles, cells, and traffic lights, then run the simulation step-by-step:
 //! ```rust
 //! use micro_traffic_sim_core::grid::road_network::GridRoads;
-//! use micro_traffic_sim_core::agents::VehicleRef;
+//! use micro_traffic_sim_core::agents::Vehicle;
 //! use micro_traffic_sim_core::trips::trip::Trip;
 //! use micro_traffic_sim_core::traffic_lights::lights::{TrafficLight, TrafficLightID};
 //! use micro_traffic_sim_core::simulation::session::Session;
@@ -52,7 +52,7 @@
 //! let mut grid = GridRoads::new();
 //! // Populate grid with cells
 //! // ...
-//! let vehicles: Vec<VehicleRef> = vec![/* ... vehicles ... */];
+//! let vehicles: Vec<Vehicle> = vec![/* ... vehicles ... */];
 //! // Prepare vehicles or use generator
 //! // ...
 //! let trips: Vec<Trip> = vec![/* ... trips ... */];

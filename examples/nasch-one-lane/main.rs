@@ -1,12 +1,11 @@
 use micro_traffic_sim_core::geom::{Point, new_point};
 use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads};
-use micro_traffic_sim_core::agents::{Vehicle, VehicleRef};
+use micro_traffic_sim_core::agents::Vehicle;
 use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
 use micro_traffic_sim_core::verbose::init_logger;
 use micro_traffic_sim_core::verbose::VerboseLevel;
-use std::rc::Rc;
-use std::cell::RefCell;
+ 
 
 fn main() {
     init_logger();
@@ -37,7 +36,7 @@ fn main() {
         .with_cell(0)
         .with_destination(last_cell_id)
         .build();
-    let vehicles: Vec<VehicleRef> = vec![Rc::new(RefCell::new(vehicle))];
+    let vehicles: Vec<Vehicle> = vec![vehicle];
 
     // 3. Prepare simulation session
     let grids_storage = GridsStorage::new()
@@ -51,8 +50,7 @@ fn main() {
     let steps = n - 1;
     println!("step;vehicle_id;vehicle_type;last_speed;last_angle;intermediate_cells;last_cell;x;y");
     // Print initial state
-    for (_vid, veh) in session.get_vehicles() {
-        let v = veh.borrow();
+    for (_vid, v) in session.get_vehicles() {
         let (x, y) = if let Some(cell) = session.get_cell(&v.cell_id) {
             let pt = cell.get_point();
             (pt.x(), pt.y())

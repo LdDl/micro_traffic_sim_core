@@ -47,6 +47,8 @@ impl fmt::Display for VehicleError {
 }
 
 /// Just a shorthand for vehicle reference type
+/// Obsolete in terms of internal usage (it was used before passing VehiclesStorage
+/// to the simulation engine). Could be useful for external usage.
 pub type VehicleRef = Rc<RefCell<Vehicle>>;
 
 /// Vehicle unique identifier type
@@ -940,6 +942,9 @@ impl VehicleBuilder {
     }
 
     /// Builds a reference to the `Vehicle` object.
+    /// 
+    /// Obsolete in terms of internal usage (it was used before passing VehiclesStorage
+    /// to the simulation engine). Could be useful for external usage.
     ///     
     /// # Returns
     /// A reference to the `Vehicle` object.
