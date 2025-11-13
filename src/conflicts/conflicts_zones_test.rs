@@ -703,10 +703,10 @@ mod tests {
         cells_conflicts_zones.insert(10, 1);
         cells_conflicts_zones.insert(4, 1);
 
-    let mut intentions_data = Intentions::new();
-    intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
-    intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
-    intentions_data.add_intention(vehicles.get_mut(&3).unwrap(), IntentionType::Target);
+        let mut intentions_data = Intentions::new();
+        intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
+        intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+        intentions_data.add_intention(vehicles.get_mut(&3).unwrap(), IntentionType::Target);
 
         let correct_conflicts = vec![
             CorrectConflict {

@@ -158,6 +158,22 @@ pub fn find_intention<'a>(
         .get_cell(&vehicle.cell_id)
         .ok_or(IntentionError::NoSourceCell(vehicle.cell_id))?;
 
+    // Deadend check
+    if source_cell.get_forward_id() < 0 && source_cell.get_right_id() < 0  && source_cell.get_left_id() < 0 {
+        let result = VehicleIntention {
+            intention_maneuver: LaneChangeType::Block,
+            intention_speed: 0,
+            destination: None,
+            confusion: None,
+            intention_cell_id: vehicle.cell_id,
+            tail_intention_cells: vec![],
+            intermediate_cells: Vec::with_capacity(0),
+            tail_maneuver: tail_maneuver,
+            should_stop: false,
+        };
+        return Ok(result);
+    }
+
     let speed_limit = source_cell.get_speed_limit().min(vehicle.speed_limit);
 
     if speed_limit < 0 {
@@ -231,10 +247,6 @@ pub fn find_intention<'a>(
         // Handle case when vehicle has no destination,H
         // therefore it should be considered as keep going where possible
         dest if dest < 0 => {
-            // println!(
-            //     "  -> Vehicle {} has no destination, finding path without goal",
-            //     vehicle.id
-            // );
             match path_no_goal(
                 source_cell,
                 net,
@@ -242,7 +254,12 @@ pub fn find_intention<'a>(
                 observe_distance + 1,
             ) {
                 Ok(path) => path,
-                Err(e) => return Err(IntentionError::NoPathFound(e)),
+                Err(e) => {
+                    println!(
+                        "----->No path found error: {}", e
+                    );
+                    return Err(IntentionError::NoPathFound(e))
+                }
             }
         },
         _ => {
