@@ -49,7 +49,7 @@ impl fmt::Display for AStarError {
             AStarError::NoPathFound { start_id, end_id } => {
                 write!(
                     f,
-                    "No shortest path has been found bentween IDs {} and {}",
+                    "No shortest path has been found between IDs {} and {}",
                     start_id, end_id
                 )
             }
@@ -616,19 +616,34 @@ pub fn path_no_goal<'a>(
         current_cell = cell;
     }
 
-    if vertices.len() == depth as usize + 1 {
-        // Calculate cost as sum of heuristic costs
-        let mut cost = 0.0;
-        for i in 1..vertices.len() {
-            cost += heuristic(vertices[i - 1], vertices[i]);
+    match vertices.len() {
+        l if l == depth as usize + 1 => {
+            // Calculate cost as sum of heuristic costs
+            let mut cost = 0.0;
+            for i in 1..vertices.len() {
+                cost += heuristic(vertices[i - 1], vertices[i]);
+            }
+            return Ok(Path::new(vertices, maneuvers, cost));
         }
-        Ok(Path::new(vertices, maneuvers, cost))
-    } else {
-        Err(AStarError::NoPathFound {
-            start_id: start.get_id(),
-            end_id: -1,
-        })
+        l if l == 1 => {
+            // Reached deadend
+            return Ok(Path::new(vertices, maneuvers, 0.0));
+        }
+        l if l > 1 => {
+            // Can't reach requested depth, but at least 2 cells in path
+            let mut cost = 0.0;
+            for i in 1..vertices.len() {
+                cost += heuristic(vertices[i - 1], vertices[i]);
+            }
+            return Ok(Path::new(vertices, maneuvers, cost));
+        }
+        _ => {}
     }
+
+    Err(AStarError::NoPathFound {
+        start_id: start.get_id(),
+        end_id: -1,
+    })
 }
 
 #[cfg(test)]

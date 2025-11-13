@@ -95,7 +95,7 @@ hyperfine -i --shell=none --output=pipe --runs 30 --warmup 2 -n "Rust NaSch vers
 Add to `Cargo.toml`:
 ```toml
 [dependencies]
-micro_traffic_sim_core = "0.1.1"
+micro_traffic_sim_core = "0.1.2"
 ```
 
 ### Basic workflow overview

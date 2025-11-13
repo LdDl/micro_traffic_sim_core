@@ -18,6 +18,11 @@ pub enum NoRouteError {
     },
     /// Indicates that the there is not exit path
     NoExitPath,
+    /// Dead end reached
+    DeadEndReached {
+        /// The ID of the cell where dead end was reached
+        cell_id: CellID
+    }
 }
 
 impl fmt::Display for NoRouteError {
@@ -32,6 +37,9 @@ impl fmt::Display for NoRouteError {
             }
             NoRouteError::NoExitPath => {
                 write!(f, "Vehicle should have exited network in previous step")
+            },
+            NoRouteError::DeadEndReached { cell_id } => {
+                write!(f, "Dead end reached at cell ID '{}'", cell_id)
             }
         }
     }
@@ -53,7 +61,9 @@ pub fn process_no_route_found<'a>(
     } else if current_cell.get_left_id() >= 0 {
         (current_cell.get_left_id(), LaneChangeType::ChangeLeft)
     } else {
-        return Err(NoRouteError::NoExitPath);
+        return Err(NoRouteError::DeadEndReached {
+            cell_id: current_cell.get_id(),
+        });
     };
 
     // Get destination cell from grid
