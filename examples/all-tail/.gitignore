@@ -1,0 +1,5 @@
+*.dat
+*.png
+config.gnu
+# Keep simulation.gif for README
+!simulation.gif

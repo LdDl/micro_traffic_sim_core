@@ -568,6 +568,7 @@ impl Session {
                 occupied_points,
                 last_point: [pt.x(), pt.y()],
                 last_cell: vehicle.cell_id,
+                tail_cells: vehicle.tail_cells.clone(),
                 last_intermediate_cells: vehicle.intention.intermediate_cells.clone(),
                 last_speed: vehicle.speed,
                 last_angle: vehicle.bearing,

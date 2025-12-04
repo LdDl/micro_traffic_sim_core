@@ -103,7 +103,13 @@ pub fn prepare_intentions<'a, 'b>(
         }
         let possible_intention = find_intention(net, current_state, &vehicle, verbose)?;
         if possible_intention.should_stop {
-            let alternate_possible_intention = find_alternate_intention(net, current_state, &vehicle)?;
+            // Calculate maneuvers_allowed for find_alternate_intention
+            // Maneuvers are blocked if tail is still completing a previous maneuver
+            let tail_maneuver = possible_intention.tail_maneuver.intention_maneuver;
+            let maneuvers_allowed = vehicle.timer_non_maneuvers <= 0
+                && tail_maneuver != LaneChangeType::ChangeRight
+                && tail_maneuver != LaneChangeType::ChangeLeft;
+            let alternate_possible_intention = find_alternate_intention(net, current_state, &vehicle, maneuvers_allowed)?;
             vehicle.set_intention(alternate_possible_intention);
             intentions.add_intention(vehicle, IntentionType::Target);
             continue;
@@ -389,13 +395,33 @@ const UNDEFINED_MANEUVER: LaneChangeType = LaneChangeType::ChangeRight;
 ///
 /// If the vehicle cannot move forward, tries left or right lane changes
 /// and selects the best available option.
+///
+/// # Arguments
+/// * `maneuvers_allowed` - Whether lane changes are allowed (false if tail is still completing a maneuver)
 pub fn find_alternate_intention<'a>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
     vehicle: &'a Vehicle,
+    maneuvers_allowed: bool,
 ) -> Result<VehicleIntention, IntentionError> {
     let source_cell_id = vehicle.cell_id;
     let target_cell_id = vehicle.destination;
+
+    // If maneuvers are not allowed (tail still completing previous maneuver), block immediately
+    if !maneuvers_allowed {
+        let result = VehicleIntention {
+            intention_maneuver: LaneChangeType::Block,
+            intention_speed: 0,
+            destination: None,
+            confusion: None,
+            intention_cell_id: source_cell_id,
+            tail_intention_cells: vec![],
+            intermediate_cells: Vec::with_capacity(0),
+            tail_maneuver: TailIntentionManeuver::default(),
+            should_stop: false,
+        };
+        return Ok(result);
+    }
 
     let source_cell = net
         .get_cell(&source_cell_id)
@@ -774,7 +800,7 @@ mod tests {
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
         let mut intentions: Intentions = Intentions::new();
-    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true);
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
     vehicle.set_intention(unwrapped_intention);
@@ -857,7 +883,7 @@ mod tests {
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
         let mut intentions = Intentions::new();
-    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true);
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
     vehicle.set_intention(unwrapped_intention);
@@ -944,7 +970,7 @@ mod tests {
         current_state.insert(source_cell.get_right_id(), blocking_vehicle2.id);
 
         let mut intentions = Intentions::new();
-    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle);
+    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true);
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
     vehicle.set_intention(unwrapped_intention);

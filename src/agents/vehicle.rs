@@ -68,7 +68,9 @@ pub struct Vehicle {
     pub cell_id: CellID,
 
     /// Currently occupied cells by tail (in case when vehicle has size more that one cell)
+    /// Order: [furthest from head, ..., closest to head]
     /// E.g. grid [1->2->3->4->5], vehicle's head in cell 4, size is 2. Then the tail cells are [2, 3]
+    /// where index 0 (cell 2) is furthest and index 1 (cell 3) is closest to head
     pub tail_cells: Vec<CellID>,
 
     /// Current speed
@@ -534,11 +536,12 @@ impl VehicleBuilder {
         self
     }
 
-    /// Sets currently occupied cells by tail (in case when vehicle has size more that one cell)
+    /// Sets currently occupied cells by tail (in case when vehicle has size more that one cell).
+    /// The occupied cells must be provided in order: [furthest from head, ..., closest to head].
     ///
     /// # Arguments
-    /// * `size` - The size of the vehicle's occupied cells list.
-    /// * `cells` - A list of cells
+    /// * `size` - The size of the vehicle's tail (number of cells behind head).
+    /// * `cells` - A list of cell IDs currently occupied by the tail.
     ///
     /// # Returns
     /// A `VehicleBuilder` instance for further method chaining.
@@ -546,8 +549,10 @@ impl VehicleBuilder {
     /// # Example
     /// ```rust
     /// use micro_traffic_sim_core::agents::Vehicle;
+    /// // For head at cell 13 with tail size 2, cell 11 is furthest, cell 12 is closest
     /// let vehicle = Vehicle::new(1)
-    ///     .with_tail_size(3, vec![10, 11, 12])
+    ///     .with_cell(13)
+    ///     .with_tail_size(2, vec![11, 12])
     ///     .build();
     /// println!("Vehicle: {:?}", vehicle);
     /// ```

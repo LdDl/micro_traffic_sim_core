@@ -29,6 +29,17 @@ Table of contents
 
 `micro_traffic_sim_core` is a Rust core library for microscopic traffic simulation (NaSch-like cellular automata and agent-based behaviours). The codebase contains utilities for grids, agents, intentions, conflicts, pathfinding, and session simulation.
 
+**Features:**
+- NaSch-like cellular automata model with configurable speed limits
+- Agent-based vehicle behaviours (cooperative, aggressive)
+- Multi-lane roads with lane changing
+- Both single-cell and multi-cell vehicles (vehicles occupying multiple cells with single-cell head and tail)
+- A* pathfinding for route calculation with depth lookup limit
+- Conflict detection and resolution at merge points and intersections
+- Traffic lights with configurable signal phases and groups
+- Trip generators for dynamic vehicle spawning with configurable probability
+- Zone types for traffic flow control (spawn, de-spawn, common, etc.)
+
 Simple coordinated zone | Simple ring-like grid
 :-------------------------:|:-------------------------:
 <img src="examples/tutorial/example.gif" width="480">  |  <img src="examples/ring/output.gif" width="400">
@@ -54,6 +65,7 @@ Examples live under the `examples/` directory. Notable examples:
 - [`examples/nasch-roads-merge/main.rs`](examples/nasch-roads-merge/main.rs) - merging two roads into one
 - [`examples/ring/main.rs`](examples/ring/main.rs) - ring-like road network
 - [`examples/tutorial/main.rs`](examples/tutorial/main.rs) - complete tutorial with grid creation, trips, traffic lights, and CSV-like output
+- [`examples/all-tail`](examples/all-tail) - multi-cell vehicles demonstration with tail mechanics, merge conflicts, and crossing scenarios
 
 Benchmarks:
 - [`benches/shortest_path_benchmark.rs`](benches/shortest_path_benchmark.rs)
@@ -273,6 +285,26 @@ fn main() {
   // ... rest of simulation setup ...
 }
 ```
+
+**Multi-cell vehicles:**
+
+Vehicles can occupy multiple cells using `with_tail_size`. The tail follows the head through the road network.
+
+```rust
+// Create a vehicle with head at cell 5 and tail occupying cells 3 and 4
+// Tail order: [furthest from head, ..., closest to head]
+let long_vehicle = Vehicle::new(1)
+    .with_cell(5)                           // Head position
+    .with_tail_size(2, vec![3, 4])          // Tail size and initial tail cells
+    .with_destination(20)
+    .with_speed(1)
+    .with_speed_limit(1)
+    .build();
+```
+
+When a multi-cell vehicle performs a lane change maneuver (LEFT/RIGHT), the tail must complete the same maneuver before the head can perform a conflicting maneuver. This prevents physically impossible situations like turning left while the tail is still turning right.
+
+See [`examples/all-tail`](examples/all-tail) for detailed multi-cell vehicle scenarios.
 
 ### Creating vehicles dynamically via trips
 
