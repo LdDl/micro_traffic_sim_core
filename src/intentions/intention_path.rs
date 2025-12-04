@@ -82,6 +82,18 @@ pub fn process_path<'a>(
 ) -> ObservablePath<'a> {
     // Remove first cell from path since it's vehicle's position
     shortest_path.vertices_mut().remove(0);
+    // Handle edge case where path is empty or speed is 0
+    if shortest_path.vertices().is_empty() || speed_possible == 0 {
+        return ObservablePath {
+            wanted_maneuver: LaneChangeType::NoChange,
+            last_cell_state: CellState::Free,
+            trimmed_path: vec![],
+            has_vehicle_on_path: false,
+            speed_limit_reached: false,
+            stopped_on_maneuver: false,
+            stopped_speed_possible: false,
+        };
+    }
     let speed_limit = (speed_possible as usize - 1).min(shortest_path.vertices().len() - 1);
     // Remove last cell if path has more than 1 cell and last cell in possible path (untill speed
     // limit would has been reached) is not vehicle's destination
