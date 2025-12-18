@@ -576,6 +576,7 @@ impl Session {
                 vehicle_type: vehicle.vehicle_type,
                 travel_time: vehicle.travel_time,
                 id: vehicle.id,
+                trip_id: vehicle.trip,
             });
         }
 

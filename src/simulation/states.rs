@@ -3,6 +3,7 @@ use crate::traffic_lights::lights::{TrafficLightID};
 use crate::agents_types::AgentType;
 use crate::agents::VehicleID;
 use crate::traffic_lights::signals::SignalType;
+use crate::trips::trip::TripID;
 use std::collections::HashMap;
 
 /// Result of a single step execution
@@ -48,6 +49,8 @@ pub struct VehicleState {
     pub travel_time: i64,
     /// Unique identifier of the vehicle
     pub id: VehicleID,
+    /// Trip identifier the vehicle belongs to
+    pub trip_id: TripID,
 }
 
 /// State of a traffic light group at a specific timestamp
