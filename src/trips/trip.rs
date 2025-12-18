@@ -81,6 +81,8 @@ pub type TripID = i64; // Alias for TripID
 /// ```
 #[derive(Debug, Clone)]
 pub struct Trip {
+    // Numeric identifier of the trip
+    pub id: TripID,
     // Cells which must be traversed in exact given order by the agent
     pub transit_cells: Vec<CellID>,
     // Initial speed which generated vehicle would have after appearing on the road network
@@ -143,6 +145,7 @@ impl Trip {
     pub fn new(from_node: CellID, to_node: CellID, trip_type: TripType) -> TripBuilder {
         TripBuilder {
             trip: Trip {
+                id: 0,
                 transit_cells: Vec::new(),
                 initial_speed: 0,
                 probability: 0.5,
@@ -162,6 +165,26 @@ impl Trip {
 }
 
 impl TripBuilder {
+    /// Sets the trip ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The numeric identifier of the trip.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
+    /// let trip = Trip::new(1, 10, TripType::Constant)
+    ///     .with_id(42)
+    ///     .build();
+    /// assert_eq!(trip.id, 42);
+    /// ```
+    pub fn with_id(mut self, id: TripID) -> Self {
+        self.trip.id = id;
+        self
+    }
+
     /// Sets the cells IDs list in which each cell must be traversed in exact given order by the agent and relaxation time for the trip.
     ///
     /// # Arguments

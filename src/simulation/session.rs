@@ -237,26 +237,27 @@ impl Session {
     }
 
     /// Adds given trip to the session. It also checks if trip's end time is valid and returns '0' if it is not.
+    /// Uses the trip's ID field for storage key.
     pub fn add_trip(&mut self, trip: Trip) -> TripID {
         let mut trip = trip;
-        
+
         // Set default end time if not set
         if trip.end_time == 0 {
             trip.end_time = i32::MAX;
         }
-        
+
         // Check if end time is valid
         if trip.end_time < trip.start_time {
             return 0;
         }
-        
-        // Generate new trip ID
-        let new_trip_id = (self.trips_data.len() as i64) + 1;
-        
+
+        // Use trip's ID for storage
+        let trip_id = trip.id;
+
         // Add trip to storage
-        self.trips_data.insert(new_trip_id, trip);
-        
-        new_trip_id
+        self.trips_data.insert(trip_id, trip);
+
+        trip_id
     }
 
     /// Adds given vehicles to the session vehicles storage
