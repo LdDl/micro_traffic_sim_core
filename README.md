@@ -52,6 +52,10 @@ Merging roads |
 :-------------------------:| 
 <img src="examples/nasch-roads-merge/output.gif" width="480">
 
+Multi-cell vehicles with tail mechanics demonstration |
+:-------------------------:
+<img src="examples/all-tail/simulation.gif" width="480">
+
 __Disclaimer__: Repository documentation will have a lot of technical details in text form since this is a computational core which will not be used by end-users directly, but rather integrated into service of some sort (gRPC/REST).
 
 ## Project layout
