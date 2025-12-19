@@ -644,6 +644,7 @@ fn main() {
         .with_allowed_behaviour_type(BehaviourType::Aggressive)
         .with_time(5)
         .with_initial_speed(1)
+        .with_speed_limit(1)
         .build();
     session.add_trip(trip);
 
