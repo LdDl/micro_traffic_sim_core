@@ -2,14 +2,15 @@ use crate::agents::Vehicle;
 use crate::grid::cell::CellID;
 use crate::agents::VehicleID;
 use crate::intentions::{CellIntention, IntentionType};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 /// Stores all cell intentions for the current simulation step.
 ///
 /// Maps each cell to a list of intentions (target, transit, tail) for conflict resolution.
+/// Uses IndexMap to maintain insertion order for deterministic iteration during conflict detection.
 #[derive(Debug, Default)]
 pub struct Intentions {
-    cells_intentions: HashMap<CellID, Vec<CellIntention>>,
+    cells_intentions: IndexMap<CellID, Vec<CellIntention>>,
 }
 
 impl Intentions {
@@ -25,7 +26,7 @@ impl Intentions {
     /// ```
     pub fn new() -> Self {
         Self {
-            cells_intentions: HashMap::new(),
+            cells_intentions: IndexMap::new(),
         }
     }
 
@@ -142,7 +143,7 @@ impl Intentions {
     /// println!("Cell 15 has {} intentions", cell_intentions.unwrap().len());
     /// ```
     pub fn get(&self, cell_id: &CellID) -> Option<&Vec<CellIntention>> {
-        self.cells_intentions.get(&cell_id)
+        self.cells_intentions.get(cell_id)
     }
 
     /// Private method for pushing a new intention to the storage for the given cell ID.
