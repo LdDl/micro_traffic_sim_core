@@ -377,9 +377,16 @@ impl TripBuilder {
 
     /// Builds the final `Trip` object with the configured properties.
     ///
+    /// If `vehicle_tail_size` was not explicitly set, it will be automatically
+    /// resolved from the `allowed_agent_type` using [`AgentType::tail_size_default()`].
+    ///
     /// # Returns
     /// The fully constructed `Trip` object.
-    pub fn build(self) -> Trip {
+    pub fn build(mut self) -> Trip {
+        // Auto-resolve tail size from agent type if not explicitly set
+        if self.trip.vehicle_tail_size == 0 {
+            self.trip.vehicle_tail_size = self.trip.allowed_agent_type.tail_size_default();
+        }
         self.trip
     }
 }
