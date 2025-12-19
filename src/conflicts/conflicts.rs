@@ -11,6 +11,7 @@ use crate::verbose::{LocalLogger, VerboseLevel};
 use rand::Rng;
 
 use std::collections::{HashMap, HashSet};
+use indexmap::IndexMap;
 use std::{fmt, vec};
 
 /// Describes the type of conflict detected between vehicles trying to move to the same cell or whose paths intersect.
@@ -638,8 +639,8 @@ pub fn new_conflict_multiple(
         ));
     }
 
-    // Step 1: Deduplicate vehicles using map
-    let mut participants_map: HashMap<VehicleID, VehicleID> = HashMap::new();
+    // Step 1: Deduplicate vehicles using IndexMap to maintain insertion order
+    let mut participants_map: IndexMap<VehicleID, VehicleID> = IndexMap::new();
     for intention in cell_intentions {
         let vehicle_id = intention.get_vehicle_id();
         participants_map.entry(vehicle_id).or_insert(vehicle_id);
