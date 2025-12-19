@@ -1,16 +1,18 @@
 use micro_traffic_sim_core::geom::new_point;
 use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads};
 use micro_traffic_sim_core::agents::Vehicle;
+use micro_traffic_sim_core::agents_types::AgentType;
 use micro_traffic_sim_core::behaviour::BehaviourType;
 use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
+use micro_traffic_sim_core::trips::trip::{Trip, TripType};
 use micro_traffic_sim_core::verbose::init_logger;
 use micro_traffic_sim_core::verbose::VerboseLevel;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 
-// Combined road layout with 8 isolated sub-networks:
+// Combined road layout with 9 isolated sub-networks:
 //
 // Sub-network 1 (L-shaped, cells 1-20): Vehicle 1 with tail=2 passes through
 // [1]-[2]-[3]-[4]-[5]-[6]-[7]-[8]-[9]-[10]
@@ -63,6 +65,9 @@ use std::io::Write;
 // [705]-[706]-[707]-[708]-[709]-[710]-[711]-[712]
 //                        /
 // [713]-[714]-[715]-[716]
+//
+// Sub-network 9 (Straight line, cells 801-818): Trip generator spawns LargeBus (auto tail=2)
+// [801]-[802]-[803]-...-[817]-[818]
 
 fn main() {
     init_logger();
@@ -485,6 +490,24 @@ fn main() {
         grid.add_cell(cell);
     }
 
+    // === Sub-network 9: Straight line for trip generator (cells 801-818) ===
+    // Y base = -16
+    for i in 1..=18 {
+        let cell_id = 800 + i;
+        let forward = if i < 18 { 800 + i + 1 } else { -1 };
+        let x = i as f64;
+        let y = -16.0;
+        cell_positions.insert(cell_id, (x, y));
+        let cell = Cell::new(cell_id)
+            .with_point(new_point(x, y, None))
+            .with_speed_limit(3)
+            .with_forward_node(forward)
+            .with_left_node(-1)
+            .with_right_node(-1)
+            .build();
+        grid.add_cell(cell);
+    }
+
     // Create vehicles for each sub-network
     let vehicles: Vec<Vehicle> = vec![
         // Vehicle 1: L-shaped road, tail=2, will pass through
@@ -613,6 +636,16 @@ fn main() {
     let mut session = Session::new(grids_storage, None);
     session.set_verbose_level(VerboseLevel::None);
     session.add_vehicles(vehicles);
+
+    // Add trip generator for sub-network 9: LargeBus with auto-resolved tail_size=2
+    let trip = Trip::new(801, 818, TripType::Constant)
+        .with_id(1)
+        .with_allowed_agent_type(AgentType::LargeBus)
+        .with_allowed_behaviour_type(BehaviourType::Aggressive)
+        .with_time(5)
+        .with_initial_speed(1)
+        .build();
+    session.add_trip(trip);
 
     // Output directory
     let out_dir = "examples/all-tail/";

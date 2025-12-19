@@ -356,6 +356,9 @@ impl TripBuilder {
     }
 
     /// Sets the tail size of the vehicle.
+    /// DEPRECATED: Tail size will be auto-resolved from the agent type.
+    /// Setting with_vehicle_tail_size(0) for multi-cell agents (Bus, Truck, LargeBus) will be overridden by the default.
+    /// There's no way to explicitly force a Bus to have zero tail size - the auto-resolution always runs when vehicle_tail_size == 0
     ///
     /// # Arguments
     ///
@@ -388,5 +391,47 @@ impl TripBuilder {
             self.trip.vehicle_tail_size = self.trip.allowed_agent_type.tail_size_default();
         }
         self.trip
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tail_size_auto_resolution() {
+        // Car should have tail_size = 0
+        let car_trip = Trip::new(1, 10, TripType::Constant)
+            .with_allowed_agent_type(AgentType::Car)
+            .build();
+        assert_eq!(car_trip.vehicle_tail_size, 0);
+
+        // Bus should have tail_size = 1
+        let bus_trip = Trip::new(1, 10, TripType::Constant)
+            .with_allowed_agent_type(AgentType::Bus)
+            .build();
+        assert_eq!(bus_trip.vehicle_tail_size, 1);
+
+        // Truck should have tail_size = 1
+        let truck_trip = Trip::new(1, 10, TripType::Constant)
+            .with_allowed_agent_type(AgentType::Truck)
+            .build();
+        assert_eq!(truck_trip.vehicle_tail_size, 1);
+
+        // LargeBus should have tail_size = 2
+        let large_bus_trip = Trip::new(1, 10, TripType::Constant)
+            .with_allowed_agent_type(AgentType::LargeBus)
+            .build();
+        assert_eq!(large_bus_trip.vehicle_tail_size, 2);
+    }
+
+    #[test]
+    fn test_tail_size_explicit_override() {
+        // Explicit tail size should not be overridden
+        let trip = Trip::new(1, 10, TripType::Constant)
+            .with_allowed_agent_type(AgentType::Car)
+            .with_vehicle_tail_size(5)
+            .build();
+        assert_eq!(trip.vehicle_tail_size, 5);
     }
 }
