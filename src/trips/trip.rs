@@ -111,6 +111,9 @@ pub struct Trip {
     // is needed to make larger vehicles (e.g. limousine) it could be handy to know extra size for
     // modeling heterogeneous road traffic flow instead of homogeneous one.
     pub vehicle_tail_size: usize,
+    // Speed limit for generated vehicles. If >= 0, overrides the behaviour-derived speed limit.
+    // Default: -1 (meaning "resolve from behaviour type")
+    pub speed_limit: i32,
 }
 
 /// A builder pattern implementation for constructing `Trip` objects.
@@ -159,6 +162,7 @@ impl Trip {
                 end_time: i32::MAX,
                 relax_time: -1,
                 vehicle_tail_size: 0,
+                speed_limit: -1,
             },
         }
     }
@@ -378,6 +382,33 @@ impl TripBuilder {
         self
     }
 
+    /// Sets the speed limit for generated vehicles.
+    ///
+    /// If set to a value >= 0, this speed limit will be used instead of the
+    /// behaviour-derived speed limit. The default value of -1 means the speed
+    /// limit will be resolved from the behaviour type.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - The speed limit value. Use -1 to resolve from behaviour type.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
+    /// use micro_traffic_sim_core::behaviour::BehaviourType;
+    /// let trip = Trip::new(1, 10, TripType::Constant)
+    ///     .with_allowed_behaviour_type(BehaviourType::Aggressive)
+    ///     // Override behaviour speed limit with 5
+    ///     .with_speed_limit(5)
+    ///     .build();
+    /// assert_eq!(trip.speed_limit, 5);
+    /// ```
+    pub fn with_speed_limit(mut self, limit: i32) -> Self {
+        self.trip.speed_limit = limit;
+        self
+    }
+
     /// Builds the final `Trip` object with the configured properties.
     ///
     /// If `vehicle_tail_size` was not explicitly set, it will be automatically
@@ -433,5 +464,41 @@ mod tests {
             .with_vehicle_tail_size(5)
             .build();
         assert_eq!(trip.vehicle_tail_size, 5);
+    }
+
+    #[test]
+    fn test_speed_limit_default() {
+        // Default speed_limit should be -1
+        let trip = Trip::new(1, 10, TripType::Constant).build();
+        assert_eq!(trip.speed_limit, -1);
+    }
+
+    #[test]
+    fn test_speed_limit_explicit() {
+        // Explicit speed_limit should be set
+        let trip = Trip::new(1, 10, TripType::Constant)
+            .with_speed_limit(5)
+            .build();
+        assert_eq!(trip.speed_limit, 5);
+    }
+
+    #[test]
+    fn test_speed_limit_with_behaviour_first() {
+        // Speed limit set after behaviour should still apply
+        let trip = Trip::new(1, 10, TripType::Constant)
+            .with_allowed_behaviour_type(BehaviourType::Aggressive)
+            .with_speed_limit(3)
+            .build();
+        assert_eq!(trip.speed_limit, 3);
+    }
+
+    #[test]
+    fn test_speed_limit_before_behaviour() {
+        // Speed limit set before behaviour should still apply
+        let trip = Trip::new(1, 10, TripType::Constant)
+            .with_speed_limit(3)
+            .with_allowed_behaviour_type(BehaviourType::Aggressive)
+            .build();
+        assert_eq!(trip.speed_limit, 3);
     }
 }
