@@ -71,6 +71,12 @@ pub struct Vehicle {
     /// Order: [furthest from head, ..., closest to head]
     /// E.g. grid [1->2->3->4->5], vehicle's head in cell 4, size is 2. Then the tail cells are [2, 3]
     /// where index 0 (cell 2) is furthest and index 1 (cell 3) is closest to head
+    ///
+    /// NOTE: Gradual Materialization - When a vehicle is spawned from a trip generator, this vector
+    /// starts empty even if tail_size > 0. The tail "materializes" gradually as the vehicle moves:
+    /// each cell the head passes through becomes a tail cell. This models a vehicle "entering" the
+    /// network head-first. During this growth period, len(tail_cells) < tail_size is expected.
+    /// See also: Trip::vehicle_tail_size.
     pub tail_cells: Vec<CellID>,
 
     /// Current speed

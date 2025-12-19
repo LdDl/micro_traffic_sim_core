@@ -110,6 +110,31 @@ pub struct Trip {
     // Size of tail of the vehicle. By default every vehicle in cellular automata has size 1 itself and tail 0. When it
     // is needed to make larger vehicles (e.g. limousine) it could be handy to know extra size for
     // modeling heterogeneous road traffic flow instead of homogeneous one.
+    //
+    // NOTE: Gradual Materialization - When a vehicle is spawned from a trip generator, its tail_cells
+    // vector starts empty. The tail "materializes" gradually as the vehicle moves: each cell the head
+    // passes through becomes a tail cell, until len(tail_cells) == vehicle_tail_size. This models
+    // a vehicle "entering" the network head-first. During this growth period, the vehicle is effectively
+    // shorter than its declared tail_size.
+    //
+    // Example 1: Road [A]-[B]-[C]-[D]-[E]-[F]-[G], vehicle spawns at D with tail_size=2, speed=1
+    //   Step 0: [A]-[B]-[C]-[D*]-[E]-[F]-[G]  tail_cells=[]      (head only, no tail yet)
+    //   Step 1: [A]-[B]-[C]-[d]-[E*]-[F]-[G]  tail_cells=[D]     (1 tail cell)
+    //   Step 2: [A]-[B]-[C]-[d]-[e]-[F*]-[G]  tail_cells=[D,E]   (full tail, 2 cells)
+    //   Step 3: [A]-[B]-[C]-[ ]-[d]-[e]-[G*]  tail_cells=[E,F]   (tail shifts, D released)
+    //
+    // Example 2: Same road, tail_size=2, speed=2 (tail materializes faster)
+    //   Step 0: [A]-[B]-[C]-[D*]-[E]-[F]-[G]  tail_cells=[]      (head only)
+    //   Step 1: [A]-[B]-[C]-[d]-[e]-[F*]-[G]  tail_cells=[D,E]   (full tail in 1 step!)
+    //   Step 2: [A]-[B]-[ ]-[ ]-[d]-[e]-[H*]  tail_cells=[F,G]   (D,E released)
+    //
+    // Example 3: Same road, tail_size=2, speed=3 (tail is "cut" to max size)
+    //   Step 0: [A]-[B]-[C]-[D*]-[E]-[F]-[G]  tail_cells=[]      (head only)
+    //   Step 1: [A]-[B]-[C]-[ ]-[d]-[e]-[G*]  tail_cells=[E,F]   (full tail, D skipped - only last 2 kept)
+    //
+    //   (* = head, lowercase = tail)
+    //
+    // See also: Vehicle::tail_cells.
     pub vehicle_tail_size: usize,
     // Speed limit for generated vehicles. If >= 0, overrides the behaviour-derived speed limit.
     // Default: -1 (meaning "resolve from behaviour type")
