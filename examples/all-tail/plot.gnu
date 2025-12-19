@@ -13,7 +13,7 @@ set output dir."simulation.gif"
 
 # Plot settings
 set xrange [0:22]
-set yrange [-15:10]
+set yrange [-17:10]
 set xlabel "X"
 set ylabel "Y"
 set grid
@@ -35,6 +35,10 @@ set style line 19 lc rgb '#FF6666' pt 7 ps 2.5  # Vehicle 10 head - Salmon
 set style line 30 lc rgb '#6666FF' pt 7 ps 2.5  # Vehicle 11 head - Light Blue
 set style line 31 lc rgb '#66FF66' pt 7 ps 2.5  # Vehicle 12 head - Light Green
 set style line 32 lc rgb '#FF66CC' pt 7 ps 2.5  # Vehicle 13 head - Pink
+set style line 33 lc rgb '#99FF00' pt 7 ps 2.5  # Vehicle 14 head - Lime (trip-generated)
+set style line 34 lc rgb '#FF9966' pt 7 ps 2.5  # Vehicle 15 head - Coral
+set style line 35 lc rgb '#66CCCC' pt 7 ps 2.5  # Vehicle 16 head - Light Teal
+set style line 36 lc rgb '#CC99FF' pt 7 ps 2.5  # Vehicle 17 head - Light Purple
 
 # Styles for vehicle tails (distinct contrasting colors)
 set style line 20 lc rgb '#990066' pt 7 ps 2    # Vehicle 1 tail - Dark Magenta
@@ -50,6 +54,10 @@ set style line 29 lc rgb '#993333' pt 7 ps 2    # Vehicle 10 tail - Dark Red
 set style line 40 lc rgb '#333399' pt 7 ps 2    # Vehicle 11 tail - Dark Blue
 set style line 41 lc rgb '#339933' pt 7 ps 2    # Vehicle 12 tail - Dark Green
 set style line 42 lc rgb '#993366' pt 7 ps 2    # Vehicle 13 tail - Dark Pink
+set style line 43 lc rgb '#669900' pt 7 ps 2    # Vehicle 14 tail - Dark Lime
+set style line 44 lc rgb '#994433' pt 7 ps 2    # Vehicle 15 tail - Dark Coral
+set style line 45 lc rgb '#336666' pt 7 ps 2    # Vehicle 16 tail - Dark Teal
+set style line 46 lc rgb '#663399' pt 7 ps 2    # Vehicle 17 tail - Dark Purple
 
 # Create animation frames
 do for [i=0:num_steps-1] {
@@ -85,6 +93,14 @@ do for [i=0:num_steps-1] {
          filename using ($3==12 && strcol(4) eq 'tail' ? $1 : 1/0):($3==12 && strcol(4) eq 'tail' ? $2 : 1/0) with points ls 41 notitle, \
          filename using ($3==13 && strcol(4) eq 'head' ? $1 : 1/0):($3==13 && strcol(4) eq 'head' ? $2 : 1/0) with points ls 32 title "V13", \
          filename using ($3==13 && strcol(4) eq 'tail' ? $1 : 1/0):($3==13 && strcol(4) eq 'tail' ? $2 : 1/0) with points ls 42 notitle, \
+         filename using ($3==14 && strcol(4) eq 'head' ? $1 : 1/0):($3==14 && strcol(4) eq 'head' ? $2 : 1/0) with points ls 33 title "V14", \
+         filename using ($3==14 && strcol(4) eq 'tail' ? $1 : 1/0):($3==14 && strcol(4) eq 'tail' ? $2 : 1/0) with points ls 43 notitle, \
+         filename using ($3==15 && strcol(4) eq 'head' ? $1 : 1/0):($3==15 && strcol(4) eq 'head' ? $2 : 1/0) with points ls 34 title "V15", \
+         filename using ($3==15 && strcol(4) eq 'tail' ? $1 : 1/0):($3==15 && strcol(4) eq 'tail' ? $2 : 1/0) with points ls 44 notitle, \
+         filename using ($3==16 && strcol(4) eq 'head' ? $1 : 1/0):($3==16 && strcol(4) eq 'head' ? $2 : 1/0) with points ls 35 title "V16", \
+         filename using ($3==16 && strcol(4) eq 'tail' ? $1 : 1/0):($3==16 && strcol(4) eq 'tail' ? $2 : 1/0) with points ls 45 notitle, \
+         filename using ($3==17 && strcol(4) eq 'head' ? $1 : 1/0):($3==17 && strcol(4) eq 'head' ? $2 : 1/0) with points ls 36 title "V17", \
+         filename using ($3==17 && strcol(4) eq 'tail' ? $1 : 1/0):($3==17 && strcol(4) eq 'tail' ? $2 : 1/0) with points ls 46 notitle, \
          filename using (strcol(4) eq 'head' ? $1 : 1/0):(strcol(4) eq 'head' ? $2 : 1/0):(sprintf("V%d", $3)) with labels font ',8' offset 0,1 notitle
 }
 

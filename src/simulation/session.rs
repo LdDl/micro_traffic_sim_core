@@ -381,13 +381,20 @@ impl Session {
         // Create behaviour parameters based on allowed behaviour type
         let behaviour_params = BehaviourParameters::from_behaviour_type(trip.allowed_behaviour_type);
 
+        // Determine speed limit: use trip's explicit value if set, otherwise from behaviour
+        let speed_limit = if trip.speed_limit >= 0 {
+            trip.speed_limit
+        } else {
+            behaviour_params.speed_limit()
+        };
+
         // Create vehicle using builder pattern
         let vehicle = Vehicle::new(self.last_vehicle_id)
             .with_type(trip.allowed_agent_type)
             .with_behaviour(trip.allowed_behaviour_type)
             .with_cell(trip.from_node)
             .with_speed(trip.initial_speed)
-            .with_speed_limit(behaviour_params.speed_limit())
+            .with_speed_limit(speed_limit)
             .with_slowdown(behaviour_params.slowdown_factor())
             .with_min_safe_distance(behaviour_params.min_safe_distance())
             .with_aggressive_level(behaviour_params.aggressive_level())
