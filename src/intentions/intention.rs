@@ -207,8 +207,9 @@ pub fn find_intention<'a>(
     let mut intention_speed = vehicle.speed.min(speed_limit);
 
     // Consider acceleration
+    // Allow stopped vehicle (speed == 0) to start moving even if acceleration timer is active
     let mut speed_possible = intention_speed;
-    let acceleration_allowed = vehicle.timer_non_acceleration <= 0;
+    let acceleration_allowed = vehicle.timer_non_acceleration <= 0 || vehicle.speed == 0;
     if acceleration_allowed {
         // Vehicle should could have (speed + 1) as possible speed untill it reaches speed limit
         speed_possible = (speed_possible + 1).min(speed_limit);
@@ -369,7 +370,9 @@ pub fn find_intention<'a>(
         };
         return Ok(result);
     }
-    // Otherwise just collect vehicles which can't move forward since not free cells ahead.
+    // Otherwise collect vehicles which can't move forward. This includes:
+    // - Vehicles with speed_possible = 0 (e.g., acceleration blocked by timer after lane change)
+    // - Vehicles blocked by other reasons (has_vehicle_on_path handled earlier)
     // Then they are trying to lane change in separate loop
     // (in further we could make cooperative drives which allow other vehicles to change lane).
     // Then we know vehicles which can't move at all.
