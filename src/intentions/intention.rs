@@ -101,6 +101,26 @@ pub fn prepare_intentions<'a, 'b>(
                 ]
             );
         }
+        // Cached route management: populate on first tick or reroute after stall threshold
+        if vehicle.destination >= 0 {
+            let needs_route = vehicle.cached_route.is_empty();
+            let needs_reroute = vehicle.route_stall_count >= vehicle.reroute_threshold;
+            if needs_route || needs_reroute {
+                if needs_reroute {
+                    vehicle.reroute_generation += 1;
+                    vehicle.reroute_threshold = vehicle.reroute_base_threshold * (vehicle.reroute_generation + 1);
+                    vehicle.route_stall_count = 0;
+                }
+                if let (Some(src), Some(tgt)) = (net.get_cell(&vehicle.cell_id), net.get_cell(&vehicle.destination)) {
+                    if let Ok(path) = shortest_path(src, tgt, net, true, None) {
+                        let verts = path.vertices();
+                        if verts.len() > 1 {
+                            vehicle.cached_route = verts[1..].iter().map(|c| c.get_id()).collect();
+                        }
+                    }
+                }
+            }
+        }
         let possible_intention = find_intention(net, current_state, &vehicle, verbose)?;
         if possible_intention.should_stop {
             // Calculate maneuvers_allowed for find_alternate_intention
@@ -269,6 +289,13 @@ pub fn find_intention<'a>(
                 }
             }
         },
+        _ if !vehicle.cached_route.is_empty() => {
+            // Follow cached route instead of running A*
+            return follow_cached_route(
+                net, current_state, vehicle, speed_possible,
+                observe_distance, tail_maneuver,
+            );
+        },
         _ => {
             let target_cell = net
                 .get_cell(&vehicle.destination)
@@ -388,6 +415,141 @@ pub fn find_intention<'a>(
         should_stop: true,
     };
     Ok(result)
+}
+
+/// Follows a cached route to produce an intention for this tick.
+/// Extracts the next cells from the cached route (up to observe_distance+1),
+/// validates them against obstacles and traffic lights.
+fn follow_cached_route(
+    net: &GridRoads,
+    current_state: &HashMap<CellID, VehicleID>,
+    vehicle: &Vehicle,
+    mut speed_possible: i32,
+    observe_distance: i32,
+    tail_maneuver: TailIntentionManeuver,
+) -> Result<VehicleIntention, IntentionError> {
+    let look_ahead = ((observe_distance + 1) as usize).min(vehicle.cached_route.len());
+
+    // Convert cached route cell IDs to Cell refs and determine maneuvers
+    let mut vertices = Vec::with_capacity(look_ahead);
+    let mut maneuvers = Vec::with_capacity(look_ahead);
+    let mut prev_cell_id = vehicle.cell_id;
+
+    for &cell_id in &vehicle.cached_route[..look_ahead] {
+        let cell = net.get_cell(&cell_id)
+            .ok_or(IntentionError::NoTargetCell(cell_id))?;
+        let prev_cell = net.get_cell(&prev_cell_id)
+            .ok_or(IntentionError::NoSourceCell(prev_cell_id))?;
+
+        let maneuver = if prev_cell.get_forward_id() == cell_id {
+            LaneChangeType::NoChange
+        } else if prev_cell.get_left_id() == cell_id {
+            LaneChangeType::ChangeLeft
+        } else if prev_cell.get_right_id() == cell_id {
+            LaneChangeType::ChangeRight
+        } else {
+            // Route stale - cell not reachable from previous
+            return Ok(VehicleIntention {
+                intention_maneuver: LaneChangeType::Block,
+                intention_speed: 0,
+                destination: None,
+                confusion: None,
+                intention_cell_id: vehicle.cell_id,
+                tail_intention_cells: vec![],
+                intermediate_cells: vec![],
+                tail_maneuver,
+                should_stop: true,
+            });
+        };
+
+        vertices.push(cell);
+        maneuvers.push(maneuver);
+        prev_cell_id = cell_id;
+    }
+
+    // Scan for obstacles, traffic lights, maneuvers, speed limits
+    let mut wanted_maneuver = LaneChangeType::NoChange;
+    let mut last_cell_state = CellState::Free;
+    let mut success_forward: i32 = 0;
+
+    for (i, cell) in vertices.iter().enumerate() {
+        let m = maneuvers[i];
+        if m != LaneChangeType::NoChange {
+            // Lane change in cached route
+            if success_forward == 0 {
+                wanted_maneuver = m;
+            }
+            break;
+        }
+        // Check occupancy
+        if current_state.contains_key(&cell.get_id()) {
+            break;
+        }
+        // Check traffic light
+        if cell.get_state() != CellState::Free {
+            last_cell_state = cell.get_state();
+            break;
+        }
+        // Check speed limit
+        if speed_possible > cell.get_speed_limit() {
+            if success_forward == 0 {
+                success_forward = 1;
+            }
+            break;
+        }
+        success_forward += 1;
+        if success_forward >= speed_possible {
+            break;
+        }
+    }
+
+    speed_possible = speed_possible.min(success_forward);
+
+    if success_forward > 0 {
+        let wanted_cell_id = vertices[success_forward as usize - 1].get_id();
+        return Ok(VehicleIntention {
+            intention_maneuver: wanted_maneuver,
+            intention_speed: speed_possible,
+            destination: None,
+            confusion: None,
+            intention_cell_id: wanted_cell_id,
+            tail_intention_cells: vec![],
+            intermediate_cells: vertices[..success_forward as usize - 1]
+                .iter()
+                .map(|c| c.get_id())
+                .collect(),
+            tail_maneuver,
+            should_stop: false,
+        });
+    }
+
+    // Stopped by traffic light - NOT a stall
+    if last_cell_state != CellState::Free {
+        return Ok(VehicleIntention {
+            intention_maneuver: LaneChangeType::Block,
+            intention_speed: 0,
+            destination: None,
+            confusion: None,
+            intention_cell_id: vehicle.cell_id,
+            tail_intention_cells: vec![],
+            intermediate_cells: vec![],
+            tail_maneuver,
+            should_stop: false,
+        });
+    }
+
+    // Blocked by vehicle ahead or lane change needed but no forward progress
+    Ok(VehicleIntention {
+        intention_maneuver: LaneChangeType::Block,
+        intention_speed: 0,
+        destination: None,
+        confusion: None,
+        intention_cell_id: vehicle.cell_id,
+        tail_intention_cells: vec![],
+        intermediate_cells: vec![],
+        tail_maneuver,
+        should_stop: true,
+    })
 }
 
 /* Change it according to right-hand or left-hand traffic (driving side) */

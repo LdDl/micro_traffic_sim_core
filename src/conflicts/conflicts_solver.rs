@@ -182,6 +182,7 @@ pub fn solve_conflicts<'b>(
             } else {
                 // Stay still
                 participant.block_with_speed(0);
+                participant.route_stall_count += 1;
             }
         }
     }
@@ -207,6 +208,7 @@ pub fn solve_conflicts<'b>(
                     let participant = vehicles.get_mut(participant_id).ok_or_else(|| ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", participant_id)))?;
                     if i != priority_index {
                         participant.block_with_speed(0);
+                        participant.route_stall_count += 1;
                     }
                 }
                 continue;
@@ -230,7 +232,7 @@ pub fn solve_conflicts<'b>(
             // Vehicle which is trying to do maneuver to the right should stop
             if let Some(right_index) = right_maneuver_index {
                 let right_id = conflict.participants[right_index];
-                if let Some(v) = vehicles.get_mut(&right_id) { v.block_with_speed(0); }
+                if let Some(v) = vehicles.get_mut(&right_id) { v.block_with_speed(0); v.route_stall_count += 1; }
             }
             // Vehicle which is trying to do maneuver to the left is allowed to do so
             // IntentionManeuver is saved

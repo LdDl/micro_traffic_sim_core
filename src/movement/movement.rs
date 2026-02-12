@@ -230,6 +230,35 @@ pub fn movement(
 
         vehicle.cell_id = final_cell;
 
+        // Cached route management
+        if !vehicle.cached_route.is_empty() {
+            if vehicle.speed > 0 {
+                // Vehicle moved: drain consumed cells from cached route
+                let cells_consumed = vehicle.speed as usize;
+                if cells_consumed <= vehicle.cached_route.len() {
+                    // Verify consumed cells match cached route head
+                    let consumed: Vec<CellID> = vehicle.intention.intermediate_cells.iter()
+                        .chain(std::iter::once(&vehicle.intention.intention_cell_id))
+                        .copied()
+                        .collect();
+                    let route_match = consumed.len() == cells_consumed
+                        && consumed.iter().zip(vehicle.cached_route.iter()).all(|(a, b)| a == b);
+                    if route_match {
+                        vehicle.cached_route.drain(..cells_consumed);
+                    } else {
+                        // Route diverged (e.g., alternate lane change was used)
+                        vehicle.cached_route.clear();
+                    }
+                } else {
+                    vehicle.cached_route.clear();
+                }
+                // Reset stall counters on successful movement
+                vehicle.route_stall_count = 0;
+                vehicle.reroute_generation = 0;
+                vehicle.reroute_threshold = vehicle.reroute_base_threshold;
+            }
+        }
+
         // Get the cell to check zone type
         let cell = net.get_cell(&vehicle.cell_id)
             .ok_or(MovementError::CellNotFound { 
@@ -258,7 +287,13 @@ pub fn movement(
             if (transits_made as usize) < vehicle.transit_cells.len() && vehicle.get_relax_countdown() == 0 {
                 vehicle.destination = vehicle.transit_cells[transits_made as usize];
                 vehicle.relax_countdown_reset();
+                vehicle.cached_route.clear(); // Destination changed, need new route
             }
+        }
+
+        // Invalidate cached route if vehicle got confused (random destination assigned)
+        if vehicle.confusion {
+            vehicle.cached_route.clear();
         }
 
         vehicle.travel_time += 1;

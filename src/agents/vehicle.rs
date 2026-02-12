@@ -127,6 +127,18 @@ pub struct Vehicle {
 
     /// Vehicle's intention to perform maneuver and other actions
     pub intention: VehicleIntention,
+
+    /// Cached full route from current position to destination (cell IDs, excluding current cell).
+    /// Empty means no cache - a full route will be computed on next intention step.
+    pub cached_route: Vec<CellID>,
+    /// Number of consecutive ticks the vehicle has been stalled (speed=0 due to conflict or blockage).
+    pub route_stall_count: i32,
+    /// Current reroute threshold (stall ticks before rerouting). Grows linearly on repeated reroutes.
+    pub reroute_threshold: i32,
+    /// Base reroute threshold (the "N" value).
+    pub reroute_base_threshold: i32,
+    /// Number of times the vehicle has rerouted while stuck (for linear backoff).
+    pub reroute_generation: i32,
 }
 
 impl Vehicle {
@@ -176,6 +188,11 @@ impl Vehicle {
                 travel_time: 0,
                 confusion: false,
                 intention: VehicleIntention::default(),
+                cached_route: Vec::new(),
+                route_stall_count: 0,
+                reroute_threshold: 3,
+                reroute_base_threshold: 3,
+                reroute_generation: 0,
             },
         }
     }
@@ -941,6 +958,14 @@ impl VehicleBuilder {
     /// ```
     pub fn with_travel_time(mut self, t: i64) -> Self {
         self.vehicle.travel_time = t;
+        self
+    }
+
+    /// Sets the base reroute threshold (number of stall ticks before first reroute).
+    /// Default is 3. Higher values make vehicles more "patient" before rerouting.
+    pub fn with_reroute_threshold(mut self, n: i32) -> Self {
+        self.vehicle.reroute_base_threshold = n;
+        self.vehicle.reroute_threshold = n;
         self
     }
 
