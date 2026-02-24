@@ -108,6 +108,7 @@ pub const EVENT_MOVEMENT: &str = "movement";
 pub const EVENT_MOVEMENT_VEHICLE: &str = "movement_vehicle";
 pub const EVENT_MOVEMENT_DEAD_END: &str = "movement_dead_end";
 pub const EVENT_MOVEMENT_DESTINATION: &str = "movement_destination";
+pub const EVENT_ROUTING_STATS: &str = "routing_stats";
 pub const EVENT_SESSION_CREATE: &str = "session_create";
 pub const EVENT_SESSION_EXPIRED: &str = "session_expired";
 pub const EVENT_SESSION_EXTRACT_STATES: &str = "session_extract";

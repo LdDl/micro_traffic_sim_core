@@ -79,7 +79,13 @@ pub fn prepare_intentions<'a, 'b>(
     verbose: &LocalLogger,
 ) -> Result<Intentions, IntentionError> {
     let mut intentions = Intentions::new();
-    if verbose.is_at_least(VerboseLevel::Main) {
+    let track_routing = verbose.is_at_least(VerboseLevel::Main);
+    let mut routing_count: u64 = 0;
+    let mut routing_sum_us: u64 = 0;
+    let mut routing_min_us: u64 = u64::MAX;
+    let mut routing_max_us: u64 = 0;
+
+    if track_routing {
         verbose.log_with_fields(
             EVENT_INTENTIONS_CREATE,
             "Collect intentions for vehicles",
@@ -101,6 +107,7 @@ pub fn prepare_intentions<'a, 'b>(
                 ]
             );
         }
+        let routing_start = std::time::Instant::now();
         let possible_intention = find_intention(net, current_state, &vehicle, verbose)?;
         if possible_intention.should_stop {
             // Calculate maneuvers_allowed for find_alternate_intention
@@ -110,9 +117,23 @@ pub fn prepare_intentions<'a, 'b>(
                 && tail_maneuver != LaneChangeType::ChangeRight
                 && tail_maneuver != LaneChangeType::ChangeLeft;
             let alternate_possible_intention = find_alternate_intention(net, current_state, &vehicle, maneuvers_allowed)?;
+            if track_routing {
+                let elapsed_us = routing_start.elapsed().as_micros() as u64;
+                routing_count += 1;
+                routing_sum_us += elapsed_us;
+                routing_min_us = routing_min_us.min(elapsed_us);
+                routing_max_us = routing_max_us.max(elapsed_us);
+            }
             vehicle.set_intention(alternate_possible_intention);
             intentions.add_intention(vehicle, IntentionType::Target);
             continue;
+        }
+        if track_routing {
+            let elapsed_us = routing_start.elapsed().as_micros() as u64;
+            routing_count += 1;
+            routing_sum_us += elapsed_us;
+            routing_min_us = routing_min_us.min(elapsed_us);
+            routing_max_us = routing_max_us.max(elapsed_us);
         }
         if verbose.is_at_least(VerboseLevel::Additional) {
             verbose.log_with_fields(
@@ -126,6 +147,20 @@ pub fn prepare_intentions<'a, 'b>(
         }
         vehicle.set_intention(possible_intention);
         intentions.add_intention(vehicle, IntentionType::Target);
+    }
+    if track_routing && routing_count > 0 {
+        let routing_avg_us = routing_sum_us / routing_count;
+        verbose.log_with_fields(
+            EVENT_ROUTING_STATS,
+            "Routing timing stats",
+            &[
+                ("routing_count", &routing_count),
+                ("routing_sum_us", &routing_sum_us),
+                ("routing_min_us", &routing_min_us),
+                ("routing_max_us", &routing_max_us),
+                ("routing_avg_us", &routing_avg_us),
+            ]
+        );
     }
     Ok(intentions)
 }
