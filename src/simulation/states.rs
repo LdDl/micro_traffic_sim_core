@@ -24,6 +24,10 @@ pub struct AutomataState {
     pub vehicles: Vec<VehicleState>,
     /// States of all traffic light groups at this timestamp
     pub tls: HashMap<TrafficLightID, Vec<TrafficLightGroupState>>,
+    /// Cumulative count of vehicles that reached their destination
+    pub vehicles_completed: i32,
+    /// Cumulative count of vehicles that were lost (reached death zone without reaching destination)
+    pub vehicles_lost: i32,
 }
 
 /// State of a single vehicle at a specific timestamp

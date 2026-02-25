@@ -140,6 +140,12 @@ pub struct Session {
 
     /// Defines the SRID of the world
     world_srid: SRID,
+
+    /// Cumulative count of vehicles that reached their destination
+    vehicles_completed: i32,
+
+    /// Cumulative count of vehicles that were lost (reached death zone without reaching destination)
+    vehicles_lost: i32,
 }
 
 impl Session {
@@ -166,6 +172,8 @@ impl Session {
             _expire_at: 0,
             steps: 0,
             world_srid: picked_srid,
+            vehicles_completed: 0,
+            vehicles_lost: 0,
         }
     }
 
@@ -193,6 +201,8 @@ impl Session {
             _expire_at: 0,
             steps: 0,
             world_srid: picked_srid,
+            vehicles_completed: 0,
+            vehicles_lost: 0,
         }
     }
 
@@ -555,7 +565,9 @@ impl Session {
 
         // 7. Move vehicles
         let vehicles_grid = self.grids_storage.get_vehicles_net_ref();
-    movement(vehicles_grid, &mut self.vehicles, &self.verbose)?;
+        let (completed, lost) = movement(vehicles_grid, &mut self.vehicles, &self.verbose)?;
+        self.vehicles_completed += completed;
+        self.vehicles_lost += lost;
 
         // 8. Collect current vehicles positions for state dump
         let mut states_dump: Vec<VehicleState> = Vec::with_capacity(self.vehicles.len());
@@ -591,10 +603,26 @@ impl Session {
         let timestamp = self.steps;
         self.steps += 1;
 
+        // Log vehicle completion statistics
+        if self.verbose.is_at_least(VerboseLevel::Main) {
+            self.verbose.log_with_fields(
+                EVENT_STEP_COMPLETE,
+                "Step completed with vehicle statistics",
+                &[
+                    ("timestamp", &timestamp),
+                    ("active_vehicles", &self.vehicles.len()),
+                    ("vehicles_completed", &self.vehicles_completed),
+                    ("vehicles_lost", &self.vehicles_lost),
+                ]
+            );
+        }
+
         Ok(AutomataState {
             timestamp: timestamp,
             vehicles: states_dump,
             tls: tl_states_dump,
+            vehicles_completed: self.vehicles_completed,
+            vehicles_lost: self.vehicles_lost,
         })
     }
 

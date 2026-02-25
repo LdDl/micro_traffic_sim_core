@@ -142,7 +142,7 @@ pub fn movement(
     net: &GridRoads,
     vehicles: &mut IndexMap<VehicleID, Vehicle>,
     verbose: &LocalLogger,
-) -> Result<(), MovementError> {
+) -> Result<(i32, i32), MovementError> {
     if verbose.is_at_least(VerboseLevel::Main) {
         verbose.log_with_fields(
             EVENT_MOVEMENT,
@@ -153,6 +153,8 @@ pub fn movement(
 
     // Collect vehicles to remove (to avoid borrowing issues during iteration)
     let mut vehicles_to_remove = Vec::new();
+    let mut vehicles_completed = 0i32;
+    let mut vehicles_lost = 0i32;
 
     for (vehicle_id, vehicle) in vehicles.iter_mut() {
         
@@ -264,19 +266,8 @@ pub fn movement(
         vehicle.travel_time += 1;
 
         // Check for vehicle removal conditions
-    if zone_type == ZoneType::Death && vehicle.cell_id != vehicle.destination {
-            // Vehicle has reached the death zone
-            if verbose.is_at_least(VerboseLevel::Main) {
-                verbose.log_with_fields(
-                    EVENT_MOVEMENT_DEAD_END,
-                    "Vehicle done movement due going to dead-end",
-                    &[("vehicle_id", &vehicle.id)]
-                );
-            }
-            vehicles_to_remove.push(*vehicle_id);
-        }
-    if vehicle.cell_id == vehicle.destination {
-            // Vehicle has reached the destination
+        if vehicle.cell_id == vehicle.destination {
+            // Vehicle has reached the destination (priority check)
             if verbose.is_at_least(VerboseLevel::Main) {
                 verbose.log_with_fields(
                     EVENT_MOVEMENT_DESTINATION,
@@ -285,6 +276,18 @@ pub fn movement(
                 );
             }
             vehicles_to_remove.push(*vehicle_id);
+            vehicles_completed += 1;
+        } else if zone_type == ZoneType::Death {
+            // Vehicle has reached the death zone without reaching destination (lost)
+            if verbose.is_at_least(VerboseLevel::Main) {
+                verbose.log_with_fields(
+                    EVENT_MOVEMENT_DEAD_END,
+                    "Vehicle done movement due going to dead-end",
+                    &[("vehicle_id", &vehicle.id)]
+                );
+            }
+            vehicles_to_remove.push(*vehicle_id);
+            vehicles_lost += 1;
         }
     }
 
@@ -295,5 +298,5 @@ pub fn movement(
         vehicles.swap_remove(&vehicle_id);
     }
 
-    Ok(())
+    Ok((vehicles_completed, vehicles_lost))
 }
