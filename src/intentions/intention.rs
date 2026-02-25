@@ -270,7 +270,7 @@ pub fn find_intention<'a>(
         && tail_maneuver.intention_maneuver != LaneChangeType::ChangeRight
         && tail_maneuver.intention_maneuver != LaneChangeType::ChangeLeft;
 
-    let mut destination: Option<CellID> = None;
+    let destination: Option<CellID> = None;
     let mut confusion: Option<bool> = None;
 
     // println!(
@@ -315,7 +315,13 @@ pub fn find_intention<'a>(
                 maneuvers_allowed,
                 Some(observe_distance + 1),
             ) {
-                Ok(path) => path,
+                Ok(path) => {
+                    // Clear confusion if vehicle was previously in confusion mode and found path
+                    if vehicle.confusion {
+                        confusion = Some(false);
+                    }
+                    path
+                },
                 Err(e)
                     if e != shortest_path::router::AStarError::NoPathFound {
                         start_id: source_cell.get_id(),
@@ -329,7 +335,7 @@ pub fn find_intention<'a>(
                         Ok(path) => path,
                         Err(e) => return Err(IntentionError::NoPathForNoRoute(e)),
                     };
-                    destination = Some(new_path.vertices()[new_path.vertices().len() - 1].get_id());
+                    // Do NOT overwrite destination - keep original trip destination
                     intention_speed = 1;
                     speed_possible = intention_speed;
                     confusion = Some(true);

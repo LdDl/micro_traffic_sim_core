@@ -90,6 +90,8 @@ pub struct Vehicle {
     pub min_safe_distance: i32,
     /// Final cell for the vehicle's trip
     pub destination: CellID,
+    /// Final trip destination (immutable, used for completion check; destination may change for transit cells)
+    pub trip_destination: CellID,
 
     /// A boolean indicating if the vehicle is a confclict participant
     pub is_conflict_participant: bool,
@@ -162,6 +164,7 @@ impl Vehicle {
                 bearing: 0.0,
                 min_safe_distance: 0,
                 destination: -1,
+                trip_destination: -1,
                 is_conflict_participant: false,
                 trip: -1,
                 transits_made: 0,
@@ -672,6 +675,7 @@ impl VehicleBuilder {
     /// ```
     pub fn with_destination(mut self, cell_id: CellID) -> Self {
         self.vehicle.destination = cell_id;
+        self.vehicle.trip_destination = cell_id;
         self
     }
 

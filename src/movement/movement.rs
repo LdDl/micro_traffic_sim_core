@@ -266,7 +266,7 @@ pub fn movement(
         vehicle.travel_time += 1;
 
         // Check for vehicle removal conditions
-        if vehicle.cell_id == vehicle.destination {
+        if vehicle.cell_id == vehicle.trip_destination {
             // Vehicle has reached the destination (priority check)
             if verbose.is_at_least(VerboseLevel::Main) {
                 verbose.log_with_fields(
