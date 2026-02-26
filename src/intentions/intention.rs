@@ -238,6 +238,27 @@ pub fn find_intention<'a>(
         return Ok(result);
     }
 
+    // Шf stopped at red traffic light do early return
+    let forward_cell_id = source_cell.get_forward_id();
+    if forward_cell_id > 0 {
+        if let Some(forward_cell) = net.get_cell(&forward_cell_id) {
+            if forward_cell.get_state() == CellState::Banned {
+                let result = VehicleIntention {
+                    intention_maneuver: LaneChangeType::Block,
+                    intention_speed: 0,
+                    destination: None,
+                    confusion: None,
+                    intention_cell_id: vehicle.cell_id,
+                    tail_intention_cells: vec![],
+                    intermediate_cells: Vec::with_capacity(0),
+                    tail_maneuver: tail_maneuver,
+                    should_stop: false,
+                };
+                return Ok(result);
+            }
+        }
+    }
+
     // Vehicle's speed should not be greater than speed limit
     let mut intention_speed = vehicle.speed.min(speed_limit);
 
