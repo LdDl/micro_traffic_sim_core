@@ -175,23 +175,50 @@ pub fn movement(
         vehicle.apply_intention();
         vehicle.is_conflict_participant = false;
 
-        // Update bearing only when next cell is different from current
+        // Update bearing depending on intention maneuver
         if vehicle.cell_id != vehicle.intention.intention_cell_id {
+            // vehicle is moving? then set bearing based on actual movement
             let cell_from = net.get_cell(&vehicle.cell_id)
-                .ok_or(MovementError::CellNotFound { 
-                    cell_id: vehicle.cell_id, 
-                    vehicle_id: vehicle.id 
+                .ok_or(MovementError::CellNotFound {
+                    cell_id: vehicle.cell_id,
+                    vehicle_id: vehicle.id
                 })?;
             let cell_to = net.get_cell(&vehicle.intention.intention_cell_id)
-                .ok_or(MovementError::CellNotFound { 
-                    cell_id: vehicle.intention.intention_cell_id, 
-                    vehicle_id: vehicle.id 
+                .ok_or(MovementError::CellNotFound {
+                    cell_id: vehicle.intention.intention_cell_id,
+                    vehicle_id: vehicle.id
                 })?;
 
             let pt_from = cell_from.get_point();
             let pt_to = cell_to.get_point();
             vehicle.bearing = get_bearing(pt_from, pt_to);
+        } else {
+            // vehicle is stopped or blocked? bearing = angle to forward direction
+            use crate::maneuver::LaneChangeType;
+            match vehicle.intention.intention_maneuver {
+                LaneChangeType::Block | LaneChangeType::NoChange => {
+                    let current_cell = net.get_cell(&vehicle.cell_id)
+                        .ok_or(MovementError::CellNotFound {
+                            cell_id: vehicle.cell_id,
+                            vehicle_id: vehicle.id
+                        })?;
+                    let forward_id = current_cell.get_forward_id();
+                    if forward_id > 0 {
+                        if let Some(forward_cell) = net.get_cell(&forward_id) {
+                            let pt_from = current_cell.get_point();
+                            let pt_to = forward_cell.get_point();
+                            vehicle.bearing = get_bearing(pt_from, pt_to);
+                        }
+                    }
+                }
+                _ => {
+                    // keep bearing as is, dunno if it's good
+                }
+            }
+        }
 
+        // Decrement timers only if vehicle moved
+        if vehicle.cell_id != vehicle.intention.intention_cell_id {
             // Decrement timers
             if vehicle.timer_non_acceleration > 0 {
                 vehicle.timer_non_acceleration -= 1;
