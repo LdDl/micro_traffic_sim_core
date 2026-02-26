@@ -3,7 +3,7 @@ use crate::behaviour::BehaviourType;
 use crate::agents::{
     TailIntentionManeuver, Vehicle, VehicleError, VehicleID, VehicleIntention,
 };
-use crate::grid::cell::CellState;
+use crate::grid::cell::{Cell, CellState};
 use crate::maneuver::LaneChangeType;
 use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
@@ -263,7 +263,7 @@ pub fn find_intention<'a>(
     }
 
     // Considering that vehicle always wants to accelerate:
-    let observe_distance = speed_possible + vehicle.min_safe_distance;
+    let _observe_distance = speed_possible + vehicle.min_safe_distance;
 
     // Check if maneuvers are allowed (they could be prohibeted due the vehicle's tail is not done previous maneuver yet)
     let maneuvers_allowed = vehicle.timer_non_maneuvers <= 0
@@ -293,7 +293,8 @@ pub fn find_intention<'a>(
                 source_cell,
                 net,
                 maneuvers_allowed,
-                observe_distance + 1,
+                1000,
+                // observe_distance + 1,  // depth-limited
             ) {
                 Ok(path) => path,
                 Err(e) => {
@@ -313,7 +314,8 @@ pub fn find_intention<'a>(
                 target_cell,
                 net,
                 maneuvers_allowed,
-                Some(observe_distance + 1),
+                None,
+                // Some(observe_distance + 1),  // depth-limited
             ) {
                 Ok(path) => {
                     // Clear confusion if vehicle was previously in confusion mode and found path
@@ -437,6 +439,70 @@ const UNDEFINED_MANEUVER: LaneChangeType = LaneChangeType::ChangeRight;
 
 /// Attempts to find an alternate maneuver (lane change) for a blocked vehicle.
 ///
+/// Helper: Creates a block intention
+fn create_block_intention(cell_id: CellID, should_stop: bool) -> VehicleIntention {
+    VehicleIntention {
+        intention_maneuver: LaneChangeType::Block,
+        intention_speed: 0,
+        destination: None,
+        confusion: None,
+        intention_cell_id: cell_id,
+        tail_intention_cells: vec![],
+        intermediate_cells: Vec::with_capacity(0),
+        tail_maneuver: TailIntentionManeuver::default(),
+        should_stop,
+    }
+}
+
+/// Helper: Checks if alternate path (left or right) is available and calculates cost
+fn check_alternate_direction(
+    cell_id: CellID,
+    source_cell: &Cell,
+    target_cell: &Cell,
+    net: &GridRoads,
+    current_state: &HashMap<CellID, VehicleID>,
+    direction: &str,
+    max_depth: Option<i32>,
+) -> Result<(CellID, f64), IntentionError> {
+    if cell_id <= 0 {
+        return Ok((-1, INFINITY));
+    }
+
+    let cell = net.get_cell(&cell_id).ok_or_else(|| {
+        if direction == "left" {
+            IntentionError::NoLeftCell(source_cell.get_id())
+        } else {
+            IntentionError::NoRightCell(source_cell.get_id())
+        }
+    })?;
+
+    let is_blocked = current_state
+        .get(&cell_id)
+        .map(|&id| id > 0)
+        .unwrap_or(false);
+
+    if is_blocked || cell.get_state() != CellState::Free {
+        return Ok((-1, INFINITY));
+    }
+
+    match shortest_path(cell, target_cell, net, true, max_depth) {
+        Ok(path) => {
+            let cost = path.cost() + source_cell.distance_to(cell);
+            Ok((cell_id, cost))
+        }
+        Err(shortest_path::router::AStarError::NoPathFound { .. }) => {
+            Ok((-1, INFINITY))
+        }
+        Err(_) => {
+            if direction == "left" {
+                Err(IntentionError::LeftPathFind(cell_id))
+            } else {
+                Err(IntentionError::RightPathFind(cell_id))
+            }
+        }
+    }
+}
+
 /// If the vehicle cannot move forward, tries left or right lane changes
 /// and selects the best available option.
 ///
@@ -453,18 +519,7 @@ pub fn find_alternate_intention<'a>(
 
     // If maneuvers are not allowed (tail still completing previous maneuver), block immediately
     if !maneuvers_allowed {
-        let result = VehicleIntention {
-            intention_maneuver: LaneChangeType::Block,
-            intention_speed: 0,
-            destination: None,
-            confusion: None,
-            intention_cell_id: source_cell_id,
-            tail_intention_cells: vec![],
-            intermediate_cells: Vec::with_capacity(0),
-            tail_maneuver: TailIntentionManeuver::default(),
-            should_stop: false,
-        };
-        return Ok(result);
+        return Ok(create_block_intention(source_cell_id, false));
     }
 
     let source_cell = net
@@ -475,103 +530,52 @@ pub fn find_alternate_intention<'a>(
         .get_cell(&target_cell_id)
         .ok_or(IntentionError::NoTargetCell(target_cell_id))?;
 
-    let mut min_left_dist = INFINITY;
-    let mut min_right_dist = INFINITY;
+    // Check left and right alternate paths (no depth limit to see full route)
+    let (left_cell_id, min_left_dist) = check_alternate_direction(
+        source_cell.get_left_id(),
+        source_cell,
+        target_cell,
+        net,
+        current_state,
+        "left",
+        None,
+        // Some(vehicle.speed),  // depth-limited
+    )?;
 
-    // Check left maneuver
-    let mut left_cell_id = source_cell.get_left_id();
-    if left_cell_id > 0 {
-        let left_cell = net
-            .get_cell(&left_cell_id)
-            .ok_or(IntentionError::NoLeftCell(vehicle.cell_id))?;
+    let (right_cell_id, min_right_dist) = check_alternate_direction(
+        source_cell.get_right_id(),
+        source_cell,
+        target_cell,
+        net,
+        current_state,
+        "right",
+        None,
+        // Some(vehicle.speed),  // depth-limited
+    )?;
 
-        // Check if possible maneuver can't be made
-        let is_blocked = current_state
-            .get(&left_cell_id)
-            .map(|&id| id > 0)
-            .unwrap_or(false);
-
-        if !is_blocked && left_cell.get_state() == CellState::Free {
-            match shortest_path(left_cell, target_cell, net, true, Some(vehicle.speed)) {
-                Ok(path) => {
-                    let cost = path.cost();
-                    min_left_dist = cost + source_cell.distance_to(left_cell);
-                }
-                Err(e)
-                    if e != shortest_path::router::AStarError::NoPathFound {
-                        start_id: left_cell_id,
-                        end_id: target_cell_id,
-                    } =>
-                {
-                    return Err(IntentionError::LeftPathFind(left_cell_id))
-                }
-                Err(_) => {
-                    min_left_dist = INFINITY;
-                }
-            }
-        } else {
-            left_cell_id = -1;
-        }
+    // If both paths are impossible (infinite distance), don't attempt a lane change - just block
+    if min_left_dist == INFINITY && min_right_dist == INFINITY {
+        return Ok(create_block_intention(source_cell_id, true));
     }
 
-    // Check right maneuver
-    let mut right_cell_id = source_cell.get_right_id();
-    if right_cell_id > 0 {
-        let right_cell = net
-            .get_cell(&right_cell_id)
-            .ok_or(IntentionError::NoRightCell(vehicle.cell_id))?;
-
-        let is_blocked = current_state
-            .get(&right_cell_id)
-            .map(|&id| id > 0)
-            .unwrap_or(false);
-
-        if !is_blocked && right_cell.get_state() == CellState::Free {
-            match shortest_path(right_cell, target_cell, net, true, Some(vehicle.speed)) {
-                Ok(path) => {
-                    let cost = path.cost();
-                    min_right_dist = cost + source_cell.distance_to(right_cell);
-                }
-                Err(e)
-                    if e != shortest_path::router::AStarError::NoPathFound {
-                        start_id: right_cell_id,
-                        end_id: target_cell_id,
-                    } =>
-                {
-                    return Err(IntentionError::RightPathFind(right_cell_id))
-                }
-                Err(_) => {
-                    min_right_dist = INFINITY;
-                }
-            }
-        } else {
-            right_cell_id = -1;
-        }
-    }
-
-    // Choose best maneuver
-    let mut min_cell: CellID;
-    let mut intention_maneuver: LaneChangeType;
-    if UNDEFINED_MANEUVER == LaneChangeType::ChangeRight {
-        min_cell = right_cell_id;
-        intention_maneuver = LaneChangeType::ChangeRight;
-        if min_left_dist < min_right_dist {
-            min_cell = left_cell_id;
-            intention_maneuver = LaneChangeType::ChangeLeft;
-        }
+    // Choose best maneuver based on distance comparison
+    let (min_cell, intention_maneuver) = if min_left_dist < min_right_dist {
+        (left_cell_id, LaneChangeType::ChangeLeft)
+    } else if min_right_dist < min_left_dist {
+        (right_cell_id, LaneChangeType::ChangeRight)
     } else {
-        min_cell = left_cell_id;
-        intention_maneuver = LaneChangeType::ChangeLeft;
-        if min_right_dist < min_left_dist {
-            min_cell = right_cell_id;
-            intention_maneuver = LaneChangeType::ChangeRight;
+        // Equal distances - use UNDEFINED_MANEUVER as tiebreaker
+        if UNDEFINED_MANEUVER == LaneChangeType::ChangeRight {
+            (right_cell_id, LaneChangeType::ChangeRight)
+        } else {
+            (left_cell_id, LaneChangeType::ChangeLeft)
         }
-    }
+    };
 
-    // Apply the chosen maneuver
+    // Apply the chosen maneuver if valid
     if min_cell > 0 {
-        let result = VehicleIntention {
-            intention_maneuver: intention_maneuver,
+        return Ok(VehicleIntention {
+            intention_maneuver,
             intention_speed: 1,
             destination: None,
             confusion: None,
@@ -580,22 +584,9 @@ pub fn find_alternate_intention<'a>(
             intermediate_cells: Vec::with_capacity(0),
             tail_maneuver: TailIntentionManeuver::default(),
             should_stop: true,
-        };
-        return Ok(result);
+        })
     }
-    let result = VehicleIntention {
-        intention_maneuver: LaneChangeType::Block,
-        intention_speed: 0,
-        destination: None,
-        confusion: None,
-        intention_cell_id: source_cell_id,
-        tail_intention_cells: vec![],
-        intermediate_cells: Vec::with_capacity(0),
-        tail_maneuver: TailIntentionManeuver::default(),
-        should_stop: false,
-    };
-
-    Ok(result)
+    Ok(create_block_intention(source_cell_id, false))
 }
 
 #[cfg(test)]
