@@ -286,6 +286,9 @@ pub fn movement(
             let transits_made = vehicle.get_transits_made();
             if (transits_made as usize) < vehicle.transit_cells.len() && vehicle.get_relax_countdown() == 0 {
                 vehicle.destination = vehicle.transit_cells[transits_made as usize];
+                // Confusion means "current destination proven unreachable"; the verdict
+                // does not transfer to a newly assigned destination
+                vehicle.confusion = false;
                 vehicle.relax_countdown_reset();
             }
         }

@@ -326,6 +326,21 @@ pub fn find_intention<'a>(
                 }
             }
         },
+        // Reachability over directed edges is monotone: once the destination is
+        // unreachable from the current cell, it is unreachable from every cell the
+        // vehicle can ever get to. Full A* would just fail again (the most expensive
+        // failure mode - it exhausts the whole reachable component), so skip routing
+        // for confused vehicles entirely. NOTE: this holds only while the grid is
+        // static during a session and the destination is not reassigned.
+        _ if vehicle.confusion => {
+            let new_path = match process_no_route_found(source_cell, net) {
+                Ok(path) => path,
+                Err(e) => return Err(IntentionError::NoPathForNoRoute(e)),
+            };
+            intention_speed = 1;
+            speed_possible = intention_speed;
+            new_path
+        },
         _ => {
             let target_cell = net
                 .get_cell(&vehicle.destination)
@@ -338,13 +353,7 @@ pub fn find_intention<'a>(
                 None,
                 // Some(observe_distance + 1),  // depth-limited
             ) {
-                Ok(path) => {
-                    // Clear confusion if vehicle was previously in confusion mode and found path
-                    if vehicle.confusion {
-                        confusion = Some(false);
-                    }
-                    path
-                },
+                Ok(path) => path,
                 Err(e)
                     if e != shortest_path::router::AStarError::NoPathFound {
                         start_id: source_cell.get_id(),
@@ -551,31 +560,72 @@ pub fn find_alternate_intention<'a>(
         .get_cell(&target_cell_id)
         .ok_or(IntentionError::NoTargetCell(target_cell_id))?;
 
-    // Check left and right alternate paths (no depth limit to see full route)
-    let (left_cell_id, min_left_dist) = check_alternate_direction(
-        source_cell.get_left_id(),
-        source_cell,
-        target_cell,
-        net,
-        current_state,
-        "left",
-        None,
-        // Some(vehicle.speed),  // depth-limited
-    )?;
+    // Check left and right alternate paths (no depth limit to see full route).
+    // A confused vehicle's destination is already proven unreachable, and
+    // reachability is monotone along directed edges - both probes would run a
+    // full failed A* just to return INFINITY, so skip them.
+    let (left_cell_id, min_left_dist) = if vehicle.confusion {
+        (-1, INFINITY)
+    } else {
+        check_alternate_direction(
+            source_cell.get_left_id(),
+            source_cell,
+            target_cell,
+            net,
+            current_state,
+            "left",
+            None,
+            // Some(vehicle.speed),  // depth-limited
+        )?
+    };
 
-    let (right_cell_id, min_right_dist) = check_alternate_direction(
-        source_cell.get_right_id(),
-        source_cell,
-        target_cell,
-        net,
-        current_state,
-        "right",
-        None,
-        // Some(vehicle.speed),  // depth-limited
-    )?;
+    let (right_cell_id, min_right_dist) = if vehicle.confusion {
+        (-1, INFINITY)
+    } else {
+        check_alternate_direction(
+            source_cell.get_right_id(),
+            source_cell,
+            target_cell,
+            net,
+            current_state,
+            "right",
+            None,
+            // Some(vehicle.speed),  // depth-limited
+        )?
+    };
 
-    // If both paths are impossible (infinite distance), don't attempt a lane change - just block
+    // If both paths are impossible (infinite distance), don't attempt a lane change.
+    // Before blocking, try to keep rolling forward: a driver stuck next to a jammed
+    // lane drives along it and merges at a gap further ahead. If the destination
+    // becomes unreachable ahead, the regular per-tick A* will return NoPathFound on
+    // the next tick and the confusion fallback takes over (the vehicle may end up
+    // counted as lost - that is an accepted risk).
     if min_left_dist == INFINITY && min_right_dist == INFINITY {
+        let forward_cell_id = source_cell.get_forward_id();
+        if forward_cell_id > 0 {
+            if let Some(forward_cell) = net.get_cell(&forward_cell_id) {
+                let is_occupied = current_state
+                    .get(&forward_cell_id)
+                    .map(|&id| id > 0)
+                    .unwrap_or(false);
+                if !is_occupied
+                    && forward_cell.get_state() == CellState::Free
+                    && forward_cell.get_speed_limit() > 0
+                {
+                    return Ok(VehicleIntention {
+                        intention_maneuver: LaneChangeType::NoChange,
+                        intention_speed: 1,
+                        destination: None,
+                        confusion: None,
+                        intention_cell_id: forward_cell_id,
+                        tail_intention_cells: vec![],
+                        intermediate_cells: Vec::with_capacity(0),
+                        tail_maneuver: TailIntentionManeuver::default(),
+                        should_stop: false,
+                    });
+                }
+            }
+        }
         return Ok(create_block_intention(source_cell_id, true));
     }
 
