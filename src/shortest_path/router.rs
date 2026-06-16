@@ -4,7 +4,7 @@ use crate::grid::{
     road_network::GridRoads,
 };
 use crate::shortest_path::{
-    heuristics::{edge_time, heuristic},
+    heuristics::{edge_time, GeometricHeuristic, Heuristic},
     path::Path,
 };
 use indexmap::IndexMap;
@@ -293,18 +293,32 @@ pub fn shortest_path<'a>(
     maneuver_allowed: bool,
     max_depth_opt: Option<i32>,
 ) -> Result<Path<'a>, AStarError> {
+    let h = GeometricHeuristic::new(net.get_max_speed());
+    shortest_path_with_heuristic(start, goal, net, maneuver_allowed, max_depth_opt, &h)
+}
+
+/// Same as [`shortest_path`] but with a caller-supplied [`Heuristic`] (e.g. a
+/// landmark/ALT heuristic). The heuristic must be admissible for the result to be
+/// optimal. This is the entry point an external heuristic crate plugs into.
+pub fn shortest_path_with_heuristic<'a, H: Heuristic>(
+    start: &'a Cell,
+    goal: &'a Cell,
+    net: &'a GridRoads,
+    maneuver_allowed: bool,
+    max_depth_opt: Option<i32>,
+    h: &H,
+) -> Result<Path<'a>, AStarError> {
     // Closed set: a cheap O(1) visited marker indexed by cell id. With a consistent
     // heuristic the first pop of a cell is already optimal, so later pops are stale
     // duplicates and can be skipped. Sized to the network's id range.
     let mut finalized: Vec<bool> = vec![false; (net.get_max_cell_id().max(0) + 1) as usize];
     let max_depth = max_depth_opt.unwrap_or(0);
-    let max_speed = net.get_max_speed();
     let mut open_set = BinaryHeap::new();
 
     let start_node = Rc::new(RefCell::new(AStarNode::new(
         start,
         0.0,
-        heuristic(start, goal, max_speed),
+        h.estimate(start, goal),
         None,
         LaneChangeType::NoChange,
     )));
@@ -349,7 +363,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::NoChange,
                     &mut g_score,
                     &mut open_set,
-                    max_speed,
+                    h,
                 );
             } else {
                 return Err(AStarError::BadData {
@@ -372,7 +386,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::ChangeLeft,
                     &mut g_score,
                     &mut open_set,
-                    max_speed,
+                    h,
                 );
             } else {
                 return Err(AStarError::BadData { cell_id: left_id });
@@ -390,7 +404,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::ChangeRight,
                     &mut g_score,
                     &mut open_set,
-                    max_speed,
+                    h,
                 );
             } else {
                 return Err(AStarError::BadData { cell_id: right_id });
@@ -426,15 +440,14 @@ pub fn shortest_path<'a>(
 /// 2. Compares with existing best cost to neighbor
 /// 3. If better path found, updates data structures and adds to open set
 /// 4. Uses travel time (edge length / source-cell speed) as the edge cost between cells.
-fn process_neighbor<'a>(
+fn process_neighbor<'a, H: Heuristic>(
     goal: &Cell,
-    // current_node: AStarNode<'a>,
     current_node: Rc<RefCell<AStarNode<'a>>>,
     neighbor_cell: &'a Cell,
     neighbor_maneuver: LaneChangeType,
     g_score: &mut IndexMap<i64, f64>,
     open_set: &mut BinaryHeap<Rc<RefCell<AStarNode<'a>>>>,
-    max_speed: f64,
+    h: &H,
 ) {
     // Edge cost = travel time. Use the precomputed per-cell time (static graph) when
     // available, otherwise compute it on the fly. Both yield the same value, so routes
@@ -460,7 +473,7 @@ fn process_neighbor<'a>(
         let neighbor = Rc::new(RefCell::new(AStarNode::new(
             neighbor_cell,
             tentative_g_score,
-            tentative_g_score + heuristic(neighbor_cell, goal, max_speed),
+            tentative_g_score + h.estimate(neighbor_cell, goal),
             // None,
             Some(current_node.clone()),
             neighbor_maneuver,

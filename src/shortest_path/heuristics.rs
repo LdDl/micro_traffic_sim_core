@@ -44,6 +44,43 @@ pub fn edge_time(from: &Cell, to: &Cell) -> f64 {
     from.distance_to(to) / speed
 }
 
+/// An A* heuristic: an **admissible** (never-overestimating) lower bound on the
+/// travel time from `from` to `goal`. The router stays optimal as long as the
+/// estimate never exceeds the true remaining travel time.
+///
+/// This is a trait so alternative heuristics (e.g. landmark/ALT, see
+/// [`crate::shortest_path::landmarks`]) can be swapped in - and the landmark
+/// machinery can later be extracted into a separate crate without touching the
+/// router, which only depends on this trait.
+pub trait Heuristic {
+    /// Lower-bound travel time from `from` to `goal`.
+    fn estimate(&self, from: &Cell, goal: &Cell) -> f64;
+}
+
+/// The built-in geometric heuristic: straight-line distance divided by the
+/// network's maximum speed (so it never overestimates travel time).
+#[derive(Debug, Clone, Copy)]
+pub struct GeometricHeuristic {
+    /// Maximum speed across the network (cells/tick); the divisor that keeps the
+    /// estimate admissible.
+    pub max_speed: f64,
+}
+
+impl GeometricHeuristic {
+    /// Builds a geometric heuristic; `max_speed` is clamped to a small positive value.
+    pub fn new(max_speed: f64) -> Self {
+        GeometricHeuristic {
+            max_speed: max_speed.max(1e-9),
+        }
+    }
+}
+
+impl Heuristic for GeometricHeuristic {
+    fn estimate(&self, from: &Cell, goal: &Cell) -> f64 {
+        heuristic(from, goal, self.max_speed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

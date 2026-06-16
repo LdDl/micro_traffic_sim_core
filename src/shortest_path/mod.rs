@@ -114,5 +114,6 @@
 //! - **Geometry**: Uses distance calculations from the [`geom`](crate::geom) module
 //! - **Maneuvers**: Returns [`LaneChangeType`](crate::maneuver::LaneChangeType) for each path segment
 pub mod heuristics;
+pub mod landmarks;
 pub mod path;
 pub mod router;
