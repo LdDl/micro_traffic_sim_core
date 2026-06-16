@@ -98,6 +98,37 @@ impl GridRoads {
         self.max_speed = max_speed;
     }
 
+    /// Recomputes per-cell edge costs as congestion-aware travel time:
+    /// `edge length / smoothed speed of the cell`. `cell_speed` holds the smoothed
+    /// per-cell speed (cells/tick); a cell with no entry keeps free-flow time. This
+    /// is the per-cell congestion model (no dependency on client-supplied link ids).
+    /// Called every `adaptation_interval` ticks by the session. The heuristic stays
+    /// free-flow (max speed), so it remains an admissible lower bound (real >= free-flow).
+    pub fn apply_congestion(&mut self, cell_speed: &HashMap<CellID, f64>) {
+        use crate::geom::{Point, PointType};
+        let points: HashMap<CellID, PointType> =
+            self.cells.iter().map(|(id, c)| (*id, *c.get_point())).collect();
+        for cell in self.cells.values_mut() {
+            let here = *cell.get_point();
+            let free_flow = (cell.get_speed_limit() as f64).max(1.0);
+            let speed = cell_speed
+                .get(&cell.get_id())
+                .copied()
+                .map(|s| s.clamp(0.1, free_flow))
+                .unwrap_or(free_flow);
+            let time = |to_id: CellID| -> f64 {
+                match points.get(&to_id) {
+                    Some(p) => here.distance_to(p) / speed,
+                    None => f64::NAN,
+                }
+            };
+            let f = time(cell.get_forward_id());
+            let l = time(cell.get_left_id());
+            let r = time(cell.get_right_id());
+            cell.set_edge_costs(f, l, r);
+        }
+    }
+
     /// Retrieves a reference to a `Cell` in the grid by its `CellID`.
     ///
     /// This method checks if the `CellID` exists in the grid's `cells` map

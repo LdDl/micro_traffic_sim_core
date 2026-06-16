@@ -130,6 +130,13 @@ impl Cell {
         self.right_cost
     }
 
+    /// Returns the mesoscopic link identifier this cell belongs to (`-1` if unset).
+    /// Cells of the same link form one road segment; used to aggregate per-link
+    /// congestion (smoothed speed) for time-based routing.
+    pub fn get_meso_link_id(&self) -> i64 {
+        self.meso_link_id
+    }
+
     /// Calculates the Euclidean distance to another cell.
     ///
     /// # Arguments
@@ -421,6 +428,8 @@ impl CellBuilder {
         self.cell.meso_link_id = meso_link_id;
         self
     }
+
+    // (getter for meso_link_id is on `Cell`, see `Cell::get_meso_link_id`)
 
     /// Builds the final `Cell` object with the configured properties.
     ///

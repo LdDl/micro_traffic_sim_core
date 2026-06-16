@@ -149,6 +149,11 @@ pub struct Session {
 
     /// Routing configuration (SUMO-style). See [`RoutingOptions`].
     routing: RoutingOptions,
+
+    /// Smoothed per-cell travel speed (cells/tick), updated every
+    /// `routing.adaptation_interval` ticks from current occupancy. Empty until the
+    /// first congestion update; only used when `adaptation_interval > 0`.
+    cell_speed: HashMap<CellID, f64>,
 }
 
 /// SUMO-style routing configuration. Mirrors `device.rerouting.*` options.
@@ -163,6 +168,20 @@ pub struct RoutingOptions {
     /// Maximum BFS depth for `reconnect_to_cache` when a vehicle falls off its
     /// route, before giving up and doing a full A*.
     pub reconnect_max_depth: usize,
+    /// How often (in ticks) per-link congestion (smoothed speed) is recomputed and
+    /// pushed into the routing edge costs. `-1` (default) disables congestion-aware
+    /// routing entirely - edge costs stay at free-flow time (current behaviour).
+    /// Mirrors SUMO `device.rerouting.adaptation-interval`.
+    pub adaptation_interval: i32,
+    /// Exponential-moving-average weight for smoothing per-cell speeds:
+    /// `smoothed = old * weight + current * (1 - weight)`. `0.0` = use the latest
+    /// observation; closer to `1.0` = slower to react (more damping against
+    /// reroute oscillation). Mirrors SUMO `device.rerouting.adaptation-weight`.
+    pub adaptation_weight: f64,
+    /// Number of forward cells to average a cell's current speed over, smoothing the
+    /// per-cell signal spatially (a stop-line cell is diluted by the free-flowing
+    /// cells just ahead, like SUMO's whole-edge mean speed). `0` = pure per-cell.
+    pub congestion_window: usize,
 }
 
 impl Default for RoutingOptions {
@@ -170,6 +189,9 @@ impl Default for RoutingOptions {
         RoutingOptions {
             reroute_period: 0,
             reconnect_max_depth: 10,
+            adaptation_interval: -1,
+            adaptation_weight: 0.5,
+            congestion_window: 2,
         }
     }
 }
@@ -201,6 +223,7 @@ impl Session {
             vehicles_completed: 0,
             vehicles_lost: 0,
             routing: RoutingOptions::default(),
+            cell_speed: HashMap::new(),
         }
     }
 
@@ -231,6 +254,7 @@ impl Session {
             vehicles_completed: 0,
             vehicles_lost: 0,
             routing: RoutingOptions::default(),
+            cell_speed: HashMap::new(),
         }
     }
 
@@ -574,6 +598,66 @@ impl Session {
         }
     }
 
+    /// Recomputes smoothed per-cell travel speed from current occupancy and pushes
+    /// the result into the routing edge costs (`GridRoads::apply_congestion`).
+    ///
+    /// Per-cell congestion (no dependency on client-supplied link ids), measured —
+    /// not modelled — like SUMO: a cell's current speed is the speed of the vehicle
+    /// on it, averaged spatially over the next `congestion_window` forward cells so a
+    /// lone stop-line cell does not dominate (the SUMO whole-edge averaging,
+    /// reconstructed from our own forward topology). Empty cells decay to free-flow,
+    /// so a cleared jam recovers. The value is then blended into the previous one via
+    /// the EMA weight. Global, O(vehicles + cells * window).
+    fn update_cell_speeds(&mut self) {
+        let alpha = self.routing.adaptation_weight;
+        let window = self.routing.congestion_window;
+        // Current occupancy speed per cell (only cells with a vehicle).
+        let mut occ: HashMap<CellID, f64> = HashMap::with_capacity(self.vehicles.len());
+        for (_, v) in self.vehicles.iter() {
+            occ.insert(v.cell_id, v.speed as f64);
+        }
+        // Current sample per cell = forward-window mean of occupied speeds, else free-flow.
+        let mut cur_map: HashMap<CellID, f64> = HashMap::new();
+        {
+            let net = self.grids_storage.get_vehicles_net_ref();
+            for (id, cell) in net.iter() {
+                let free_flow = (cell.get_speed_limit() as f64).max(1.0);
+                let mut sum = 0.0;
+                let mut cnt = 0u32;
+                let mut c = *id;
+                for _ in 0..=window {
+                    if let Some(&sp) = occ.get(&c) {
+                        sum += sp;
+                        cnt += 1;
+                    }
+                    match net.get_cell(&c).map(|cc| cc.get_forward_id()) {
+                        Some(f) if f >= 0 => c = f,
+                        _ => break,
+                    }
+                }
+                let cur = if cnt > 0 {
+                    (sum / cnt as f64).clamp(0.1, free_flow)
+                } else {
+                    free_flow
+                };
+                cur_map.insert(*id, cur);
+            }
+        }
+        // EMA-update the stored smoothed speeds.
+        for (id, cur) in cur_map {
+            let new = match self.cell_speed.get(&id) {
+                Some(&old) => old * alpha + cur * (1.0 - alpha),
+                None => cur,
+            };
+            self.cell_speed.insert(id, new);
+        }
+        // Push smoothed speeds into the grid's edge costs for routing.
+        let cell_speed = self.cell_speed.clone();
+        self.grids_storage
+            .get_vehicles_net_mut()
+            .apply_congestion(&cell_speed);
+    }
+    
     /// Main simulation step function
     /// 
     /// Pipeline is:
@@ -606,6 +690,15 @@ impl Session {
         
         // 2. Update current positions
         self.update_current_positions();
+
+        // 2b. Congestion update: every adaptation_interval ticks, recompute smoothed
+        // per-link speeds and push them into the routing edge costs (no-op when
+        // adaptation_interval <= 0, i.e. free-flow routing).
+        if self.routing.adaptation_interval > 0
+            && self.steps % self.routing.adaptation_interval == 0
+        {
+            self.update_cell_speeds();
+        }
 
         // 3. Update and collect TLS state
         let tl_states_dump = self.grids_storage.tick_traffic_lights(&self.verbose)?;
