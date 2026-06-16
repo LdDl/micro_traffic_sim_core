@@ -168,7 +168,7 @@ pub struct RoutingOptions {
     /// Maximum BFS depth for `reconnect_to_cache` when a vehicle falls off its
     /// route, before giving up and doing a full A*.
     pub reconnect_max_depth: usize,
-    /// How often (in ticks) per-link congestion (smoothed speed) is recomputed and
+    /// How often (in ticks) per-cell congestion (smoothed speed) is recomputed and
     /// pushed into the routing edge costs. `-1` (default) disables congestion-aware
     /// routing entirely - edge costs stay at free-flow time (current behaviour).
     /// Mirrors SUMO `device.rerouting.adaptation-interval`.
@@ -418,18 +418,9 @@ impl Session {
                 }
             }
             TripType::Random => {
-                // Generate vehicle based on probability.
-                // TEMP: MTSC_DET_SPAWN makes the spawn decision deterministic
-                // (hash of step+trip) so A/B runs see an identical spawn sequence.
-                let norm_value: f64 = if std::env::var_os("MTSC_DET_SPAWN").is_some() {
-                    use std::hash::{Hash, Hasher};
-                    let mut h = std::collections::hash_map::DefaultHasher::new();
-                    (self.steps, trip_id).hash(&mut h);
-                    (h.finish() >> 11) as f64 / ((1u64 << 53) as f64)
-                } else {
-                    let mut rng = rand::rng();
-                    rng.random()
-                };
+                // Generate vehicle based on probability
+                let mut rng = rand::rng();
+                let norm_value: f64 = rng.random();
                 norm_value < trip.probability
             }
             _ => {
@@ -601,8 +592,8 @@ impl Session {
     /// Recomputes smoothed per-cell travel speed from current occupancy and pushes
     /// the result into the routing edge costs (`GridRoads::apply_congestion`).
     ///
-    /// Per-cell congestion (no dependency on client-supplied link ids), measured —
-    /// not modelled — like SUMO: a cell's current speed is the speed of the vehicle
+    /// Per-cell congestion (no dependency on client-supplied link ids), measured -
+    /// not modelled - like SUMO: a cell's current speed is the speed of the vehicle
     /// on it, averaged spatially over the next `congestion_window` forward cells so a
     /// lone stop-line cell does not dominate (the SUMO whole-edge averaging,
     /// reconstructed from our own forward topology). Empty cells decay to free-flow,
@@ -692,7 +683,7 @@ impl Session {
         self.update_current_positions();
 
         // 2b. Congestion update: every adaptation_interval ticks, recompute smoothed
-        // per-link speeds and push them into the routing edge costs (no-op when
+        // per-cell speeds and push them into the routing edge costs (no-op when
         // adaptation_interval <= 0, i.e. free-flow routing).
         if self.routing.adaptation_interval > 0
             && self.steps % self.routing.adaptation_interval == 0

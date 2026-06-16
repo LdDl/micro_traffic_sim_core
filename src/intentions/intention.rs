@@ -186,8 +186,7 @@ fn refresh_route(
     reroute_period: i32,
     reconnect_max_depth: usize,
 ) {
-    // TEMP A/B: MTSC_NO_CACHE disables the whole cached-route system (full A* per tick).
-    if vehicle.destination < 0 || vehicle.confusion || std::env::var_os("MTSC_NO_CACHE").is_some() {
+    if vehicle.destination < 0 || vehicle.confusion {
         return;
     }
     let on_route = vehicle.advance_route_cursor();
@@ -196,8 +195,7 @@ fn refresh_route(
         return;
     }
     // Off-route with a cache present: try a cheap bounded reconnect first.
-    // TEMP A/B: MTSC_NO_RECONNECT forces the full-A* rebuild path instead.
-    if !on_route && !vehicle.cached_route.is_empty() && std::env::var_os("MTSC_NO_RECONNECT").is_none() {
+    if !on_route && !vehicle.cached_route.is_empty() {
         if let Some(spliced) = reconnect_to_cache(
             vehicle.cell_id,
             &vehicle.cached_route,
@@ -249,10 +247,6 @@ fn build_path_from_cache<'a>(
     net: &'a GridRoads,
     max_len: usize,
 ) -> Option<Path<'a>> {
-    // TEMP A/B toggle: MTSC_NO_CACHE forces the per-tick full-A* path for comparison.
-    if std::env::var_os("MTSC_NO_CACHE").is_some() {
-        return None;
-    }
     let route = &vehicle.cached_route;
     let start = vehicle.route_idx;
     // The cursor must point at the vehicle's current cell (advance_route_cursor ran).

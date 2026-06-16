@@ -61,9 +61,10 @@ pub struct Cell {
     meso_link_id: i64,
     /// Current state of the cell (e.g., free, banned).
     state: CellState,
-    /// Precomputed edge cost (distance) to the forward/left/right neighbour.
-    /// NaN means "not precomputed" - callers fall back to computing it on the fly.
-    /// Filled once per static grid by `GridRoads::precompute_edge_costs`.
+    /// Precomputed edge cost (travel time = distance / speed) to the forward/left/right
+    /// neighbour. NaN means "not precomputed" - callers fall back to computing it on the
+    /// fly. Filled by `GridRoads::precompute_edge_costs` (free-flow) and refreshed by
+    /// `GridRoads::apply_congestion` (smoothed per-cell speed) when congestion is on.
     forward_cost: f64,
     left_cost: f64,
     right_cost: f64,
@@ -107,32 +108,32 @@ impl Cell {
         }
     }
 
-    /// Sets the precomputed edge costs to the forward/left/right neighbours.
-    /// Use NaN for a missing neighbour.
+    /// Sets the precomputed edge costs (travel time) to the forward/left/right
+    /// neighbours. Use NaN for a missing neighbour.
     pub fn set_edge_costs(&mut self, forward: f64, left: f64, right: f64) {
         self.forward_cost = forward;
         self.left_cost = left;
         self.right_cost = right;
     }
 
-    /// Precomputed distance to the forward neighbour (NaN if not precomputed).
+    /// Precomputed travel time to the forward neighbour (NaN if not precomputed).
     pub fn get_forward_cost(&self) -> f64 {
         self.forward_cost
     }
 
-    /// Precomputed distance to the left neighbour (NaN if not precomputed).
+    /// Precomputed travel time to the left neighbour (NaN if not precomputed).
     pub fn get_left_cost(&self) -> f64 {
         self.left_cost
     }
 
-    /// Precomputed distance to the right neighbour (NaN if not precomputed).
+    /// Precomputed travel time to the right neighbour (NaN if not precomputed).
     pub fn get_right_cost(&self) -> f64 {
         self.right_cost
     }
 
     /// Returns the mesoscopic link identifier this cell belongs to (`-1` if unset).
-    /// Cells of the same link form one road segment; used to aggregate per-link
-    /// congestion (smoothed speed) for time-based routing.
+    /// Cells of the same link form one road segment. Informational only - the
+    /// congestion model is per-cell and does not depend on this client-supplied id.
     pub fn get_meso_link_id(&self) -> i64 {
         self.meso_link_id
     }

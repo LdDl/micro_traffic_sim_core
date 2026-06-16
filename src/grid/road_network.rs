@@ -14,6 +14,9 @@ pub struct GridRoads {
     /// Maintained incrementally in `add_cell`; used as the divisor in the
     /// time-based A* heuristic to keep it admissible. Defaults to 1.0.
     max_speed: f64,
+    /// Largest cell id seen so far (`-1` if empty). Maintained in `add_cell`; used to
+    /// size the A* closed-set marker array.
+    max_cell_id: CellID,
 }
 
 impl GridRoads {
@@ -31,6 +34,7 @@ impl GridRoads {
         GridRoads {
             cells: HashMap::new(),
             max_speed: 1.0,
+            max_cell_id: -1,
         }
     }
 
@@ -38,6 +42,12 @@ impl GridRoads {
     /// Divisor for the admissible time-based A* heuristic.
     pub fn get_max_speed(&self) -> f64 {
         self.max_speed
+    }
+
+    /// Largest cell id in the network (`-1` if empty). Used to size O(1) per-cell
+    /// scratch arrays (e.g. the A* closed set).
+    pub fn get_max_cell_id(&self) -> CellID {
+        self.max_cell_id
     }
 
     /// Adds a `GridRoads` to the grid.
@@ -61,6 +71,9 @@ impl GridRoads {
         let speed = (cell.get_speed_limit() as f64).max(1.0);
         if speed > self.max_speed {
             self.max_speed = speed;
+        }
+        if cell.get_id() > self.max_cell_id {
+            self.max_cell_id = cell.get_id();
         }
         self.cells.insert(cell.get_id(), cell);
     }

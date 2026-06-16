@@ -13,7 +13,7 @@
 //! 
 //! ### Core Functions
 //! - [`router::shortest_path`] - A* algorithm implementation with lane change support
-//! - [`heuristics::heuristic`] - Distance-based heuristic function
+//! - [`heuristics::heuristic`] - admissible travel-time heuristic (distance / max speed)
 //! 
 //! ### Data Structures
 //! - [`path::Path`] - Represents a complete path with vertices, maneuvers, and cost
@@ -23,17 +23,18 @@
 //! ## Algorithm Features
 //!
 //! ### A* Implementation
-//! - **Optimal pathfinding**: Most of time guarantees shortest path when heuristic is admissible.
-//! I am using distance-based heuristic currently which could be not that admissible.
+//! - **Optimal pathfinding**: guarantees the shortest path - the travel-time heuristic
+//! (distance / max speed) is an admissible lower bound, and a closed set skips stale re-expansions.
 //! - **Lane change support**: Handles forward, left, and right maneuvers. Penalizes lane changes.
 //! - **Configurable maneuvers**: Can prohibit lane changes for straight-only routing.
 //! - **Depth limiting**: Optional maximum search depth to prevent excessive computation
 //! when it is acceptable to not find a path but just "guess" initial part of it.
 //!
-//! ### Heuristic Function
-//! - **Distance-based**: Uses geometric distance between cell coordinates.
-//! In future we can make some time-based heuristic considering speed limits, traffic jams,
-//! traffic lights and etc.
+//! ### Cost and Heuristic
+//! - **Cost = travel time**: edge length divided by speed (free-flow speed limit, or
+//!   the smoothed per-cell speed when congestion-aware routing is enabled).
+//! - **Heuristic**: an admissible travel-time lower bound - straight-line distance
+//!   divided by the network's maximum speed (so it never overestimates).
 //! - **Supports both coordinate systems**: Euclidean and WGS84 geographic distances.
 //! 
 //! ## Usage Examples

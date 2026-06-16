@@ -158,8 +158,9 @@ impl<'a> Ord for AStarNode<'a> {
 /// ## Search strategy
 /// - **Forward movement**: Always considers forward connections
 /// - **Lane changes**: Optionally considers left and right connections. Penalizes lane changes.
-/// - **Cost calculation**: Uses geometric distance between nodes as edge weights
-/// - **Heuristic**: Straight-line distance to goal
+/// - **Cost calculation**: travel time (edge length / speed) between nodes; with a
+///   congestion-aware grid the speed is the smoothed per-cell speed
+/// - **Heuristic**: admissible travel-time lower bound (straight-line distance / max speed)
 ///
 /// ## Performance characteristics
 /// 
@@ -285,32 +286,6 @@ impl<'a> Ord for AStarNode<'a> {
 ///     Err(e) => println!("Search exhausted or failed: {}", e),
 /// }
 /// ```
-// @remove: TEMP A* instrumentation (measurement only, to be reverted) ----
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-pub static ASTAR_CALLS: AtomicU64 = AtomicU64::new(0);
-pub static ASTAR_POPS: AtomicU64 = AtomicU64::new(0);
-pub static ASTAR_REEXPANDS: AtomicU64 = AtomicU64::new(0);
-pub static ASTAR_RELAX: AtomicU64 = AtomicU64::new(0);
-
-/// Returns (calls, pops, reexpands, relaxations) accumulated since the last reset.
-pub fn astar_stats_snapshot() -> (u64, u64, u64, u64) {
-    (
-        ASTAR_CALLS.load(AtomicOrdering::Relaxed),
-        ASTAR_POPS.load(AtomicOrdering::Relaxed),
-        ASTAR_REEXPANDS.load(AtomicOrdering::Relaxed),
-        ASTAR_RELAX.load(AtomicOrdering::Relaxed),
-    )
-}
-
-/// Resets the A* instrumentation counters.
-pub fn astar_stats_reset() {
-    ASTAR_CALLS.store(0, AtomicOrdering::Relaxed);
-    ASTAR_POPS.store(0, AtomicOrdering::Relaxed);
-    ASTAR_REEXPANDS.store(0, AtomicOrdering::Relaxed);
-    ASTAR_RELAX.store(0, AtomicOrdering::Relaxed);
-}
-// @remove
-
 pub fn shortest_path<'a>(
     start: &'a Cell,
     goal: &'a Cell,
@@ -318,11 +293,10 @@ pub fn shortest_path<'a>(
     maneuver_allowed: bool,
     max_depth_opt: Option<i32>,
 ) -> Result<Path<'a>, AStarError> {
-    ASTAR_CALLS.fetch_add(1, AtomicOrdering::Relaxed);
-    // TEMP: closed set is on unless ASTAR_NO_CLOSED is set (for A/B measurement).
-    // Cheap visited marker: Vec<bool> indexed by cell id (instead of a hashed set).
-    let use_closed = std::env::var_os("ASTAR_NO_CLOSED").is_none();
-    let mut finalized: Vec<bool> = vec![false; 16384];
+    // Closed set: a cheap O(1) visited marker indexed by cell id. With a consistent
+    // heuristic the first pop of a cell is already optimal, so later pops are stale
+    // duplicates and can be skipped. Sized to the network's id range.
+    let mut finalized: Vec<bool> = vec![false; (net.get_max_cell_id().max(0) + 1) as usize];
     let max_depth = max_depth_opt.unwrap_or(0);
     let max_speed = net.get_max_speed();
     let mut open_set = BinaryHeap::new();
@@ -343,9 +317,7 @@ pub fn shortest_path<'a>(
     let mut research_vertices = 0;
 
     while let Some(current_node) = open_set.pop() {
-        // println!("pop with id: {} {} {}", current_node.borrow().cell.get_id(), current_node.borrow().f_cost, current_node.borrow().g_cost);
         research_vertices += 1;
-        ASTAR_POPS.fetch_add(1, AtomicOrdering::Relaxed);
 
         if max_depth > 0 && research_vertices >= max_depth {
             return Ok(reconstruct_path(&current_node));
@@ -357,15 +329,13 @@ pub fn shortest_path<'a>(
             return Ok(reconstruct_path(&current_node));
         }
 
-        // Closed set: with a consistent heuristic the first pop of a cell is already
-        // optimal, so any later pop of the same cell is a stale duplicate - skip it.
-        let cid = current_cell.get_id() as usize;
-        if use_closed && cid < finalized.len() && finalized[cid] {
-            ASTAR_REEXPANDS.fetch_add(1, AtomicOrdering::Relaxed);
-            continue;
-        }
-        if use_closed && cid < finalized.len() {
-            finalized[cid] = true;
+        // Closed set: skip a cell already finalized by an earlier (optimal) pop.
+        let cid = current_cell.get_id();
+        if cid >= 0 && (cid as usize) < finalized.len() {
+            if finalized[cid as usize] {
+                continue;
+            }
+            finalized[cid as usize] = true;
         }
 
         let forward_id = current_cell.get_forward_id();
@@ -455,7 +425,7 @@ pub fn shortest_path<'a>(
 /// 1. Calculates tentative g_score (current g_cost + edge cost)
 /// 2. Compares with existing best cost to neighbor
 /// 3. If better path found, updates data structures and adds to open set
-/// 4. Uses geometric distance as edge cost (currently, can be changed in future, see [`mod.rs`](crate::shortest_path) of this module) between cells.
+/// 4. Uses travel time (edge length / source-cell speed) as the edge cost between cells.
 fn process_neighbor<'a>(
     goal: &Cell,
     // current_node: AStarNode<'a>,
@@ -485,8 +455,6 @@ fn process_neighbor<'a>(
     let tentative_g_score = current_node.borrow().g_cost + edge_cost;
     let neighbor_cell_id = neighbor_cell.get_id();
     if tentative_g_score < *g_score.get(&neighbor_cell_id).unwrap_or(&f64::INFINITY) {
-        ASTAR_RELAX.fetch_add(1, AtomicOrdering::Relaxed);
-        // println!("scan {} {}", neighbor_cell_id, tentative_g_score);
         g_score.insert(neighbor_cell_id, tentative_g_score);
 
         let neighbor = Rc::new(RefCell::new(AStarNode::new(
