@@ -222,6 +222,45 @@ impl LandmarkTable {
     pub fn landmarks(&self) -> &[CellID] {
         &self.landmarks
     }
+
+    /// The triangle-inequality lower bound on `d(v, g)` from landmark `i` alone
+    /// (the larger of the to-landmark and from-landmark bounds; `0` if missing).
+    fn landmark_bound(&self, i: usize, v: CellID, g: CellID) -> f64 {
+        let mut b = 0.0;
+        // Bound via distances TO landmark i:  d(v,goal) >= d(v,L) - d(goal,L).
+        if let (Some(&dvl), Some(&dgl)) = (self.dist_to[i].get(&v), self.dist_to[i].get(&g)) {
+            let lb = dvl - dgl;
+            if lb > b {
+                b = lb;
+            }
+        }
+        // Bound via distances FROM landmark i:  d(v,goal) >= d(L,goal) - d(L,v).
+        if let (Some(&dlg), Some(&dlv)) = (self.dist_from[i].get(&g), self.dist_from[i].get(&v)) {
+            let lb = dlg - dlv;
+            if lb > b {
+                b = lb;
+            }
+        }
+        b
+    }
+
+    /// Selects the `num_active` landmarks that give the tightest bound for the query
+    /// `(start, goal)` and returns a lightweight per-query heuristic that consults only
+    /// those - the standard "active landmarks" optimisation. Per-node estimates then
+    /// cost `O(num_active)` table lookups instead of `O(all landmarks)`. Any subset of
+    /// landmarks stays admissible, so routes are unchanged. Build this once per A*
+    /// search (it borrows the table; no copying of distance data).
+    pub fn active_for<'a>(&'a self, start: &Cell, goal: &Cell, num_active: usize) -> ActiveQuery<'a> {
+        let s = start.get_id();
+        let g = goal.get_id();
+        let mut scored: Vec<(f64, usize)> = (0..self.landmarks.len())
+            .map(|i| (self.landmark_bound(i, s, g), i))
+            .collect();
+        // Highest bound first; keep the top `num_active`.
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
+        let active = scored.into_iter().take(num_active).map(|(_, i)| i).collect();
+        ActiveQuery { table: self, active }
+    }
 }
 
 impl Heuristic for LandmarkTable {
@@ -231,19 +270,38 @@ impl Heuristic for LandmarkTable {
         // Always at least the geometric bound (also admissible); ALT only tightens it.
         let mut best = from.distance_to(goal) / self.max_speed;
         for i in 0..self.landmarks.len() {
-            // Bound via distances TO landmark i:  d(v,goal) >= d(v,L) - d(goal,L).
-            if let (Some(&dvl), Some(&dgl)) = (self.dist_to[i].get(&v), self.dist_to[i].get(&g)) {
-                let lb = dvl - dgl;
-                if lb > best {
-                    best = lb;
-                }
+            let lb = self.landmark_bound(i, v, g);
+            if lb > best {
+                best = lb;
             }
-            // Bound via distances FROM landmark i:  d(v,goal) >= d(L,goal) - d(L,v).
-            if let (Some(&dlg), Some(&dlv)) = (self.dist_from[i].get(&g), self.dist_from[i].get(&v)) {
-                let lb = dlg - dlv;
-                if lb > best {
-                    best = lb;
-                }
+        }
+        best.max(0.0)
+    }
+}
+
+/// A per-query view of a [`LandmarkTable`] that consults only the landmarks selected
+/// as "active" for one `(start, goal)` pair (see [`LandmarkTable::active_for`]).
+pub struct ActiveQuery<'a> {
+    table: &'a LandmarkTable,
+    active: Vec<usize>,
+}
+
+impl ActiveQuery<'_> {
+    /// Indices of the active landmarks (into the parent table's landmark list).
+    pub fn active(&self) -> &[usize] {
+        &self.active
+    }
+}
+
+impl Heuristic for ActiveQuery<'_> {
+    fn estimate(&self, from: &Cell, goal: &Cell) -> f64 {
+        let v = from.get_id();
+        let g = goal.get_id();
+        let mut best = from.distance_to(goal) / self.table.max_speed;
+        for &i in &self.active {
+            let lb = self.table.landmark_bound(i, v, g);
+            if lb > best {
+                best = lb;
             }
         }
         best.max(0.0)
@@ -398,5 +456,54 @@ mod tests {
         let est = table.estimate(c1, c5);
         let geo = c1.distance_to(c5) / grid.get_max_speed();
         assert!((est - geo).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_active_query_admissible_and_bounded() {
+        let grid = build_test_grid();
+        let table = LandmarkTable::build(&grid, 4);
+        let ids = [1, 2, 3, 4, 5, 6, 7];
+        for &a in &ids {
+            for &b in &ids {
+                let (ca, cb) = (grid.get_cell(&a).unwrap(), grid.get_cell(&b).unwrap());
+                let active = table.active_for(ca, cb, 2);
+                // At most 2 active landmarks (the requested cap).
+                assert!(active.active().len() <= 2);
+                let est = active.estimate(ca, cb);
+                // Admissible: never exceeds the true cost.
+                if let Ok(path) = shortest_path(ca, cb, &grid, true, None) {
+                    assert!(est <= path.cost() + 1e-9, "active estimate overestimates {a}->{b}");
+                }
+                // A subset is never tighter than the full table.
+                assert!(est <= table.estimate(ca, cb) + 1e-9);
+                // Still at least the geometric bound.
+                assert!(est + 1e-9 >= ca.distance_to(cb) / grid.get_max_speed());
+            }
+        }
+    }
+
+    #[test]
+    fn test_routing_with_active_landmarks_matches_geometric() {
+        let grid = build_test_grid();
+        let table = LandmarkTable::build(&grid, 4);
+        let ids = [1, 2, 3, 4, 5, 6, 7];
+        for &a in &ids {
+            for &b in &ids {
+                let (ca, cb) = (grid.get_cell(&a).unwrap(), grid.get_cell(&b).unwrap());
+                let active = table.active_for(ca, cb, 2);
+                let geo = shortest_path(ca, cb, &grid, true, None);
+                let alt = shortest_path_with_heuristic(ca, cb, &grid, true, None, &active);
+                match (geo, alt) {
+                    (Ok(pg), Ok(pa)) => {
+                        assert!((pg.cost() - pa.cost()).abs() < 1e-9, "cost mismatch {a}->{b}");
+                        let vg: Vec<CellID> = pg.vertices().iter().map(|c| c.get_id()).collect();
+                        let va: Vec<CellID> = pa.vertices().iter().map(|c| c.get_id()).collect();
+                        assert_eq!(vg, va, "route mismatch {a}->{b}");
+                    }
+                    (Err(_), Err(_)) => {}
+                    (g, a2) => panic!("reachability mismatch {a}->{b}: {g:?} vs {a2:?}"),
+                }
+            }
+        }
     }
 }
