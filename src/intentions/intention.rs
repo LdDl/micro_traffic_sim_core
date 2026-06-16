@@ -9,6 +9,7 @@ use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
 use crate::shortest_path::router::{shortest_path, path_no_goal};
+use crate::shortest_path::path::Path;
 use crate::shortest_path::router::AStarError;
 use crate::verbose::*;
 use indexmap::IndexMap;
@@ -107,6 +108,9 @@ pub fn prepare_intentions<'a, 'b>(
                 ]
             );
         }
+        // Advance the cached-route cursor to the vehicle's current cell so
+        // find_intention can follow the cache from there instead of re-running A*.
+        vehicle.advance_route_cursor();
         let routing_start = std::time::Instant::now();
         let possible_intention = find_intention(net, current_state, &vehicle, verbose)?;
         if possible_intention.should_stop {
@@ -163,6 +167,60 @@ pub fn prepare_intentions<'a, 'b>(
         );
     }
     Ok(intentions)
+}
+
+/// Classifies the edge from `a` to `b` as a forward/left/right maneuver by matching
+/// `b` against `a`'s neighbour links. Defaults to forward for a non-adjacent pair
+/// (which should not occur on a valid cached route).
+fn maneuver_between(a: &Cell, b: &Cell) -> LaneChangeType {
+    let bid = b.get_id();
+    if a.get_left_id() == bid {
+        LaneChangeType::ChangeLeft
+    } else if a.get_right_id() == bid {
+        LaneChangeType::ChangeRight
+    } else {
+        LaneChangeType::NoChange
+    }
+}
+
+/// Builds a short `Path` slice from the vehicle's cached route, starting at its
+/// current cell (`cached_route[route_idx]`), at most `max_len` cells long. Returns
+/// `None` when there is no cache, the cursor does not point at the current cell
+/// (the vehicle fell off its route), or no cell resolves - in all of which the
+/// caller falls back to a full A*. The returned path carries `cost = 0.0` (the
+/// per-tick follow does not need the route's total cost; only `process_path`'s
+/// obstacle/speed scan of the slice matters).
+fn build_path_from_cache<'a>(
+    vehicle: &Vehicle,
+    net: &'a GridRoads,
+    max_len: usize,
+) -> Option<Path<'a>> {
+    // TEMP A/B toggle: MTSC_NO_CACHE forces the per-tick full-A* path for comparison.
+    if std::env::var_os("MTSC_NO_CACHE").is_some() {
+        return None;
+    }
+    let route = &vehicle.cached_route;
+    let start = vehicle.route_idx;
+    // The cursor must point at the vehicle's current cell (advance_route_cursor ran).
+    if route.get(start) != Some(&vehicle.cell_id) {
+        return None;
+    }
+    let end = (start + max_len).min(route.len());
+    let mut vertices: Vec<&Cell> = Vec::with_capacity(end - start);
+    for &id in &route[start..end] {
+        match net.get_cell(&id) {
+            Some(c) => vertices.push(c),
+            None => break, // dangling id - stop; the prefix collected so far is valid
+        }
+    }
+    if vertices.is_empty() {
+        return None;
+    }
+    let mut maneuvers = Vec::with_capacity(vertices.len().saturating_sub(1));
+    for w in vertices.windows(2) {
+        maneuvers.push(maneuver_between(w[0], w[1]));
+    }
+    Some(Path::new(vertices, maneuvers, 0.0))
 }
 
 /// Computes the movement intention for a single vehicle.
@@ -306,6 +364,14 @@ pub fn find_intention<'a>(
     //     if _is_slowdown { " (slowdown)" } else { "" }
     // );
 
+    // Try to follow the cached route (O(speed) read) instead of a per-tick full A*.
+    // None when the vehicle has no cache or fell off it (then we fall back to A*).
+    let cache_path = if vehicle.destination >= 0 && !vehicle.confusion {
+        build_path_from_cache(vehicle, net, (speed_possible.max(1) + 2) as usize)
+    } else {
+        None
+    };
+
     let mut path = match vehicle.destination {
         // Handle case when vehicle has no destination,H
         // therefore it should be considered as keep going where possible
@@ -341,6 +407,11 @@ pub fn find_intention<'a>(
             speed_possible = intention_speed;
             new_path
         },
+        // Follow the cached route if the vehicle is on it (built above): the slice is
+        // fed through the same process_path/assembly below, replacing the per-tick
+        // full A* with an O(speed) cache read.
+        _ if cache_path.is_some() => cache_path.unwrap(),
+        // Off the cached route (or no cache): fall back to a full A*.
         _ => {
             let target_cell = net
                 .get_cell(&vehicle.destination)

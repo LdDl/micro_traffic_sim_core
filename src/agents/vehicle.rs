@@ -197,6 +197,34 @@ impl Vehicle {
         }
     }
 
+    /// Advances the cached-route cursor (`route_idx`) so that
+    /// `cached_route[route_idx] == cell_id`, searching forward from the current
+    /// cursor (the vehicle only ever moves forward along its route). No-op if the
+    /// route is empty. Returns `true` if the cursor now points at the current cell,
+    /// `false` if the current cell was not found ahead on the route (the vehicle
+    /// fell off its cached route - the caller falls back to full routing / reconnect).
+    pub fn advance_route_cursor(&mut self) -> bool {
+        if self.cached_route.is_empty() {
+            return false;
+        }
+        let mut i = self.route_idx.min(self.cached_route.len() - 1);
+        while i < self.cached_route.len() {
+            if self.cached_route[i] == self.cell_id {
+                self.route_idx = i;
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// Clears the cached route (e.g. when the destination changes), forcing the
+    /// next tick to fall back to full routing.
+    pub fn clear_cached_route(&mut self) {
+        self.cached_route.clear();
+        self.route_idx = 0;
+    }
+
     /// Increments number of transit have been made by vehicle
     ///
     /// # Returns
