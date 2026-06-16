@@ -127,6 +127,17 @@ pub struct Vehicle {
     /// @todo: for further research and development needs
     pub confusion: bool,
 
+    /// Cached route to the destination as an ordered list of cell IDs
+    /// (origin first, destination last), built by a full A* at spawn / on reroute.
+    /// Per-tick the vehicle follows this list cheaply instead of re-running A*.
+    /// Empty means "no cached route" (fall back to per-tick routing).
+    pub cached_route: Vec<CellID>,
+    /// Index into `cached_route` of the vehicle's current head cell.
+    pub route_idx: usize,
+    /// Simulation step at which the route was last (re)computed; used to schedule
+    /// the next staggered reroute.
+    pub last_reroute: i32,
+
     /// Vehicle's intention to perform maneuver and other actions
     pub intention: VehicleIntention,
 }
@@ -178,6 +189,9 @@ impl Vehicle {
                 relax_countdown: 0,
                 travel_time: 0,
                 confusion: false,
+                cached_route: Vec::new(),
+                route_idx: 0,
+                last_reroute: -1,
                 intention: VehicleIntention::default(),
             },
         }

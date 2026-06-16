@@ -3,7 +3,10 @@ use crate::grid::{
     cell::{Cell, CellID},
     road_network::GridRoads,
 };
-use crate::shortest_path::{heuristics::heuristic, path::Path};
+use crate::shortest_path::{
+    heuristics::{edge_time, heuristic},
+    path::Path,
+};
 use indexmap::IndexMap;
 use std::{cell::RefCell, cmp::Ordering, collections::BinaryHeap, fmt, rc::Rc};
 
@@ -282,6 +285,32 @@ impl<'a> Ord for AStarNode<'a> {
 ///     Err(e) => println!("Search exhausted or failed: {}", e),
 /// }
 /// ```
+// @remove: TEMP A* instrumentation (measurement only, to be reverted) ----
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+pub static ASTAR_CALLS: AtomicU64 = AtomicU64::new(0);
+pub static ASTAR_POPS: AtomicU64 = AtomicU64::new(0);
+pub static ASTAR_REEXPANDS: AtomicU64 = AtomicU64::new(0);
+pub static ASTAR_RELAX: AtomicU64 = AtomicU64::new(0);
+
+/// Returns (calls, pops, reexpands, relaxations) accumulated since the last reset.
+pub fn astar_stats_snapshot() -> (u64, u64, u64, u64) {
+    (
+        ASTAR_CALLS.load(AtomicOrdering::Relaxed),
+        ASTAR_POPS.load(AtomicOrdering::Relaxed),
+        ASTAR_REEXPANDS.load(AtomicOrdering::Relaxed),
+        ASTAR_RELAX.load(AtomicOrdering::Relaxed),
+    )
+}
+
+/// Resets the A* instrumentation counters.
+pub fn astar_stats_reset() {
+    ASTAR_CALLS.store(0, AtomicOrdering::Relaxed);
+    ASTAR_POPS.store(0, AtomicOrdering::Relaxed);
+    ASTAR_REEXPANDS.store(0, AtomicOrdering::Relaxed);
+    ASTAR_RELAX.store(0, AtomicOrdering::Relaxed);
+}
+// @remove
+
 pub fn shortest_path<'a>(
     start: &'a Cell,
     goal: &'a Cell,
@@ -289,20 +318,25 @@ pub fn shortest_path<'a>(
     maneuver_allowed: bool,
     max_depth_opt: Option<i32>,
 ) -> Result<Path<'a>, AStarError> {
+    ASTAR_CALLS.fetch_add(1, AtomicOrdering::Relaxed);
+    // TEMP: closed set is on unless ASTAR_NO_CLOSED is set (for A/B measurement).
+    // Cheap visited marker: Vec<bool> indexed by cell id (instead of a hashed set).
+    let use_closed = std::env::var_os("ASTAR_NO_CLOSED").is_none();
+    let mut finalized: Vec<bool> = vec![false; 16384];
     let max_depth = max_depth_opt.unwrap_or(0);
+    let max_speed = net.get_max_speed();
     let mut open_set = BinaryHeap::new();
 
     let start_node = Rc::new(RefCell::new(AStarNode::new(
         start,
         0.0,
-        heuristic(start, goal),
+        heuristic(start, goal, max_speed),
         None,
         LaneChangeType::NoChange,
     )));
 
     open_set.push(start_node);
 
-    let mut came_from = IndexMap::new();
     let mut g_score = IndexMap::new();
     g_score.insert(start.get_id(), 0.0);
 
@@ -311,6 +345,7 @@ pub fn shortest_path<'a>(
     while let Some(current_node) = open_set.pop() {
         // println!("pop with id: {} {} {}", current_node.borrow().cell.get_id(), current_node.borrow().f_cost, current_node.borrow().g_cost);
         research_vertices += 1;
+        ASTAR_POPS.fetch_add(1, AtomicOrdering::Relaxed);
 
         if max_depth > 0 && research_vertices >= max_depth {
             return Ok(reconstruct_path(&current_node));
@@ -320,6 +355,17 @@ pub fn shortest_path<'a>(
         let current_cell = current_node.borrow().cell;
         if current_cell.get_id() == goal.get_id() {
             return Ok(reconstruct_path(&current_node));
+        }
+
+        // Closed set: with a consistent heuristic the first pop of a cell is already
+        // optimal, so any later pop of the same cell is a stale duplicate - skip it.
+        let cid = current_cell.get_id() as usize;
+        if use_closed && cid < finalized.len() && finalized[cid] {
+            ASTAR_REEXPANDS.fetch_add(1, AtomicOrdering::Relaxed);
+            continue;
+        }
+        if use_closed && cid < finalized.len() {
+            finalized[cid] = true;
         }
 
         let forward_id = current_cell.get_forward_id();
@@ -333,7 +379,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::NoChange,
                     &mut g_score,
                     &mut open_set,
-                    &mut came_from,
+                    max_speed,
                 );
             } else {
                 return Err(AStarError::BadData {
@@ -356,7 +402,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::ChangeLeft,
                     &mut g_score,
                     &mut open_set,
-                    &mut came_from,
+                    max_speed,
                 );
             } else {
                 return Err(AStarError::BadData { cell_id: left_id });
@@ -374,7 +420,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::ChangeRight,
                     &mut g_score,
                     &mut open_set,
-                    &mut came_from,
+                    max_speed,
                 );
             } else {
                 return Err(AStarError::BadData { cell_id: right_id });
@@ -417,22 +463,36 @@ fn process_neighbor<'a>(
     neighbor_cell: &'a Cell,
     neighbor_maneuver: LaneChangeType,
     g_score: &mut IndexMap<i64, f64>,
-    // open_set: &mut BinaryHeap<AStarNode<'a>>,
-    // came_from: &mut HashMap<i64, AStarNode<'a>>,
     open_set: &mut BinaryHeap<Rc<RefCell<AStarNode<'a>>>>,
-    came_from: &mut IndexMap<i64, Rc<RefCell<AStarNode<'a>>>>,
+    max_speed: f64,
 ) {
-    let tentative_g_score =
-        current_node.borrow().g_cost + heuristic(current_node.borrow().cell, neighbor_cell);
+    // Edge cost = travel time. Use the precomputed per-cell time (static graph) when
+    // available, otherwise compute it on the fly. Both yield the same value, so routes
+    // are identical whether or not the grid was precomputed.
+    let edge_cost = {
+        let cur = current_node.borrow();
+        let pre = match neighbor_maneuver {
+            LaneChangeType::ChangeLeft => cur.cell.get_left_cost(),
+            LaneChangeType::ChangeRight => cur.cell.get_right_cost(),
+            _ => cur.cell.get_forward_cost(),
+        };
+        if pre.is_nan() {
+            edge_time(cur.cell, neighbor_cell)
+        } else {
+            pre
+        }
+    };
+    let tentative_g_score = current_node.borrow().g_cost + edge_cost;
     let neighbor_cell_id = neighbor_cell.get_id();
     if tentative_g_score < *g_score.get(&neighbor_cell_id).unwrap_or(&f64::INFINITY) {
+        ASTAR_RELAX.fetch_add(1, AtomicOrdering::Relaxed);
         // println!("scan {} {}", neighbor_cell_id, tentative_g_score);
         g_score.insert(neighbor_cell_id, tentative_g_score);
 
         let neighbor = Rc::new(RefCell::new(AStarNode::new(
             neighbor_cell,
             tentative_g_score,
-            tentative_g_score + heuristic(neighbor_cell, goal),
+            tentative_g_score + heuristic(neighbor_cell, goal, max_speed),
             // None,
             Some(current_node.clone()),
             neighbor_maneuver,
@@ -445,7 +505,6 @@ fn process_neighbor<'a>(
         //     neighbor.borrow().g_cost
         // );
         open_set.push(neighbor.to_owned());
-        came_from.insert(neighbor_cell_id, current_node);
     }
 }
 
@@ -621,7 +680,7 @@ pub fn path_no_goal<'a>(
             // Calculate cost as sum of heuristic costs
             let mut cost = 0.0;
             for i in 1..vertices.len() {
-                cost += heuristic(vertices[i - 1], vertices[i]);
+                cost += edge_time(vertices[i - 1], vertices[i]);
             }
             return Ok(Path::new(vertices, maneuvers, cost));
         }
@@ -633,7 +692,7 @@ pub fn path_no_goal<'a>(
             // Can't reach requested depth, but at least 2 cells in path
             let mut cost = 0.0;
             for i in 1..vertices.len() {
-                cost += heuristic(vertices[i - 1], vertices[i]);
+                cost += edge_time(vertices[i - 1], vertices[i]);
             }
             return Ok(Path::new(vertices, maneuvers, cost));
         }
@@ -742,7 +801,9 @@ mod tests {
             path_result.err()
         );
         let path = path_result.unwrap();
-        let correct_cost = 1111.414213562373;
+        // Cost is now travel TIME = distance / speed. The one-lane generator uses
+        // speed_limit 3, so the time cost is the former distance cost (1111.414...) / 3.
+        let correct_cost = 370.4714045207875;
         assert!(
             (path.cost() - correct_cost).abs() < 0.001,
             "Cost should be {}, but got {}",

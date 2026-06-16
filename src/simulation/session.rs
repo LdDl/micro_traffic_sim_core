@@ -444,7 +444,23 @@ impl Session {
                 continue;
             }
             // Generate vehicle for this trip
-            if let Some(generated_vehicle) = self.generate_vehicle(trip, *trip_id) {
+            if let Some(mut generated_vehicle) = self.generate_vehicle(trip, *trip_id) {
+                // Build the cached route once at spawn (full A* to the destination).
+                // Per-tick the vehicle follows this route instead of re-running A*.
+                if generated_vehicle.destination >= 0 {
+                    let net = self.grids_storage.get_vehicles_net_ref();
+                    if let (Some(s), Some(g)) = (
+                        net.get_cell(&generated_vehicle.cell_id),
+                        net.get_cell(&generated_vehicle.destination),
+                    ) {
+                        if let Ok(path) = crate::shortest_path::router::shortest_path(s, g, net, true, None) {
+                            generated_vehicle.cached_route =
+                                path.vertices().iter().map(|c| c.get_id()).collect();
+                            generated_vehicle.route_idx = 0;
+                            generated_vehicle.last_reroute = self.steps;
+                        }
+                    }
+                }
                 if self.verbose.is_at_least(VerboseLevel::Additional) {
                     self.verbose.log_with_fields(
                         EVENT_GEN_VEHICLES,

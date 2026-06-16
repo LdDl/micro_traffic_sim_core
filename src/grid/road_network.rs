@@ -10,6 +10,10 @@ use crate::grid::cell::{CellID, Cell};
 pub struct GridRoads {
     // A `HashMap` mapping each `CellID` to its corresponding `Cell` object.
     cells: HashMap<CellID, Cell>,
+    /// Maximum cell speed limit across the network (cells/tick, clamped to >= 1).
+    /// Maintained incrementally in `add_cell`; used as the divisor in the
+    /// time-based A* heuristic to keep it admissible. Defaults to 1.0.
+    max_speed: f64,
 }
 
 impl GridRoads {
@@ -26,7 +30,14 @@ impl GridRoads {
     pub fn new() -> Self {
         GridRoads {
             cells: HashMap::new(),
+            max_speed: 1.0,
         }
+    }
+
+    /// Maximum cell speed limit across the network (cells/tick, >= 1).
+    /// Divisor for the admissible time-based A* heuristic.
+    pub fn get_max_speed(&self) -> f64 {
+        self.max_speed
     }
 
     /// Adds a `GridRoads` to the grid.
@@ -47,7 +58,44 @@ impl GridRoads {
     /// grid.add_cell(cell);
     /// ```
     pub fn add_cell(&mut self, cell: Cell) {
+        let speed = (cell.get_speed_limit() as f64).max(1.0);
+        if speed > self.max_speed {
+            self.max_speed = speed;
+        }
         self.cells.insert(cell.get_id(), cell);
+    }
+
+    /// Precomputes the edge cost from every cell to its forward, left and right
+    /// neighbour and stores it on the cell. The cost is free-flow TRAVEL TIME
+    /// (edge length / source-cell speed limit, see [`crate::shortest_path::heuristics::edge_time`]).
+    /// The graph is static, so these costs never change during a session;
+    /// precomputing them removes the per-relaxation haversine + division from the
+    /// A* hot path. Idempotent and O(cells).
+    pub fn precompute_edge_costs(&mut self) {
+        use crate::geom::{Point, PointType};
+        // Snapshot neighbour points first (immutable), then write costs back.
+        let points: HashMap<CellID, PointType> =
+            self.cells.iter().map(|(id, c)| (*id, *c.get_point())).collect();
+        let mut max_speed = 1.0_f64;
+        for cell in self.cells.values_mut() {
+            let here = *cell.get_point();
+            let speed = (cell.get_speed_limit() as f64).max(1.0);
+            if speed > max_speed {
+                max_speed = speed;
+            }
+            // Edge cost = travel time = distance / source speed.
+            let time = |to_id: CellID| -> f64 {
+                match points.get(&to_id) {
+                    Some(p) => here.distance_to(p) / speed,
+                    None => f64::NAN,
+                }
+            };
+            let f = time(cell.get_forward_id());
+            let l = time(cell.get_left_id());
+            let r = time(cell.get_right_id());
+            cell.set_edge_costs(f, l, r);
+        }
+        self.max_speed = max_speed;
     }
 
     /// Retrieves a reference to a `Cell` in the grid by its `CellID`.
