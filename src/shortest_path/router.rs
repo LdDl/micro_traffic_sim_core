@@ -550,6 +550,75 @@ fn reconstruct_path<'a>(current_node: &Rc<RefCell<AStarNode<'a>>>) -> Path<'a> {
     Path::new(vertices, maneuvers, cost)
 }
 
+/// Bounded breadth-first search that reconnects a vehicle that fell off its cached
+/// route back onto it. Searches forward/left/right from `from` (up to `max_depth`
+/// expanded cells) for the nearest cell that lies on `cache` at index >= `min_idx`,
+/// and returns the spliced full route: the reconnect prefix (`from` ... reconnect
+/// cell) followed by the remaining cache tail. Returns `None` if no cache cell is
+/// reachable within the bound (caller then falls back to a full A*).
+///
+/// Cheaper than a full A* to the destination, and SUMO-faithful "get back on route"
+/// behaviour. A dangling neighbour id is skipped (not a hard error) - this fixes the
+/// reference-branch reconnect bug where one bad id aborted the whole search.
+pub fn reconnect_to_cache(
+    from: CellID,
+    cache: &[CellID],
+    min_idx: usize,
+    net: &GridRoads,
+    max_depth: usize,
+) -> Option<Vec<CellID>> {
+    use std::collections::VecDeque;
+    if cache.is_empty() {
+        return None;
+    }
+    // Map each cache cell (from min_idx on) to its index, to detect a hit quickly.
+    let mut cache_idx: std::collections::HashMap<CellID, usize> = std::collections::HashMap::new();
+    for (i, &c) in cache.iter().enumerate().skip(min_idx) {
+        cache_idx.entry(c).or_insert(i); // first (earliest) occurrence wins
+    }
+
+    let mut parent: std::collections::HashMap<CellID, CellID> = std::collections::HashMap::new();
+    let mut visited: std::collections::HashSet<CellID> = std::collections::HashSet::new();
+    let mut queue: VecDeque<(CellID, usize)> = VecDeque::new();
+    queue.push_back((from, 0));
+    visited.insert(from);
+
+    while let Some((cell_id, depth)) = queue.pop_front() {
+        // Hit: cell_id is on the cache ahead - splice and return.
+        if let Some(&idx) = cache_idx.get(&cell_id) {
+            if cell_id != from {
+                // Reconstruct the reconnect prefix (from -> ... -> cell_id).
+                let mut prefix = vec![cell_id];
+                let mut cur = cell_id;
+                while let Some(&p) = parent.get(&cur) {
+                    prefix.push(p);
+                    cur = p;
+                }
+                prefix.reverse(); // now [from, ..., cell_id]
+                // Splice: prefix + cache tail after the reconnect cell.
+                let mut route = prefix;
+                route.extend_from_slice(&cache[idx + 1..]);
+                return Some(route);
+            }
+        }
+        if depth >= max_depth {
+            continue;
+        }
+        let cell = match net.get_cell(&cell_id) {
+            Some(c) => c,
+            None => continue, // dangling id - skip, do not abort the whole search
+        };
+        for nb in [cell.get_forward_id(), cell.get_left_id(), cell.get_right_id()] {
+            if nb > -1 && !visited.contains(&nb) {
+                visited.insert(nb);
+                parent.insert(nb, cell_id);
+                queue.push_back((nb, depth + 1));
+            }
+        }
+    }
+    None
+}
+
 /// Finds a path of exactly `depth` steps starting from `start`, ignoring any goal.
 ///
 /// This function attempts to build a path of a specified length by moving forward

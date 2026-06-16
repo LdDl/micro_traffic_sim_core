@@ -8,7 +8,7 @@ use crate::maneuver::LaneChangeType;
 use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
-use crate::shortest_path::router::{shortest_path, path_no_goal};
+use crate::shortest_path::router::{shortest_path, path_no_goal, reconnect_to_cache};
 use crate::shortest_path::path::Path;
 use crate::shortest_path::router::AStarError;
 use crate::verbose::*;
@@ -78,6 +78,9 @@ pub fn prepare_intentions<'a, 'b>(
     current_state: &HashMap<CellID, VehicleID>,
     vehicles: &'b mut IndexMap<VehicleID, Vehicle>,
     verbose: &LocalLogger,
+    steps: i32,
+    reroute_period: i32,
+    reconnect_max_depth: usize,
 ) -> Result<Intentions, IntentionError> {
     let mut intentions = Intentions::new();
     let track_routing = verbose.is_at_least(VerboseLevel::Main);
@@ -108,9 +111,9 @@ pub fn prepare_intentions<'a, 'b>(
                 ]
             );
         }
-        // Advance the cached-route cursor to the vehicle's current cell so
-        // find_intention can follow the cache from there instead of re-running A*.
-        vehicle.advance_route_cursor();
+        // Keep the cached route fresh: advance the cursor, periodically reroute,
+        // and reconnect (or full-A* rebuild) when the vehicle fell off its route.
+        refresh_route(net, vehicle, steps, reroute_period, reconnect_max_depth);
         let routing_start = std::time::Instant::now();
         let possible_intention = find_intention(net, current_state, &vehicle, verbose)?;
         if possible_intention.should_stop {
@@ -167,6 +170,57 @@ pub fn prepare_intentions<'a, 'b>(
         );
     }
     Ok(intentions)
+}
+
+/// Keeps a vehicle's cached route usable for this tick:
+/// 1. advances the route cursor to the current cell;
+/// 2. if the cursor still matches and no periodic reroute is due, keeps the cache;
+/// 3. if the vehicle fell off its route, tries a cheap bounded reconnect back onto it;
+/// 4. otherwise (periodic reroute due, or reconnect failed) rebuilds the route with a
+///    fresh full A*.
+/// A no-op for destination-less or confused vehicles.
+fn refresh_route(
+    net: &GridRoads,
+    vehicle: &mut Vehicle,
+    steps: i32,
+    reroute_period: i32,
+    reconnect_max_depth: usize,
+) {
+    // TEMP A/B: MTSC_NO_CACHE disables the whole cached-route system (full A* per tick).
+    if vehicle.destination < 0 || vehicle.confusion || std::env::var_os("MTSC_NO_CACHE").is_some() {
+        return;
+    }
+    let on_route = vehicle.advance_route_cursor();
+    let due = reroute_period > 0 && (steps - vehicle.last_reroute) >= reroute_period;
+    if on_route && !due {
+        return;
+    }
+    // Off-route with a cache present: try a cheap bounded reconnect first.
+    // TEMP A/B: MTSC_NO_RECONNECT forces the full-A* rebuild path instead.
+    if !on_route && !vehicle.cached_route.is_empty() && std::env::var_os("MTSC_NO_RECONNECT").is_none() {
+        if let Some(spliced) = reconnect_to_cache(
+            vehicle.cell_id,
+            &vehicle.cached_route,
+            vehicle.route_idx,
+            net,
+            reconnect_max_depth,
+        ) {
+            vehicle.cached_route = spliced;
+            vehicle.route_idx = 0;
+            return; // a reconnect is not a reroute - keep last_reroute
+        }
+    }
+    // Periodic reroute, or reconnect failed: rebuild the full route with a fresh A*.
+    if let (Some(s), Some(g)) = (
+        net.get_cell(&vehicle.cell_id),
+        net.get_cell(&vehicle.destination),
+    ) {
+        if let Ok(path) = shortest_path(s, g, net, true, None) {
+            vehicle.cached_route = path.vertices().iter().map(|c| c.get_id()).collect();
+            vehicle.route_idx = 0;
+            vehicle.last_reroute = steps;
+        }
+    }
 }
 
 /// Classifies the edge from `a` to `b` as a forward/left/right maneuver by matching

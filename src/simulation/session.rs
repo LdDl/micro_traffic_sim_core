@@ -146,6 +146,32 @@ pub struct Session {
 
     /// Cumulative count of vehicles that were lost (reached death zone without reaching destination)
     vehicles_lost: i32,
+
+    /// Routing configuration (SUMO-style). See [`RoutingOptions`].
+    routing: RoutingOptions,
+}
+
+/// SUMO-style routing configuration. Mirrors `device.rerouting.*` options.
+#[derive(Debug, Clone)]
+pub struct RoutingOptions {
+    /// How often (in ticks) a vehicle re-plans its cached route. `0` (the SUMO
+    /// default) disables periodic rerouting - the spawn route is kept and only
+    /// refreshed when the vehicle falls off it. `>0` re-runs a full A* every
+    /// `reroute_period` ticks (staggered by spawn time), the hook congestion-aware
+    /// routing (smoothed weights) will use.
+    pub reroute_period: i32,
+    /// Maximum BFS depth for `reconnect_to_cache` when a vehicle falls off its
+    /// route, before giving up and doing a full A*.
+    pub reconnect_max_depth: usize,
+}
+
+impl Default for RoutingOptions {
+    fn default() -> Self {
+        RoutingOptions {
+            reroute_period: 0,
+            reconnect_max_depth: 10,
+        }
+    }
 }
 
 impl Session {
@@ -174,6 +200,7 @@ impl Session {
             world_srid: picked_srid,
             vehicles_completed: 0,
             vehicles_lost: 0,
+            routing: RoutingOptions::default(),
         }
     }
 
@@ -203,6 +230,7 @@ impl Session {
             world_srid: picked_srid,
             vehicles_completed: 0,
             vehicles_lost: 0,
+            routing: RoutingOptions::default(),
         }
     }
 
@@ -234,6 +262,16 @@ impl Session {
     /// Sets verbose level for the session
     pub fn set_verbose_level(&mut self, verbose: VerboseLevel) {
         self.verbose.set_level(verbose);
+    }
+
+    /// Sets the SUMO-style routing options (rerouting period, reconnect depth).
+    pub fn set_routing_options(&mut self, options: RoutingOptions) {
+        self.routing = options;
+    }
+
+    /// Returns the current routing options.
+    pub fn get_routing_options(&self) -> &RoutingOptions {
+        &self.routing
     }
 
     /// Returns a reference to the cell with the given ID if it exists in the vehicles grid.
@@ -356,9 +394,18 @@ impl Session {
                 }
             }
             TripType::Random => {
-                // Generate vehicle based on probability
-                let mut rng = rand::rng();
-                let norm_value: f64 = rng.random();
+                // Generate vehicle based on probability.
+                // TEMP: MTSC_DET_SPAWN makes the spawn decision deterministic
+                // (hash of step+trip) so A/B runs see an identical spawn sequence.
+                let norm_value: f64 = if std::env::var_os("MTSC_DET_SPAWN").is_some() {
+                    use std::hash::{Hash, Hasher};
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    (self.steps, trip_id).hash(&mut h);
+                    (h.finish() >> 11) as f64 / ((1u64 << 53) as f64)
+                } else {
+                    let mut rng = rand::rng();
+                    rng.random()
+                };
                 norm_value < trip.probability
             }
             _ => {
@@ -564,7 +611,7 @@ impl Session {
         let tl_states_dump = self.grids_storage.tick_traffic_lights(&self.verbose)?;
 
         // 4. Create intentions for all vehicles
-    let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose)?;
+    let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose, self.steps, self.routing.reroute_period, self.routing.reconnect_max_depth)?;
 
         // 5. Collect conflicts
         let conflicts_data = collect_conflicts(
