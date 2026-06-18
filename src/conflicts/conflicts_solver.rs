@@ -33,6 +33,19 @@ impl fmt::Display for ConflictSolverError {
     }
 }
 
+/// True if the conflict has at least one desperate (patience-exhausted) participant and is
+/// not a physical Tail conflict - i.e. it will be resolved by the patience override.
+fn conflict_has_desperate(c: &CellConflict, vehicles: &IndexMap<VehicleID, Vehicle>) -> bool {
+    let is_physical = matches!(
+        c.conflict_type,
+        ConflictType::Tail | ConflictType::SelfTail | ConflictType::TailCrossLaneChange
+    );
+    !is_physical
+        && c.participants
+            .iter()
+            .any(|id| vehicles.get(id).map(|v| v.is_desperate()).unwrap_or(false))
+}
+
 /// Solves conflicts between vehicles based on their intentions and priority for the current simulation step.
 ///
 /// # Arguments
@@ -77,9 +90,18 @@ pub fn solve_conflicts<'b>(
     }
     let mut trajectories_conflicts: Vec<CellConflict> = Vec::new();
     let mut conflict_zones_conflicts: Vec<CellConflict> = Vec::new();
-    // Cells already granted to a desperate (patience-override) winner this tick, so two
-    // separate conflicts cannot force two vehicles into the same cell.
+    // Cells already granted to a desperate (patience-override) winner this tick, so no later
+    // grant (desperate OR normal) can put a second vehicle on the same cell.
     let mut claimed_cells: HashSet<CellID> = HashSet::new();
+    // Resolve desperate conflicts FIRST so claimed_cells is complete before any normal grant;
+    // otherwise a normal winner processed earlier could take a cell a later desperate winner
+    // also claims. Partition preserves relative order within each group (determinism).
+    let conflicts_data: Vec<CellConflict> = {
+        let (mut desperate_first, rest): (Vec<CellConflict>, Vec<CellConflict>) =
+            conflicts_data.into_iter().partition(|c| conflict_has_desperate(c, vehicles));
+        desperate_first.extend(rest);
+        desperate_first
+    };
     for conflict in conflicts_data {
         if conflict.participants.len() < 2 {
             return Err(ConflictSolverError::InsufficientParticipants(
@@ -120,23 +142,33 @@ pub fn solve_conflicts<'b>(
                 .max_by_key(|&(_, wait)| wait);
             if let Some((win_idx, _)) = desperate_winner {
                 let win_id = conflict.participants[win_idx];
-                let target = vehicles
+                // The cell the winner actually ENTERS this tick is its first path cell - the
+                // contested intermediate, not the far head cell of a multi-cell move. Reserving
+                // that cell (and clamping the winner to a one-cell step below) keeps it on a
+                // single known cell instead of sweeping unreserved intermediate cells.
+                let entered = vehicles
                     .get(&win_id)
-                    .map(|v| v.intention.intention_cell_id)
+                    .map(|v| {
+                        v.intention
+                            .intermediate_cells
+                            .first()
+                            .copied()
+                            .unwrap_or(v.intention.intention_cell_id)
+                    })
                     .unwrap_or(-1);
-                if target >= 0 {
+                if entered >= 0 {
                     // Granted unless another desperate winner already took this cell this
                     // tick; if taken, the cell is unavailable to everyone here -> block all
                     // (preserves the one-occupant-per-cell invariant across conflicts).
-                    let granted = claimed_cells.insert(target);
+                    let granted = claimed_cells.insert(entered);
                     if verbose.is_at_least(VerboseLevel::Additional) {
                         verbose.log_with_fields(
                             EVENT_CONFLICT_SOLVE,
-                            if granted { "Patience override - desperate vehicle wins" } else { "Patience override - target cell already claimed, blocking" },
+                            if granted { "Patience override - desperate vehicle wins" } else { "Patience override - entered cell already claimed, blocking" },
                             &[
                                 ("cell", &conflict.cell_id),
                                 ("winner_id", &win_id),
-                                ("target_cell", &target),
+                                ("entered_cell", &entered),
                                 ("conflict_type", &format!("{:?}", conflict.conflict_type)),
                             ],
                         );
@@ -144,10 +176,11 @@ pub fn solve_conflicts<'b>(
                     for (i, participant_id) in conflict.participants.iter().enumerate() {
                         if let Some(v) = vehicles.get_mut(participant_id) {
                             if granted && i == win_idx {
-                                // Lane-change winners advance exactly one cell.
-                                if v.intention.intention_maneuver != LaneChangeType::NoChange {
-                                    v.intention.intention_speed = 1;
-                                }
+                                // Clamp the winner to a single-cell step into `entered` so it
+                                // occupies exactly the reserved cell and never sweeps unreserved
+                                // intermediate cells. This also rebuilds the tail so a stale
+                                // multi-cell tail does not land ahead of the clamped head.
+                                v.set_single_step_intention(entered);
                             } else {
                                 v.block_with_speed(0);
                             }
@@ -233,6 +266,17 @@ pub fn solve_conflicts<'b>(
             );
         }
 
+        // If the contested cell was already taken by a desperate winner (resolved first),
+        // nobody in this conflict may enter it: block all participants.
+        if conflict.cell_id >= 0 && claimed_cells.contains(&conflict.cell_id) {
+            for participant_id in &conflict.participants {
+                if let Some(v) = vehicles.get_mut(participant_id) {
+                    v.block_with_speed(0);
+                }
+            }
+            continue;
+        }
+
         let priority_index = conflict.priority_participant_index;
         for (i, participant_id) in conflict.participants.iter().enumerate() {
             let participant = vehicles.get_mut(participant_id).ok_or_else(|| ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", participant_id)))?;
@@ -292,17 +336,24 @@ pub fn solve_conflicts<'b>(
             }
         }
         if need_to_solve && left_maneuver_index.is_some() && right_maneuver_index.is_some() {
-            // Vehicle which is trying to do maneuver to the right should stop
-            if let Some(right_index) = right_maneuver_index {
-                let right_id = conflict.participants[right_index];
-                if let Some(v) = vehicles.get_mut(&right_id) { v.block_with_speed(0); }
-            }
-            // Vehicle which is trying to do maneuver to the left is allowed to do so
-            // IntentionManeuver is saved
-            // intention_cell is saved
-            // Explicitly make speed to be equal 1 (just in case)
-            if let Some(left_index) = left_maneuver_index {
-                let left_id = conflict.participants[left_index];
+            // The left maneuver normally wins; but if its target cell was already taken by a
+            // desperate winner, neither may move into it -> block both.
+            let left_id = conflict.participants[left_maneuver_index.unwrap()];
+            let left_target = vehicles.get(&left_id).map(|v| v.intention.intention_cell_id).unwrap_or(-1);
+            if left_target >= 0 && claimed_cells.contains(&left_target) {
+                for participant_id in &conflict.participants {
+                    if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(0); }
+                }
+            } else {
+                // Vehicle which is trying to do maneuver to the right should stop
+                if let Some(right_index) = right_maneuver_index {
+                    let right_id = conflict.participants[right_index];
+                    if let Some(v) = vehicles.get_mut(&right_id) { v.block_with_speed(0); }
+                }
+                // Vehicle which is trying to do maneuver to the left is allowed to do so
+                // IntentionManeuver is saved
+                // intention_cell is saved
+                // Explicitly make speed to be equal 1 (just in case)
                 if let Some(v) = vehicles.get_mut(&left_id) { v.intention.intention_speed = 1; }
             }
         }
@@ -323,6 +374,16 @@ pub fn solve_conflicts<'b>(
         }
         
         let priority_index = conflict.priority_participant_index;
+        // If the zone winner's target cell was already taken by a desperate winner, it may
+        // not enter it either: block all participants (preserve one-occupant-per-cell).
+        let prio_id = conflict.participants[priority_index];
+        let prio_target = vehicles.get(&prio_id).map(|v| v.intention.intention_cell_id).unwrap_or(-1);
+        if prio_target >= 0 && claimed_cells.contains(&prio_target) {
+            for participant_id in &conflict.participants {
+                if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(0); }
+            }
+            continue;
+        }
         for (i, participant_id) in conflict.participants.iter().enumerate() {
             if i != priority_index {
                 if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(1); }

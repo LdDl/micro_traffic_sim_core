@@ -298,6 +298,11 @@ pub fn movement(
                 // Confusion means "current destination proven unreachable"; the verdict
                 // does not transfer to a newly assigned destination
                 vehicle.confusion = false;
+                // The cached route still ends at the OLD stop the bus is sitting on; without
+                // clearing it, advance_route_cursor would report on_route=true (current cell == last route cell)
+                // and refresh_route would keep the dead cache, stalling the bus at the stop.
+                // Clear it so next tick rebuilds a route to the new destination.
+                vehicle.clear_cached_route();
                 vehicle.relax_countdown_reset();
             }
         }

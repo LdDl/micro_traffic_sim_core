@@ -743,12 +743,13 @@ pub fn find_alternate_intention<'a>(
     // Before blocking, try to keep rolling forward: a driver stuck next to a jammed
     // lane drives along it and merges at a gap further ahead.
     //
-    // Rolling forward is the SOLE cause of lost vehicles: it can push the vehicle off
-    // its route into a one-way pocket from which the destination is unreachable, after
-    // which the per-tick A* returns NoPathFound, confusion latches, and the vehicle is
-    // despawned as `lost`. So a non-confused vehicle is allowed to roll forward only
-    // while it can still get back to its route (`forward_keeps_reachable`); otherwise
-    // it waits in place (a recoverable stall) instead of driving into a trap.
+    // An unguarded roll can push the vehicle off its route into a one-way pocket from
+    // which the destination is unreachable, after which the per-tick A* returns
+    // NoPathFound, confusion latches, and the vehicle is despawned as `lost` (before this
+    // guard existed, this was measured to be the sole cause of lost vehicles). So a
+    // non-confused vehicle is allowed to roll forward only while it can still get back to
+    // its route (`forward_keeps_reachable`); otherwise it waits in place (a recoverable
+    // stall) instead of driving into a trap.
     //
     // A vehicle that is ALREADY confused has no reachable route to protect, so it keeps
     // rolling unconditionally - that is what carries it to a Death zone for removal

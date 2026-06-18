@@ -528,6 +528,29 @@ impl Vehicle {
         // No need to update tails cells. It is done in movement.rs
     }
 
+    /// Rewrites this vehicle's intention to a single forward step into `target` (an
+    /// adjacent cell). Used by the patience override to clamp a desperate winner to one
+    /// cell. Crucially it also rebuilds `tail_intention_cells` consistently with the
+    /// one-cell step -- the tail shifts forward and the vacated current cell becomes the
+    /// new nearest tail cell (same convention as `extract_tail_intention`'s 1-cell case).
+    /// Without this, a stale multi-cell `tail_intention_cells` from the original (longer)
+    /// intention would be applied in movement and land the body ahead of / on top of the
+    /// clamped head.
+    pub fn set_single_step_intention(&mut self, target: CellID) {
+        self.intention.intention_cell_id = target;
+        self.intention.intermediate_cells.clear();
+        self.intention.intention_speed = 1;
+        if self.tail_cells.is_empty() {
+            self.intention.tail_intention_cells = Vec::new();
+        } else {
+            // Drop the furthest tail cell, shift the rest forward, append the cell the
+            // head is vacating (current cell_id) as the new nearest-to-head tail cell.
+            let mut tail = self.tail_cells[1..].to_vec();
+            tail.push(self.cell_id);
+            self.intention.tail_intention_cells = tail;
+        }
+    }
+
     /// The vehicle's patience threshold in ticks: how long it tolerates losing
     /// contested cells before overriding right-of-way. Scaled by cooperativity so
     /// every vehicle eventually forces (the threshold is always finite), but more
