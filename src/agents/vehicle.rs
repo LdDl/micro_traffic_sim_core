@@ -531,7 +531,7 @@ impl Vehicle {
     /// Rewrites this vehicle's intention to a single forward step into `target` (an
     /// adjacent cell). Used by the patience override to clamp a desperate winner to one
     /// cell. Crucially it also rebuilds `tail_intention_cells` consistently with the
-    /// one-cell step -- the tail shifts forward and the vacated current cell becomes the
+    /// one-cell step - the tail shifts forward and the vacated current cell becomes the
     /// new nearest tail cell (same convention as `extract_tail_intention`'s 1-cell case).
     /// Without this, a stale multi-cell `tail_intention_cells` from the original (longer)
     /// intention would be applied in movement and land the body ahead of / on top of the

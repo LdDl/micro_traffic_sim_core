@@ -175,8 +175,21 @@ pub fn movement(
         vehicle.apply_intention();
         vehicle.is_conflict_participant = false;
 
+        // The cell the vehicle ACTUALLY ends on this tick: a dwelling vehicle (relax_countdown > 0)
+        // stays put even if it intended to move. Head, tail, timers and bearing must all
+        // key off this single decision-otherwise a dwelling tailed vehicle's tail would
+        // advance while its head stays, leaving the head inside its own tail.
+        let final_cell = if vehicle.get_relax_countdown() > 0 {
+            vehicle.relax_countdown_dec();
+            // Stay in current cell
+            vehicle.cell_id
+        } else {
+            vehicle.intention.intention_cell_id
+        };
+        let moved = final_cell != vehicle.cell_id;
+
         // Update bearing depending on intention maneuver
-        if vehicle.cell_id != vehicle.intention.intention_cell_id {
+        if moved {
             // vehicle is moving? then set bearing based on actual movement
             let cell_from = net.get_cell(&vehicle.cell_id)
                 .ok_or(MovementError::CellNotFound {
@@ -218,7 +231,7 @@ pub fn movement(
         }
 
         // Decrement timers only if vehicle moved
-        if vehicle.cell_id != vehicle.intention.intention_cell_id {
+        if moved {
             // Decrement timers
             if vehicle.timer_non_acceleration > 0 {
                 vehicle.timer_non_acceleration -= 1;
@@ -232,7 +245,7 @@ pub fn movement(
         }
 
         // Update tail cells only if vehicle is actually moving
-        if vehicle.cell_id != vehicle.intention.intention_cell_id {
+        if moved {
             let tail_size = vehicle.tail_cells.len();
             if tail_size > 0 {
                 let tail_intention = vehicle.intention.tail_intention_cells.clone();
@@ -249,18 +262,10 @@ pub fn movement(
             vehicle.timer_non_slowdown = tail_size;
         }
 
-        // Determine final cell (considering relax countdown)
-        let final_cell = if vehicle.get_relax_countdown() > 0 {
-            vehicle.relax_countdown_dec();
-            vehicle.cell_id // Stay in current cell
-        } else {
-            vehicle.intention.intention_cell_id
-        };
-
         // Patience accrual: reset on any real move, otherwise the vehicle is stuck this
         // tick. Once wait_ticks reaches the patience threshold the vehicle is "desperate"
         // and overrides right-of-way in the conflict solver (see Vehicle::is_desperate).
-        if final_cell != vehicle.cell_id {
+        if moved {
             vehicle.wait_ticks = 0;
         } else {
             vehicle.wait_ticks = vehicle.wait_ticks.saturating_add(1);
