@@ -349,3 +349,58 @@ pub fn movement(
 
     Ok((vehicles_completed, vehicles_lost))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::{VehicleIntention, VehiclesStorage};
+    use crate::geom::new_point;
+    use crate::grid::cell::Cell;
+
+    /// Regression: a dwelling tailed vehicle (relax_countdown > 0) that intended to move
+    /// must NOT advance its tail while its head stays - head and tail share the single
+    /// `final_cell`/`moved` decision. Without it, the tail moved (head ending inside its
+    /// own tail).
+    #[test]
+    fn test_dwelling_tailed_vehicle_tail_does_not_advance() {
+        // Linear road 1 -> 2 -> 3 -> 4.
+        let mut net = GridRoads::new();
+        for (id, fwd, x) in [(1i64, 2i64, 0.0), (2, 3, 1.0), (3, 4, 2.0), (4, -1, 3.0)] {
+            net.add_cell(
+                Cell::new(id)
+                    .with_point(new_point(x, 0.0, None))
+                    .with_forward_node(fwd)
+                    .with_speed_limit(3)
+                    .build(),
+            );
+        }
+
+        // Tailed vehicle: head at 3, tail [1,2]; dwelling (relax_countdown > 0) but its
+        // intention is a forward move to 4 with the already-advanced tail [2,3].
+        let mut v = Vehicle::new(1)
+            .with_cell(3)
+            .with_tail_size(2, vec![1, 2])
+            .with_destination(4)
+            .with_relax_time(5)
+            .build();
+        v.relax_countdown_reset();
+        assert!(v.get_relax_countdown() > 0, "precondition: vehicle is dwelling");
+        v.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 4,
+            intention_speed: 1,
+            // the tail it WOULD have if it actually moved
+            tail_intention_cells: vec![2, 3],
+            ..Default::default()
+        });
+
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, v);
+        movement(&net, &mut vehicles, &LocalLogger::none()).unwrap();
+
+        let v = vehicles.get(&1).expect("vehicle stays (dwelling, not removed)");
+        assert_eq!(v.cell_id, 3, "head stays put while dwelling");
+        assert_eq!(v.tail_cells, vec![1, 2], "tail must NOT advance while the head dwells");
+        assert!(!v.tail_cells.contains(&v.cell_id), "head cell is not inside its own tail");
+    }
+}
