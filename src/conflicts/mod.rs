@@ -75,5 +75,7 @@ mod conflicts_solver;
 mod conflicts_test;
 #[cfg(test)]
 mod conflicts_zones_test;
+#[cfg(test)]
+mod conflicts_desperate_test;
 
 pub use self::{conflicts::*, conflict_rule::*, conflicts_solver::*};

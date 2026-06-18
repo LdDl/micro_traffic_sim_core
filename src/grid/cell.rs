@@ -61,6 +61,13 @@ pub struct Cell {
     meso_link_id: i64,
     /// Current state of the cell (e.g., free, banned).
     state: CellState,
+    /// Precomputed edge cost (travel time = distance / speed) to the forward/left/right
+    /// neighbour. NaN means "not precomputed" - callers fall back to computing it on the
+    /// fly. Filled by `GridRoads::precompute_edge_costs` (free-flow) and refreshed by
+    /// `GridRoads::apply_congestion` (smoothed per-cell speed) when congestion is on.
+    forward_cost: f64,
+    left_cost: f64,
+    right_cost: f64,
 }
 
 impl Cell {
@@ -94,8 +101,41 @@ impl Cell {
                 right_cell: -1,
                 meso_link_id: -1,
                 state: CellState::Free,
+                forward_cost: f64::NAN,
+                left_cost: f64::NAN,
+                right_cost: f64::NAN,
             },
         }
+    }
+
+    /// Sets the precomputed edge costs (travel time) to the forward/left/right
+    /// neighbours. Use NaN for a missing neighbour.
+    pub fn set_edge_costs(&mut self, forward: f64, left: f64, right: f64) {
+        self.forward_cost = forward;
+        self.left_cost = left;
+        self.right_cost = right;
+    }
+
+    /// Precomputed travel time to the forward neighbour (NaN if not precomputed).
+    pub fn get_forward_cost(&self) -> f64 {
+        self.forward_cost
+    }
+
+    /// Precomputed travel time to the left neighbour (NaN if not precomputed).
+    pub fn get_left_cost(&self) -> f64 {
+        self.left_cost
+    }
+
+    /// Precomputed travel time to the right neighbour (NaN if not precomputed).
+    pub fn get_right_cost(&self) -> f64 {
+        self.right_cost
+    }
+
+    /// Returns the mesoscopic link identifier this cell belongs to (`-1` if unset).
+    /// Cells of the same link form one road segment. Informational only - the
+    /// congestion model is per-cell and does not depend on this client-supplied id.
+    pub fn get_meso_link_id(&self) -> i64 {
+        self.meso_link_id
     }
 
     /// Calculates the Euclidean distance to another cell.
@@ -389,6 +429,8 @@ impl CellBuilder {
         self.cell.meso_link_id = meso_link_id;
         self
     }
+
+    // (getter for meso_link_id is on `Cell`, see `Cell::get_meso_link_id`)
 
     /// Builds the final `Cell` object with the configured properties.
     ///

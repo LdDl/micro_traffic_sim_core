@@ -54,6 +54,15 @@ pub type VehicleRef = Rc<RefCell<Vehicle>>;
 /// Vehicle unique identifier type
 pub type VehicleID = u64;
 
+/// Patience threshold (in ticks) for the most aggressive vehicle (cooperativity 0):
+/// how long it loses contested cells before overriding right-of-way. SUMO's
+/// `--time-to-teleport` default is 300 s; we reuse it as the impatient end.
+pub const PATIENCE_MIN: i32 = 300;
+/// Patience threshold (in ticks) for the fully cooperative vehicle (cooperativity 1):
+/// the most patient driver waits longer before forcing, but still finite (no permanent
+/// stall). Vehicles in between scale linearly with cooperativity.
+pub const PATIENCE_MAX: i32 = 700;
+
 /// Represents basic agent in simulation
 #[derive(Debug)]
 pub struct Vehicle {
@@ -95,6 +104,11 @@ pub struct Vehicle {
 
     /// A boolean indicating if the vehicle is a confclict participant
     pub is_conflict_participant: bool,
+    /// Consecutive ticks the vehicle has failed to move. Drives the patience-based
+    /// right-of-way override: once `wait_ticks` reaches the vehicle's cooperativity-scaled
+    /// patience threshold, the vehicle wins contested cells in conflict resolution
+    /// ("desperate" - see `Vehicle::is_desperate`). Reset to 0 on any actual move.
+    pub wait_ticks: i32,
     /// Corresponding trip identifier
     pub trip: TripID,
     /// Number of transits have been made by the vehicle
@@ -126,6 +140,17 @@ pub struct Vehicle {
 
     /// @todo: for further research and development needs
     pub confusion: bool,
+
+    /// Cached route to the destination as an ordered list of cell IDs
+    /// (origin first, destination last), built by a full A* at spawn / on reroute.
+    /// Per-tick the vehicle follows this list cheaply instead of re-running A*.
+    /// Empty means "no cached route" (fall back to per-tick routing).
+    pub cached_route: Vec<CellID>,
+    /// Index into `cached_route` of the vehicle's current head cell.
+    pub route_idx: usize,
+    /// Simulation step at which the route was last (re)computed; used to schedule
+    /// the next staggered reroute.
+    pub last_reroute: i32,
 
     /// Vehicle's intention to perform maneuver and other actions
     pub intention: VehicleIntention,
@@ -166,6 +191,7 @@ impl Vehicle {
                 destination: -1,
                 trip_destination: -1,
                 is_conflict_participant: false,
+                wait_ticks: 0,
                 trip: -1,
                 transits_made: 0,
                 transit_cells: Vec::new(),
@@ -178,9 +204,40 @@ impl Vehicle {
                 relax_countdown: 0,
                 travel_time: 0,
                 confusion: false,
+                cached_route: Vec::new(),
+                route_idx: 0,
+                last_reroute: -1,
                 intention: VehicleIntention::default(),
             },
         }
+    }
+
+    /// Advances the cached-route cursor (`route_idx`) so that
+    /// `cached_route[route_idx] == cell_id`, searching forward from the current
+    /// cursor (the vehicle only ever moves forward along its route). No-op if the
+    /// route is empty. Returns `true` if the cursor now points at the current cell,
+    /// `false` if the current cell was not found ahead on the route (the vehicle
+    /// fell off its cached route - the caller falls back to full routing / reconnect).
+    pub fn advance_route_cursor(&mut self) -> bool {
+        if self.cached_route.is_empty() {
+            return false;
+        }
+        let mut i = self.route_idx.min(self.cached_route.len() - 1);
+        while i < self.cached_route.len() {
+            if self.cached_route[i] == self.cell_id {
+                self.route_idx = i;
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// Clears the cached route (e.g. when the destination changes), forcing the
+    /// next tick to fall back to full routing.
+    pub fn clear_cached_route(&mut self) {
+        self.cached_route.clear();
+        self.route_idx = 0;
     }
 
     /// Increments number of transit have been made by vehicle
@@ -469,7 +526,49 @@ impl Vehicle {
             self.confusion = confusion;
         }
         // No need to update tails cells. It is done in movement.rs
-    } 
+    }
+
+    /// Rewrites this vehicle's intention to a single forward step into `target` (an
+    /// adjacent cell). Used by the patience override to clamp a desperate winner to one
+    /// cell. Crucially it also rebuilds `tail_intention_cells` consistently with the
+    /// one-cell step - the tail shifts forward and the vacated current cell becomes the
+    /// new nearest tail cell (same convention as `extract_tail_intention`'s 1-cell case).
+    /// Without this, a stale multi-cell `tail_intention_cells` from the original (longer)
+    /// intention would be applied in movement and land the body ahead of / on top of the
+    /// clamped head.
+    pub fn set_single_step_intention(&mut self, target: CellID) {
+        self.intention.intention_cell_id = target;
+        self.intention.intermediate_cells.clear();
+        self.intention.intention_speed = 1;
+        if self.tail_cells.is_empty() {
+            self.intention.tail_intention_cells = Vec::new();
+        } else {
+            // Drop the furthest tail cell, shift the rest forward, append the cell the
+            // head is vacating (current cell_id) as the new nearest-to-head tail cell.
+            let mut tail = self.tail_cells[1..].to_vec();
+            tail.push(self.cell_id);
+            self.intention.tail_intention_cells = tail;
+        }
+    }
+
+    /// The vehicle's patience threshold in ticks: how long it tolerates losing
+    /// contested cells before overriding right-of-way. Scaled by cooperativity so
+    /// every vehicle eventually forces (the threshold is always finite), but more
+    /// cooperative drivers wait longer: aggressive (cooperativity 0) -> `PATIENCE_MIN`,
+    /// fully cooperative (cooperativity 1) -> `PATIENCE_MAX`.
+    pub fn patience(&self) -> i32 {
+        let coop = self.cooperativity.clamp(0.0, 1.0);
+        PATIENCE_MIN + (coop * (PATIENCE_MAX - PATIENCE_MIN) as f64).round() as i32
+    }
+
+    /// True when the vehicle has been stuck for at least its patience threshold and is
+    /// therefore allowed to win a contested (free) cell in conflict resolution. It only
+    /// ever takes effect inside the conflict solver, which exists solely for free cells,
+    /// so a vehicle blocked by an occupied cell (a queue follower) is never desperate in
+    /// any useful sense; and it never overrides a `Tail` (physical body) conflict.
+    pub fn is_desperate(&self) -> bool {
+        self.wait_ticks >= self.patience()
+    }
 }
 
 /// A builder pattern implementation for constructing `Vehicle` objects.

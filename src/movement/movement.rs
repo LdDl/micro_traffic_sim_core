@@ -175,8 +175,21 @@ pub fn movement(
         vehicle.apply_intention();
         vehicle.is_conflict_participant = false;
 
+        // The cell the vehicle ACTUALLY ends on this tick: a dwelling vehicle (relax_countdown > 0)
+        // stays put even if it intended to move. Head, tail, timers and bearing must all
+        // key off this single decision-otherwise a dwelling tailed vehicle's tail would
+        // advance while its head stays, leaving the head inside its own tail.
+        let final_cell = if vehicle.get_relax_countdown() > 0 {
+            vehicle.relax_countdown_dec();
+            // Stay in current cell
+            vehicle.cell_id
+        } else {
+            vehicle.intention.intention_cell_id
+        };
+        let moved = final_cell != vehicle.cell_id;
+
         // Update bearing depending on intention maneuver
-        if vehicle.cell_id != vehicle.intention.intention_cell_id {
+        if moved {
             // vehicle is moving? then set bearing based on actual movement
             let cell_from = net.get_cell(&vehicle.cell_id)
                 .ok_or(MovementError::CellNotFound {
@@ -218,7 +231,7 @@ pub fn movement(
         }
 
         // Decrement timers only if vehicle moved
-        if vehicle.cell_id != vehicle.intention.intention_cell_id {
+        if moved {
             // Decrement timers
             if vehicle.timer_non_acceleration > 0 {
                 vehicle.timer_non_acceleration -= 1;
@@ -232,7 +245,7 @@ pub fn movement(
         }
 
         // Update tail cells only if vehicle is actually moving
-        if vehicle.cell_id != vehicle.intention.intention_cell_id {
+        if moved {
             let tail_size = vehicle.tail_cells.len();
             if tail_size > 0 {
                 let tail_intention = vehicle.intention.tail_intention_cells.clone();
@@ -249,13 +262,14 @@ pub fn movement(
             vehicle.timer_non_slowdown = tail_size;
         }
 
-        // Determine final cell (considering relax countdown)
-        let final_cell = if vehicle.get_relax_countdown() > 0 {
-            vehicle.relax_countdown_dec();
-            vehicle.cell_id // Stay in current cell
+        // Patience accrual: reset on any real move, otherwise the vehicle is stuck this
+        // tick. Once wait_ticks reaches the patience threshold the vehicle is "desperate"
+        // and overrides right-of-way in the conflict solver (see Vehicle::is_desperate).
+        if moved {
+            vehicle.wait_ticks = 0;
         } else {
-            vehicle.intention.intention_cell_id
-        };
+            vehicle.wait_ticks = vehicle.wait_ticks.saturating_add(1);
+        }
 
         vehicle.cell_id = final_cell;
 
@@ -289,6 +303,11 @@ pub fn movement(
                 // Confusion means "current destination proven unreachable"; the verdict
                 // does not transfer to a newly assigned destination
                 vehicle.confusion = false;
+                // The cached route still ends at the OLD stop the bus is sitting on; without
+                // clearing it, advance_route_cursor would report on_route=true (current cell == last route cell)
+                // and refresh_route would keep the dead cache, stalling the bus at the stop.
+                // Clear it so next tick rebuilds a route to the new destination.
+                vehicle.clear_cached_route();
                 vehicle.relax_countdown_reset();
             }
         }
@@ -329,4 +348,59 @@ pub fn movement(
     }
 
     Ok((vehicles_completed, vehicles_lost))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::{VehicleIntention, VehiclesStorage};
+    use crate::geom::new_point;
+    use crate::grid::cell::Cell;
+
+    /// Regression: a dwelling tailed vehicle (relax_countdown > 0) that intended to move
+    /// must NOT advance its tail while its head stays - head and tail share the single
+    /// `final_cell`/`moved` decision. Without it, the tail moved (head ending inside its
+    /// own tail).
+    #[test]
+    fn test_dwelling_tailed_vehicle_tail_does_not_advance() {
+        // Linear road 1 -> 2 -> 3 -> 4.
+        let mut net = GridRoads::new();
+        for (id, fwd, x) in [(1i64, 2i64, 0.0), (2, 3, 1.0), (3, 4, 2.0), (4, -1, 3.0)] {
+            net.add_cell(
+                Cell::new(id)
+                    .with_point(new_point(x, 0.0, None))
+                    .with_forward_node(fwd)
+                    .with_speed_limit(3)
+                    .build(),
+            );
+        }
+
+        // Tailed vehicle: head at 3, tail [1,2]; dwelling (relax_countdown > 0) but its
+        // intention is a forward move to 4 with the already-advanced tail [2,3].
+        let mut v = Vehicle::new(1)
+            .with_cell(3)
+            .with_tail_size(2, vec![1, 2])
+            .with_destination(4)
+            .with_relax_time(5)
+            .build();
+        v.relax_countdown_reset();
+        assert!(v.get_relax_countdown() > 0, "precondition: vehicle is dwelling");
+        v.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 4,
+            intention_speed: 1,
+            // the tail it WOULD have if it actually moved
+            tail_intention_cells: vec![2, 3],
+            ..Default::default()
+        });
+
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, v);
+        movement(&net, &mut vehicles, &LocalLogger::none()).unwrap();
+
+        let v = vehicles.get(&1).expect("vehicle stays (dwelling, not removed)");
+        assert_eq!(v.cell_id, 3, "head stays put while dwelling");
+        assert_eq!(v.tail_cells, vec![1, 2], "tail must NOT advance while the head dwells");
+        assert!(!v.tail_cells.contains(&v.cell_id), "head cell is not inside its own tail");
+    }
 }

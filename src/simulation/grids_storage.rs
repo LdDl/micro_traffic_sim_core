@@ -86,6 +86,9 @@ impl GridsStorage {
         for cell in cells_data {
             self.vehicles_net.add_cell(cell);
         }
+        // Static graph: precompute per-cell edge costs once so the live simulation
+        // uses the same fast router path as the routing benchmarks.
+        self.vehicles_net.precompute_edge_costs();
     }
 
     /// Returns a reference to the cell with the given ID if it exists in the vehicles grid.

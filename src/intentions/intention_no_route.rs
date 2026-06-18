@@ -4,7 +4,7 @@ use crate::{
         cell::{Cell, CellID},
         road_network::GridRoads,
     },
-    shortest_path::{heuristics::heuristic, path::Path},
+    shortest_path::{heuristics::edge_time, path::Path},
 };
 use std::fmt;
 
@@ -78,7 +78,7 @@ pub fn process_no_route_found<'a>(
         vec![current_cell, destination_cell],
         // Maneuvers is a slice of maneuvers between cells, so it's len = len(Vertices) - 1
         vec![maneuver],
-        heuristic(current_cell, destination_cell), // Default cost for single step
+        edge_time(current_cell, destination_cell), // travel-time cost for the single step
     ))
 }
 

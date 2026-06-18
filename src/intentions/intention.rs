@@ -8,7 +8,8 @@ use crate::maneuver::LaneChangeType;
 use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
-use crate::shortest_path::router::{shortest_path, path_no_goal};
+use crate::shortest_path::router::{shortest_path, path_no_goal, reconnect_to_cache};
+use crate::shortest_path::path::Path;
 use crate::shortest_path::router::AStarError;
 use crate::verbose::*;
 use indexmap::IndexMap;
@@ -77,6 +78,9 @@ pub fn prepare_intentions<'a, 'b>(
     current_state: &HashMap<CellID, VehicleID>,
     vehicles: &'b mut IndexMap<VehicleID, Vehicle>,
     verbose: &LocalLogger,
+    steps: i32,
+    reroute_period: i32,
+    reconnect_max_depth: usize,
 ) -> Result<Intentions, IntentionError> {
     let mut intentions = Intentions::new();
     let track_routing = verbose.is_at_least(VerboseLevel::Main);
@@ -107,6 +111,9 @@ pub fn prepare_intentions<'a, 'b>(
                 ]
             );
         }
+        // Keep the cached route fresh: advance the cursor, periodically reroute,
+        // and reconnect (or full-A* rebuild) when the vehicle fell off its route.
+        refresh_route(net, vehicle, steps, reroute_period, reconnect_max_depth);
         let routing_start = std::time::Instant::now();
         let possible_intention = find_intention(net, current_state, &vehicle, verbose)?;
         if possible_intention.should_stop {
@@ -163,6 +170,131 @@ pub fn prepare_intentions<'a, 'b>(
         );
     }
     Ok(intentions)
+}
+
+/// Keeps a vehicle's cached route usable for this tick:
+/// 1. advances the route cursor to the current cell;
+/// 2. if the cursor still matches and no periodic reroute is due, keeps the cache;
+/// 3. if the vehicle fell off its route, tries a cheap bounded reconnect back onto it;
+/// 4. otherwise (periodic reroute due, or reconnect failed) rebuilds the route with a
+///    fresh full A*.
+/// A no-op for destination-less or confused vehicles.
+fn refresh_route(
+    net: &GridRoads,
+    vehicle: &mut Vehicle,
+    steps: i32,
+    reroute_period: i32,
+    reconnect_max_depth: usize,
+) {
+    if vehicle.destination < 0 || vehicle.confusion {
+        return;
+    }
+    let on_route = vehicle.advance_route_cursor();
+    let due = reroute_period > 0 && (steps - vehicle.last_reroute) >= reroute_period;
+    if on_route && !due {
+        return;
+    }
+    // Off-route with a cache present: try a cheap bounded reconnect first.
+    if !on_route && !vehicle.cached_route.is_empty() {
+        if let Some(spliced) = reconnect_to_cache(
+            vehicle.cell_id,
+            &vehicle.cached_route,
+            vehicle.route_idx,
+            net,
+            reconnect_max_depth,
+        ) {
+            vehicle.cached_route = spliced;
+            vehicle.route_idx = 0;
+            return; // a reconnect is not a reroute - keep last_reroute
+        }
+    }
+    // Periodic reroute, or reconnect failed: rebuild the full route with a fresh A*.
+    if let (Some(s), Some(g)) = (
+        net.get_cell(&vehicle.cell_id),
+        net.get_cell(&vehicle.destination),
+    ) {
+        if let Ok(path) = shortest_path(s, g, net, true, None) {
+            vehicle.cached_route = path.vertices().iter().map(|c| c.get_id()).collect();
+            vehicle.route_idx = 0;
+            vehicle.last_reroute = steps;
+        }
+    }
+}
+
+/// Classifies the edge from `a` to `b` as a forward/left/right maneuver by matching
+/// `b` against `a`'s neighbour links. Defaults to forward for a non-adjacent pair
+/// (which should not occur on a valid cached route).
+fn maneuver_between(a: &Cell, b: &Cell) -> LaneChangeType {
+    let bid = b.get_id();
+    if a.get_left_id() == bid {
+        LaneChangeType::ChangeLeft
+    } else if a.get_right_id() == bid {
+        LaneChangeType::ChangeRight
+    } else {
+        LaneChangeType::NoChange
+    }
+}
+
+/// Builds a short `Path` slice from the vehicle's cached route, starting at its
+/// current cell (`cached_route[route_idx]`), at most `max_len` cells long. Returns
+/// `None` when there is no cache, the cursor does not point at the current cell
+/// (the vehicle fell off its route), or no cell resolves - in all of which the
+/// caller falls back to a full A*. The returned path carries `cost = 0.0` (the
+/// per-tick follow does not need the route's total cost; only `process_path`'s
+/// obstacle/speed scan of the slice matters).
+fn build_path_from_cache<'a>(
+    vehicle: &Vehicle,
+    net: &'a GridRoads,
+    max_len: usize,
+) -> Option<Path<'a>> {
+    let route = &vehicle.cached_route;
+    let start = vehicle.route_idx;
+    // The cursor must point at the vehicle's current cell (advance_route_cursor ran).
+    if route.get(start) != Some(&vehicle.cell_id) {
+        return None;
+    }
+    let end = (start + max_len).min(route.len());
+    let mut vertices: Vec<&Cell> = Vec::with_capacity(end - start);
+    for &id in &route[start..end] {
+        match net.get_cell(&id) {
+            Some(c) => vertices.push(c),
+            None => break, // dangling id - stop; the prefix collected so far is valid
+        }
+    }
+    if vertices.is_empty() {
+        return None;
+    }
+    let mut maneuvers = Vec::with_capacity(vertices.len().saturating_sub(1));
+    for w in vertices.windows(2) {
+        maneuvers.push(maneuver_between(w[0], w[1]));
+    }
+    Some(Path::new(vertices, maneuvers, 0.0))
+}
+
+/// Bounded BFS depth for the forward-fallback reachability guard. The guard only has
+/// to confirm the vehicle can rejoin its cached route after a one-cell forward roll;
+/// a short bound keeps the check cheap (a few cells), and a false "no" only costs the
+/// vehicle a recoverable stall, never a lost trip.
+const FORWARD_FALLBACK_REACH_DEPTH: usize = 16;
+
+/// Returns true when rolling onto `forward_id` keeps the vehicle's destination
+/// reachable, i.e. `forward_id` is still on (or can rejoin) the cached route. Used to
+/// stop the forward-fallback from driving a non-confused vehicle into a one-way pocket
+/// (the sole cause of lost vehicles). Cheap O(1) fast paths first, then a bounded BFS.
+fn forward_keeps_reachable(vehicle: &Vehicle, forward_id: CellID, net: &GridRoads) -> bool {
+    let route = &vehicle.cached_route;
+    let idx = vehicle.route_idx;
+    // The route continues straight onto forward_id (the common case).
+    if route.get(idx + 1) == Some(&forward_id) {
+        return true;
+    }
+    // forward_id is the destination itself (the last route cell, whose neighbours are
+    // not on the cache ahead, so reconnect_to_cache would miss it).
+    if route.last() == Some(&forward_id) {
+        return true;
+    }
+    // Otherwise: can we still get back onto the route from forward_id within the bound?
+    reconnect_to_cache(forward_id, route, idx, net, FORWARD_FALLBACK_REACH_DEPTH).is_some()
 }
 
 /// Computes the movement intention for a single vehicle.
@@ -306,6 +438,14 @@ pub fn find_intention<'a>(
     //     if _is_slowdown { " (slowdown)" } else { "" }
     // );
 
+    // Try to follow the cached route (O(speed) read) instead of a per-tick full A*.
+    // None when the vehicle has no cache or fell off it (then we fall back to A*).
+    let cache_path = if vehicle.destination >= 0 && !vehicle.confusion {
+        build_path_from_cache(vehicle, net, (speed_possible.max(1) + 2) as usize)
+    } else {
+        None
+    };
+
     let mut path = match vehicle.destination {
         // Handle case when vehicle has no destination,H
         // therefore it should be considered as keep going where possible
@@ -341,6 +481,11 @@ pub fn find_intention<'a>(
             speed_possible = intention_speed;
             new_path
         },
+        // Follow the cached route if the vehicle is on it (built above): the slice is
+        // fed through the same process_path/assembly below, replacing the per-tick
+        // full A* with an O(speed) cache read.
+        _ if cache_path.is_some() => cache_path.unwrap(),
+        // Off the cached route (or no cache): fall back to a full A*.
         _ => {
             let target_cell = net
                 .get_cell(&vehicle.destination)
@@ -596,10 +741,19 @@ pub fn find_alternate_intention<'a>(
 
     // If both paths are impossible (infinite distance), don't attempt a lane change.
     // Before blocking, try to keep rolling forward: a driver stuck next to a jammed
-    // lane drives along it and merges at a gap further ahead. If the destination
-    // becomes unreachable ahead, the regular per-tick A* will return NoPathFound on
-    // the next tick and the confusion fallback takes over (the vehicle may end up
-    // counted as lost - that is an accepted risk).
+    // lane drives along it and merges at a gap further ahead.
+    //
+    // An unguarded roll can push the vehicle off its route into a one-way pocket from
+    // which the destination is unreachable, after which the per-tick A* returns
+    // NoPathFound, confusion latches, and the vehicle is despawned as `lost` (before this
+    // guard existed, this was measured to be the sole cause of lost vehicles). So a
+    // non-confused vehicle is allowed to roll forward only while it can still get back to
+    // its route (`forward_keeps_reachable`); otherwise it waits in place (a recoverable
+    // stall) instead of driving into a trap.
+    //
+    // A vehicle that is ALREADY confused has no reachable route to protect, so it keeps
+    // rolling unconditionally - that is what carries it to a Death zone for removal
+    // (without it, a confused vehicle would block forever as a zombie).
     if min_left_dist == INFINITY && min_right_dist == INFINITY {
         let forward_cell_id = source_cell.get_forward_id();
         if forward_cell_id > 0 {
@@ -608,9 +762,12 @@ pub fn find_alternate_intention<'a>(
                     .get(&forward_cell_id)
                     .map(|&id| id > 0)
                     .unwrap_or(false);
+                let safe_to_roll = vehicle.confusion
+                    || forward_keeps_reachable(vehicle, forward_cell_id, net);
                 if !is_occupied
                     && forward_cell.get_state() == CellState::Free
                     && forward_cell.get_speed_limit() > 0
+                    && safe_to_roll
                 {
                     return Ok(VehicleIntention {
                         intention_maneuver: LaneChangeType::NoChange,
