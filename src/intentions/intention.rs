@@ -271,6 +271,32 @@ fn build_path_from_cache<'a>(
     Some(Path::new(vertices, maneuvers, 0.0))
 }
 
+/// Bounded BFS depth for the forward-fallback reachability guard. The guard only has
+/// to confirm the vehicle can rejoin its cached route after a one-cell forward roll;
+/// a short bound keeps the check cheap (a few cells), and a false "no" only costs the
+/// vehicle a recoverable stall, never a lost trip.
+const FORWARD_FALLBACK_REACH_DEPTH: usize = 16;
+
+/// Returns true when rolling onto `forward_id` keeps the vehicle's destination
+/// reachable, i.e. `forward_id` is still on (or can rejoin) the cached route. Used to
+/// stop the forward-fallback from driving a non-confused vehicle into a one-way pocket
+/// (the sole cause of lost vehicles). Cheap O(1) fast paths first, then a bounded BFS.
+fn forward_keeps_reachable(vehicle: &Vehicle, forward_id: CellID, net: &GridRoads) -> bool {
+    let route = &vehicle.cached_route;
+    let idx = vehicle.route_idx;
+    // The route continues straight onto forward_id (the common case).
+    if route.get(idx + 1) == Some(&forward_id) {
+        return true;
+    }
+    // forward_id is the destination itself (the last route cell, whose neighbours are
+    // not on the cache ahead, so reconnect_to_cache would miss it).
+    if route.last() == Some(&forward_id) {
+        return true;
+    }
+    // Otherwise: can we still get back onto the route from forward_id within the bound?
+    reconnect_to_cache(forward_id, route, idx, net, FORWARD_FALLBACK_REACH_DEPTH).is_some()
+}
+
 /// Computes the movement intention for a single vehicle.
 ///
 /// Determines the best maneuver (forward, lane change, block, etc.)
@@ -715,10 +741,19 @@ pub fn find_alternate_intention<'a>(
 
     // If both paths are impossible (infinite distance), don't attempt a lane change.
     // Before blocking, try to keep rolling forward: a driver stuck next to a jammed
-    // lane drives along it and merges at a gap further ahead. If the destination
-    // becomes unreachable ahead, the regular per-tick A* will return NoPathFound on
-    // the next tick and the confusion fallback takes over (the vehicle may end up
-    // counted as lost - that is an accepted risk).
+    // lane drives along it and merges at a gap further ahead.
+    //
+    // An unguarded roll can push the vehicle off its route into a one-way pocket from
+    // which the destination is unreachable, after which the per-tick A* returns
+    // NoPathFound, confusion latches, and the vehicle is despawned as `lost` (before this
+    // guard existed, this was measured to be the sole cause of lost vehicles). So a
+    // non-confused vehicle is allowed to roll forward only while it can still get back to
+    // its route (`forward_keeps_reachable`); otherwise it waits in place (a recoverable
+    // stall) instead of driving into a trap.
+    //
+    // A vehicle that is ALREADY confused has no reachable route to protect, so it keeps
+    // rolling unconditionally - that is what carries it to a Death zone for removal
+    // (without it, a confused vehicle would block forever as a zombie).
     if min_left_dist == INFINITY && min_right_dist == INFINITY {
         let forward_cell_id = source_cell.get_forward_id();
         if forward_cell_id > 0 {
@@ -727,9 +762,12 @@ pub fn find_alternate_intention<'a>(
                     .get(&forward_cell_id)
                     .map(|&id| id > 0)
                     .unwrap_or(false);
+                let safe_to_roll = vehicle.confusion
+                    || forward_keeps_reachable(vehicle, forward_cell_id, net);
                 if !is_occupied
                     && forward_cell.get_state() == CellState::Free
                     && forward_cell.get_speed_limit() > 0
+                    && safe_to_roll
                 {
                     return Ok(VehicleIntention {
                         intention_maneuver: LaneChangeType::NoChange,
