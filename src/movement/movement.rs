@@ -257,6 +257,15 @@ pub fn movement(
             vehicle.intention.intention_cell_id
         };
 
+        // Patience accrual: reset on any real move, otherwise the vehicle is stuck this
+        // tick. Once wait_ticks reaches the patience threshold the vehicle is "desperate"
+        // and overrides right-of-way in the conflict solver (see Vehicle::is_desperate).
+        if final_cell != vehicle.cell_id {
+            vehicle.wait_ticks = 0;
+        } else {
+            vehicle.wait_ticks = vehicle.wait_ticks.saturating_add(1);
+        }
+
         vehicle.cell_id = final_cell;
 
         // Get the cell to check zone type

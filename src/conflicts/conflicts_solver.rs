@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use crate::maneuver::LaneChangeType;
 use crate::grid::cell::CellID;
 use crate::verbose::*;
+use std::collections::HashSet;
 
 use std::fmt;
 
@@ -76,6 +77,9 @@ pub fn solve_conflicts<'b>(
     }
     let mut trajectories_conflicts: Vec<CellConflict> = Vec::new();
     let mut conflict_zones_conflicts: Vec<CellConflict> = Vec::new();
+    // Cells already granted to a desperate (patience-override) winner this tick, so two
+    // separate conflicts cannot force two vehicles into the same cell.
+    let mut claimed_cells: HashSet<CellID> = HashSet::new();
     for conflict in conflicts_data {
         if conflict.participants.len() < 2 {
             return Err(ConflictSolverError::InsufficientParticipants(
@@ -91,6 +95,67 @@ pub fn solve_conflicts<'b>(
                 conflict.priority_participant_index,
                 conflict.participants.len(),
             ));
+        }
+
+        // Patience override (authoritative, for EVERY conflict type)
+        // A vehicle stuck past its patience threshold (Vehicle::is_desperate) wins the
+        // contested cell, overriding normal right-of-way, the fixed conflict-zone winner
+        // AND the left/right rule. Among several desperate participants the most-starved
+        // (highest wait_ticks) wins, giving a single deterministic winner. It NEVER applies
+        // to physical Tail conflicts (you cannot force through a body), and `claimed_cells`
+        // keeps the one-occupant-per-cell invariant across conflicts. Non-desperate
+        // conflicts fall through untouched to the usual resolution below.
+        let is_physical = matches!(
+            conflict.conflict_type,
+            ConflictType::Tail | ConflictType::SelfTail | ConflictType::TailCrossLaneChange
+        );
+        if !is_physical {
+            let desperate_winner = conflict
+                .participants
+                .iter()
+                .enumerate()
+                .filter_map(|(i, id)| {
+                    vehicles.get(id).filter(|v| v.is_desperate()).map(|v| (i, v.wait_ticks))
+                })
+                .max_by_key(|&(_, wait)| wait);
+            if let Some((win_idx, _)) = desperate_winner {
+                let win_id = conflict.participants[win_idx];
+                let target = vehicles
+                    .get(&win_id)
+                    .map(|v| v.intention.intention_cell_id)
+                    .unwrap_or(-1);
+                if target >= 0 {
+                    // Granted unless another desperate winner already took this cell this
+                    // tick; if taken, the cell is unavailable to everyone here -> block all
+                    // (preserves the one-occupant-per-cell invariant across conflicts).
+                    let granted = claimed_cells.insert(target);
+                    if verbose.is_at_least(VerboseLevel::Additional) {
+                        verbose.log_with_fields(
+                            EVENT_CONFLICT_SOLVE,
+                            if granted { "Patience override - desperate vehicle wins" } else { "Patience override - target cell already claimed, blocking" },
+                            &[
+                                ("cell", &conflict.cell_id),
+                                ("winner_id", &win_id),
+                                ("target_cell", &target),
+                                ("conflict_type", &format!("{:?}", conflict.conflict_type)),
+                            ],
+                        );
+                    }
+                    for (i, participant_id) in conflict.participants.iter().enumerate() {
+                        if let Some(v) = vehicles.get_mut(participant_id) {
+                            if granted && i == win_idx {
+                                // Lane-change winners advance exactly one cell.
+                                if v.intention.intention_maneuver != LaneChangeType::NoChange {
+                                    v.intention.intention_speed = 1;
+                                }
+                            } else {
+                                v.block_with_speed(0);
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
         }
 
         match conflict.conflict_type {

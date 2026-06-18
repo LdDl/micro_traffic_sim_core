@@ -54,6 +54,15 @@ pub type VehicleRef = Rc<RefCell<Vehicle>>;
 /// Vehicle unique identifier type
 pub type VehicleID = u64;
 
+/// Patience threshold (in ticks) for the most aggressive vehicle (cooperativity 0):
+/// how long it loses contested cells before overriding right-of-way. SUMO's
+/// `--time-to-teleport` default is 300 s; we reuse it as the impatient end.
+pub const PATIENCE_MIN: i32 = 300;
+/// Patience threshold (in ticks) for the fully cooperative vehicle (cooperativity 1):
+/// the most patient driver waits longer before forcing, but still finite (no permanent
+/// stall). Vehicles in between scale linearly with cooperativity.
+pub const PATIENCE_MAX: i32 = 700;
+
 /// Represents basic agent in simulation
 #[derive(Debug)]
 pub struct Vehicle {
@@ -95,6 +104,11 @@ pub struct Vehicle {
 
     /// A boolean indicating if the vehicle is a confclict participant
     pub is_conflict_participant: bool,
+    /// Consecutive ticks the vehicle has failed to move. Drives the patience-based
+    /// right-of-way override: once `wait_ticks` reaches the vehicle's cooperativity-scaled
+    /// patience threshold, the vehicle wins contested cells in conflict resolution
+    /// ("desperate" - see `Vehicle::is_desperate`). Reset to 0 on any actual move.
+    pub wait_ticks: i32,
     /// Corresponding trip identifier
     pub trip: TripID,
     /// Number of transits have been made by the vehicle
@@ -177,6 +191,7 @@ impl Vehicle {
                 destination: -1,
                 trip_destination: -1,
                 is_conflict_participant: false,
+                wait_ticks: 0,
                 trip: -1,
                 transits_made: 0,
                 transit_cells: Vec::new(),
@@ -511,7 +526,26 @@ impl Vehicle {
             self.confusion = confusion;
         }
         // No need to update tails cells. It is done in movement.rs
-    } 
+    }
+
+    /// The vehicle's patience threshold in ticks: how long it tolerates losing
+    /// contested cells before overriding right-of-way. Scaled by cooperativity so
+    /// every vehicle eventually forces (the threshold is always finite), but more
+    /// cooperative drivers wait longer: aggressive (cooperativity 0) -> `PATIENCE_MIN`,
+    /// fully cooperative (cooperativity 1) -> `PATIENCE_MAX`.
+    pub fn patience(&self) -> i32 {
+        let coop = self.cooperativity.clamp(0.0, 1.0);
+        PATIENCE_MIN + (coop * (PATIENCE_MAX - PATIENCE_MIN) as f64).round() as i32
+    }
+
+    /// True when the vehicle has been stuck for at least its patience threshold and is
+    /// therefore allowed to win a contested (free) cell in conflict resolution. It only
+    /// ever takes effect inside the conflict solver, which exists solely for free cells,
+    /// so a vehicle blocked by an occupied cell (a queue follower) is never desperate in
+    /// any useful sense; and it never overrides a `Tail` (physical body) conflict.
+    pub fn is_desperate(&self) -> bool {
+        self.wait_ticks >= self.patience()
+    }
 }
 
 /// A builder pattern implementation for constructing `Vehicle` objects.
