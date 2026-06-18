@@ -6,8 +6,6 @@
 //! and the left/right rule - across EVERY conflict type - but NEVER a `Tail` conflict
 //! (physical body), and never two vehicles into the same cell (claimed-cell dedup).
 
-use super::*;
-
 #[cfg(test)]
 mod tests {
     use crate::agents::{Vehicle, VehicleIntention, VehiclesStorage, PATIENCE_MAX, PATIENCE_MIN};
