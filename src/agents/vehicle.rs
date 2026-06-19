@@ -778,6 +778,24 @@ impl VehicleBuilder {
         self
     }
 
+    /// Overrides the trip-completion destination independently of the immediate `destination`.
+    ///
+    /// `with_destination` sets both the immediate `destination` and the `trip_destination`
+    /// (where the trip is considered complete) to the same cell. For a multi-stop bus these
+    /// differ: the immediate destination starts at the FIRST transit stop (and is advanced
+    /// stop-by-stop during movement), while the trip only completes at the LAST stop. Call
+    /// this AFTER `with_destination` to set the completion cell separately.
+    ///
+    /// # Arguments
+    /// * `cell_id` - Cell at which the trip is considered complete
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    pub fn with_trip_destination(mut self, cell_id: CellID) -> Self {
+        self.vehicle.trip_destination = cell_id;
+        self
+    }
+
     /// Establishes source and target cells of maneuver for the vehicle's tail and vehicle's tail intention maneuver (in case when vehicle has size more that one cell)
     ///
     /// # Arguments
