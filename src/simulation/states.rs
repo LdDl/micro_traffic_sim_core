@@ -35,8 +35,6 @@ pub struct AutomataState {
 pub struct VehicleState {
     /// List of occupied points by the vehicle
     pub occupied_points: Vec<[f64; 2]>,
-    /// Last known position of the vehicle
-    pub last_point: [f64; 2],
     /// Last known cell ID of the vehicle
     pub last_cell: CellID,
     /// Cells occupied by tail. Order: [furthest from head, ..., closest to head]
