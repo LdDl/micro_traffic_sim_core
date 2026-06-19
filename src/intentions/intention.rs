@@ -124,7 +124,7 @@ pub fn prepare_intentions<'a, 'b>(
             let maneuvers_allowed = vehicle.timer_non_maneuvers <= 0
                 && tail_maneuver != LaneChangeType::ChangeRight
                 && tail_maneuver != LaneChangeType::ChangeLeft;
-            let alternate_possible_intention = find_alternate_intention(net, current_state, &vehicle, maneuvers_allowed)?;
+            let alternate_possible_intention = find_alternate_intention(net, current_state, &vehicle, maneuvers_allowed, reconnect_max_depth)?;
             if track_routing {
                 let elapsed_us = routing_start.elapsed().as_micros() as u64;
                 routing_count += 1;
@@ -272,17 +272,17 @@ fn build_path_from_cache<'a>(
     Some(Path::new(vertices, maneuvers, 0.0))
 }
 
-/// Bounded BFS depth for the forward-fallback reachability guard. The guard only has
-/// to confirm the vehicle can rejoin its cached route after a one-cell forward roll;
-/// a short bound keeps the check cheap (a few cells), and a false "no" only costs the
-/// vehicle a recoverable stall, never a lost trip.
-const FORWARD_FALLBACK_REACH_DEPTH: usize = 16;
-
 /// Returns true when rolling onto `forward_id` keeps the vehicle's destination
 /// reachable, i.e. `forward_id` is still on (or can rejoin) the cached route. Used to
 /// stop the forward-fallback from driving a non-confused vehicle into a one-way pocket
 /// (the sole cause of lost vehicles). Cheap O(1) fast paths first, then a bounded BFS.
-fn forward_keeps_reachable(vehicle: &Vehicle, forward_id: CellID, net: &GridRoads) -> bool {
+///
+/// `max_depth` MUST be the same `reconnect_max_depth` the per-tick reconnect uses: this
+/// guard authorizes a roll only if next tick's `reconnect_to_cache` (run from the very
+/// cell we roll onto) will succeed. A larger bound here green-lights rolls the next tick
+/// then cannot follow up on, forcing a needless full A* rebuild; a smaller one stalls
+/// rolls that would in fact reconnect. Equal bounds make "authorized" mean "reconnects".
+fn forward_keeps_reachable(vehicle: &Vehicle, forward_id: CellID, net: &GridRoads, max_depth: usize) -> bool {
     let route = &vehicle.cached_route;
     let idx = vehicle.route_idx;
     // The route continues straight onto forward_id (the common case).
@@ -295,7 +295,7 @@ fn forward_keeps_reachable(vehicle: &Vehicle, forward_id: CellID, net: &GridRoad
         return true;
     }
     // Otherwise: can we still get back onto the route from forward_id within the bound?
-    reconnect_to_cache(forward_id, route, idx, net, FORWARD_FALLBACK_REACH_DEPTH).is_some()
+    reconnect_to_cache(forward_id, route, idx, net, max_depth).is_some()
 }
 
 /// Computes the movement intention for a single vehicle.
@@ -371,7 +371,7 @@ pub fn find_intention<'a>(
         return Ok(result);
     }
 
-    // Шf stopped at red traffic light do early return
+    // If stopped at red traffic light do early return
     let forward_cell_id = source_cell.get_forward_id();
     if forward_cell_id > 0 {
         if let Some(forward_cell) = net.get_cell(&forward_cell_id) {
@@ -509,6 +509,18 @@ pub fn find_intention<'a>(
                     return Err(IntentionError::NoPathFound(e));
                 }
                 Err(_) => {
+                    // A* with maneuvers disabled (tail still completing a previous lane change)
+                    // can report NoPathFound merely because the only continuation needs a
+                    // maneuver that is briefly on cooldown - a TIMING constraint, not an
+                    // unreachable destination. `confusion` is a PERMANENT "unreachable" verdict
+                    // (confused vehicles skip routing entirely and are eventually despawned as
+                    // `lost`), so latch it ONLY when the destination is unreachable even WITH
+                    // maneuvers allowed. Otherwise we still roll forward (process_no_route_found,
+                    // a NoChange step) so the tail finishes its maneuver and the cooldown clears,
+                    // and we leave confusion unset so next tick re-routes onto the real path
+                    // instead of writing the trip off as lost.
+                    let truly_unreachable = maneuvers_allowed
+                        || shortest_path(source_cell, target_cell, net, true, None).is_err();
                     let new_path = match process_no_route_found(source_cell, net) {
                         Ok(path) => path,
                         Err(e) => return Err(IntentionError::NoPathForNoRoute(e)),
@@ -516,7 +528,9 @@ pub fn find_intention<'a>(
                     // Do NOT overwrite destination - keep original trip destination
                     intention_speed = 1;
                     speed_possible = intention_speed;
-                    confusion = Some(true);
+                    if truly_unreachable {
+                        confusion = Some(true);
+                    }
                     new_path
                 }
             }
@@ -686,11 +700,15 @@ fn check_alternate_direction(
 ///
 /// # Arguments
 /// * `maneuvers_allowed` - Whether lane changes are allowed (false if tail is still completing a maneuver)
+/// * `reconnect_max_depth` - Bound for the forward-roll reachability guard; MUST match the
+///   per-tick reconnect bound so an authorized roll is guaranteed to reconnect next tick
+///   (see [`forward_keeps_reachable`]).
 pub fn find_alternate_intention<'a>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
     vehicle: &'a Vehicle,
     maneuvers_allowed: bool,
+    reconnect_max_depth: usize,
 ) -> Result<VehicleIntention, IntentionError> {
     let source_cell_id = vehicle.cell_id;
     let target_cell_id = vehicle.destination;
@@ -766,7 +784,7 @@ pub fn find_alternate_intention<'a>(
                     .map(|&id| id > 0)
                     .unwrap_or(false);
                 let safe_to_roll = vehicle.confusion
-                    || forward_keeps_reachable(vehicle, forward_cell_id, net);
+                    || forward_keeps_reachable(vehicle, forward_cell_id, net, reconnect_max_depth);
                 if !is_occupied
                     && forward_cell.get_state() == CellState::Free
                     && forward_cell.get_speed_limit() > 0
@@ -1066,7 +1084,7 @@ mod tests {
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
         let mut intentions: Intentions = Intentions::new();
-    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true);
+    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true, 10);
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
     vehicle.set_intention(unwrapped_intention);
@@ -1149,7 +1167,7 @@ mod tests {
         current_state.insert(blocked_cell.get_id(), blocking_vehicle.id);
 
         let mut intentions = Intentions::new();
-    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true);
+    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true, 10);
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
     vehicle.set_intention(unwrapped_intention);
@@ -1236,7 +1254,7 @@ mod tests {
         current_state.insert(source_cell.get_right_id(), blocking_vehicle2.id);
 
         let mut intentions = Intentions::new();
-    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true);
+    let collected_intention = find_alternate_intention(&net, &current_state, &vehicle, true, 10);
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
     vehicle.set_intention(unwrapped_intention);
@@ -1302,5 +1320,68 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The forward-roll reachability guard must honour the SAME bound the per-tick reconnect
+    /// uses (`reconnect_max_depth`), not a separate hard-coded constant. A roll whose rejoin
+    /// point sits at BFS depth 2 is authorized only when the bound is >= 2; otherwise the
+    /// guard would green-light a roll that next tick's reconnect (same bound) cannot follow,
+    /// forcing a needless full A*. Fast paths (route continues straight / forward is the
+    /// destination) bypass the BFS and ignore the bound entirely.
+    #[test]
+    fn test_forward_guard_uses_reconnect_depth_bound() {
+        let sl = 3;
+        let mut net = GridRoads::new();
+        // Cached route 1 -> 2 -> 3. The vehicle sits at route[0]=1.
+        net.add_cell(Cell::new(1).with_speed_limit(sl).with_forward_node(2).with_point(new_point(0.0, 0.0, None)).build());
+        net.add_cell(Cell::new(2).with_speed_limit(sl).with_forward_node(3).with_point(new_point(1.0, 0.0, None)).build());
+        net.add_cell(Cell::new(3).with_speed_limit(sl).with_point(new_point(2.0, 0.0, None)).build());
+        // Off-route detour 10 -> 11 -> 2: rejoins the cache (cell 2) at BFS depth 2.
+        net.add_cell(Cell::new(10).with_speed_limit(sl).with_forward_node(11).with_point(new_point(0.0, 1.0, None)).build());
+        net.add_cell(Cell::new(11).with_speed_limit(sl).with_forward_node(2).with_point(new_point(1.0, 1.0, None)).build());
+
+        let mut vehicle = Vehicle::new(1).with_cell(1).with_speed(3).build();
+        vehicle.cached_route = vec![1, 2, 3];
+        vehicle.route_idx = 0;
+
+        // BFS path: rejoin is at depth 2, so the bound decides.
+        assert!(!forward_keeps_reachable(&vehicle, 10, &net, 1), "bound 1 < rejoin depth 2 -> not authorized");
+        assert!(forward_keeps_reachable(&vehicle, 10, &net, 2), "bound 2 == rejoin depth 2 -> authorized");
+
+        // Fast paths ignore the bound: route continues straight onto 2, and 3 is the destination.
+        assert!(forward_keeps_reachable(&vehicle, 2, &net, 0), "route continues straight onto forward -> always ok");
+        assert!(forward_keeps_reachable(&vehicle, 3, &net, 0), "forward is the destination (last route cell) -> always ok");
+    }
+
+    /// Regression (lost-for-tailed): an off-cache vehicle whose only route to the destination
+    /// needs a lane change that is momentarily on cooldown (tail mid-maneuver, modelled here by
+    /// `timer_non_maneuvers > 0`) must NOT latch `confusion`. The maneuvers-disabled A* fails,
+    /// but the destination is still reachable WITH a maneuver, so the vehicle rolls forward and
+    /// stays un-confused (recoverable) instead of being written off as lost. Confusion must
+    /// still latch when the destination is genuinely unreachable even with maneuvers.
+    #[test]
+    fn test_offcache_cooldown_reachable_via_maneuver_does_not_confuse() {
+        let sl = 3;
+        let mut net = GridRoads::new();
+        // From cell 1 the ONLY route to 4 is the lane change 1 -(right)-> 3 -> 4.
+        // Going straight (1 -> 2) is a dead-end, so a maneuvers-disabled A* finds no path.
+        net.add_cell(Cell::new(1).with_speed_limit(sl).with_forward_node(2).with_right_node(3).with_point(new_point(0.0, 0.0, None)).build());
+        net.add_cell(Cell::new(2).with_speed_limit(sl).with_point(new_point(1.0, 0.0, None)).build()); // dead-end
+        net.add_cell(Cell::new(3).with_speed_limit(sl).with_forward_node(4).with_point(new_point(0.0, 1.0, None)).build());
+        net.add_cell(Cell::new(4).with_speed_limit(sl).with_point(new_point(1.0, 1.0, None)).build()); // destination
+        net.add_cell(Cell::new(500).with_speed_limit(sl).with_point(new_point(9.0, 9.0, None)).build()); // disconnected
+
+        let state: HashMap<CellID, VehicleID> = HashMap::new();
+
+        // Reachable-only-via-maneuver + maneuver on cooldown -> must NOT confuse.
+        let mut v = Vehicle::new(1).with_cell(1).with_speed(3).with_destination(4).build();
+        v.timer_non_maneuvers = 5; // tail still completing a previous maneuver -> maneuvers disabled
+        let intention = find_intention(&net, &state, &v, &LocalLogger::none()).unwrap();
+        assert_ne!(intention.confusion, Some(true), "reachable-via-maneuver must not latch confusion (would be lost)");
+
+        // Control: genuinely unreachable destination, maneuvers allowed -> confusion DOES latch.
+        let v = Vehicle::new(2).with_cell(1).with_speed(3).with_destination(500).build();
+        let intention = find_intention(&net, &state, &v, &LocalLogger::none()).unwrap();
+        assert_eq!(intention.confusion, Some(true), "truly unreachable destination still latches confusion");
     }
 }
