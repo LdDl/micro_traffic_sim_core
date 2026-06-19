@@ -9,6 +9,7 @@ use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
 use crate::shortest_path::router::{shortest_path, path_no_goal, reconnect_to_cache};
+use crate::shortest_path::heuristics::edge_time;
 use crate::shortest_path::path::Path;
 use crate::shortest_path::router::AStarError;
 use crate::verbose::*;
@@ -662,7 +663,9 @@ fn check_alternate_direction(
 
     match shortest_path(cell, target_cell, net, true, max_depth) {
         Ok(path) => {
-            let cost = path.cost() + source_cell.distance_to(cell);
+            // previously source_cell.distance_to(cell) was used as additiona. now it is edge_time(source_cell, cell)
+            // to match units with path.cost() (travel time).
+            let cost = path.cost() + edge_time(source_cell, cell);
             Ok((cell_id, cost))
         }
         Err(shortest_path::router::AStarError::NoPathFound { .. }) => {
