@@ -6,6 +6,7 @@ use crate::grid::cell::CellID;
 use crate::verbose::*;
 use std::collections::HashSet;
 use std::cmp::Reverse;
+use std::iter::once;
 
 use std::fmt;
 
@@ -292,6 +293,23 @@ pub fn solve_conflicts<'b>(
                 if participant.intention.intention_maneuver != LaneChangeType::NoChange {
                     participant.intention.intention_cell_id = conflict.cell_id;
                     participant.intention.intention_speed = 1;
+                }
+                // Sweep-through guard (one-occupant-per-cell): a multi-cell winner must not
+                // drive THROUGH a cell already reserved by a desperate winner this tick. Scan
+                // the cells it would enter (the intermediate cells, then the head); if one is
+                // claimed, clamp the winner to a single step into its first cell - or block it
+                // outright when that very first cell is the claimed one.
+                let first_claimed = participant.intention.intermediate_cells.iter()
+                    .chain(once(&participant.intention.intention_cell_id))
+                    .position(|c| claimed_cells.contains(c));
+                if let Some(j) = first_claimed {
+                    if j == 0 {
+                        participant.block_with_speed(0);
+                    } else {
+                        let first_cell = *participant.intention.intermediate_cells.first()
+                            .unwrap_or(&participant.intention.intention_cell_id);
+                        participant.set_single_step_intention(first_cell);
+                    }
                 }
             } else {
                 // Stay still
@@ -614,5 +632,47 @@ mod tests {
         // Check second conflict resolution
         assert_eq!(vehicles.get(&3).unwrap().intention.intention_speed, 0, "Vehicle 3 should be blocked");
         assert_eq!(vehicles.get(&4).unwrap().intention.intention_speed, 1, "Vehicle 4 should keep its original speed (has priority, NoChange)");
+    }
+
+    /// Sweep-through guard (one-occupant-per-cell): a NORMAL multi-cell priority winner must
+    /// NOT drive through a cell already reserved by a desperate winner this tick. Vehicle 1
+    /// (desperate) reserves cell 20; vehicle 3 is the normal priority winner of a separate
+    /// conflict, but its 2-cell move (-> 11 -> 20) would sweep into the reserved cell 20. It
+    /// must be clamped to a single step (stop at 11) instead of sweeping through.
+    #[test]
+    fn test_normal_multicell_winner_does_not_sweep_claimed_cell() {
+        let log = LocalLogger::none();
+        let mut vehicles = VehiclesStorage::new();
+
+        // Desperate winner of conflict on cell 20 -> reserves cell 20.
+        let mut d = create_test_vehicle(1, 1, LaneChangeType::NoChange, 20);
+        d.wait_ticks = 9999;
+        vehicles.insert(1, d);
+        vehicles.insert(2, create_test_vehicle(2, 1, LaneChangeType::NoChange, 20)); // loser of that conflict
+
+        // Normal priority winner with a 2-cell move whose head is the reserved cell 20.
+        let mut w = Vehicle::new(3).with_behaviour(BehaviourType::Undefined).with_speed(2).build();
+        w.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 20,
+            intermediate_cells: vec![11],
+            intention_speed: 2,
+            ..Default::default()
+        });
+        vehicles.insert(3, w);
+        vehicles.insert(4, create_test_vehicle(4, 1, LaneChangeType::NoChange, 11)); // loser of conflict on 11
+
+        // The normal conflict is listed FIRST to prove desperate-first reserves 20 before it.
+        let conflicts = vec![
+            CellConflict { cell_id: 11, participants: vec![3, 4], priority_participant_index: 0, conflict_type: ConflictType::MergeForward },
+            CellConflict { cell_id: 20, participants: vec![1, 2], priority_participant_index: 0, conflict_type: ConflictType::MergeForward },
+        ];
+        solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+
+        let w = vehicles.get(&3).unwrap();
+        assert_eq!(w.intention.intention_cell_id, 11, "winner clamped to stop before the reserved cell");
+        assert!(w.intention.intermediate_cells.is_empty(), "no multi-cell sweep through the reserved cell");
+        assert_eq!(w.intention.intention_speed, 1, "single-cell step");
+        assert_ne!(vehicles.get(&1).unwrap().intention.intention_speed, 0, "desperate vehicle keeps the reserved cell 20");
     }
 }
