@@ -233,6 +233,33 @@ mod tests {
         assert!(!w.intention.tail_intention_cells.contains(&16), "the head cell is not also occupied by the tail");
     }
 
+    /// One-occupant-per-cell vs a standing non-participant: a desperate winner must NOT be
+    /// granted a cell that is physically occupied this tick by a vehicle outside the conflict
+    /// (this CA has no same-tick "following" into a vacated cell). It is granted only when the
+    /// cell is actually free.
+    #[test]
+    fn test_desperate_does_not_enter_occupied_cell() {
+        let log = LocalLogger::none();
+
+        // Cell 15 is occupied by a standing non-participant (id 99) -> desperate winner blocked.
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15)); // desperate, wants 15
+        vehicles.insert(2, veh(2, 11, 0.0, 2, 0, LaneChangeType::NoChange, 15));    // loser
+        vehicles.insert(99, veh(99, 15, 0.0, 0, 0, LaneChangeType::Block, 15));     // standing ON 15, NOT a participant
+        let conflicts = vec![CellConflict { cell_id: 15, participants: vec![1, 2], priority_participant_index: 0, conflict_type: ConflictType::MergeForward }];
+        solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+        assert_eq!(speed(&vehicles, 1), 0, "desperate winner must NOT enter a cell occupied by a standing non-participant");
+        assert_eq!(speed(&vehicles, 99), 0, "the standing occupant is untouched");
+
+        // Same conflict but cell 15 is free -> desperate winner is granted it.
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+        vehicles.insert(2, veh(2, 11, 0.0, 2, 0, LaneChangeType::NoChange, 15));
+        let conflicts = vec![CellConflict { cell_id: 15, participants: vec![1, 2], priority_participant_index: 0, conflict_type: ConflictType::MergeForward }];
+        solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+        assert_ne!(speed(&vehicles, 1), 0, "desperate winner is granted a free cell");
+    }
+
     /// A desperate winner of one conflict blocks the NORMAL winner of a *separate* conflict
     /// that targets the same cell -and the desperate-first reordering makes this hold
     /// regardless of input order.

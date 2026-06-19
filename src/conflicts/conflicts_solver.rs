@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use crate::maneuver::LaneChangeType;
 use crate::grid::cell::CellID;
 use crate::verbose::*;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::cmp::Reverse;
 use std::iter::once;
 
@@ -95,6 +95,24 @@ pub fn solve_conflicts<'b>(
     // Cells already granted to a desperate (patience-override) winner this tick, so no later
     // grant (desperate OR normal) can put a second vehicle on the same cell.
     let mut claimed_cells: HashSet<CellID> = HashSet::new();
+    // Cells physically occupied RIGHT NOW (head + materialized tail of every vehicle). At
+    // solve time vehicle positions have not changed yet (movement is a later pipeline step),
+    // so this equals Session::current_position. In this CA a vehicle never enters a cell that
+    // is occupied this tick (it stops behind the current position of the vehicle ahead - there
+    // is no same-tick "following" into a vacated cell), so the desperate override must not be
+    // granted a currently-occupied cell either. Mirrors Session::current_position's head+tail.
+    let occupancy: HashMap<CellID, VehicleID> = {
+        let mut occ = HashMap::new();
+        for (id, v) in vehicles.iter() {
+            occ.insert(v.cell_id, *id);
+            for &tail_cell in &v.tail_cells {
+                if tail_cell > 0 {
+                    occ.insert(tail_cell, *id);
+                }
+            }
+        }
+        occ
+    };
     // Resolve desperate conflicts FIRST so claimed_cells is complete before any normal grant;
     // otherwise a normal winner processed earlier could take a cell a later desperate winner
     // also claims. Partition preserves relative order within each group (determinism).
@@ -163,14 +181,22 @@ pub fn solve_conflicts<'b>(
                     })
                     .unwrap_or(-1);
                 if entered >= 0 {
-                    // Granted unless another desperate winner already took this cell this
-                    // tick; if taken, the cell is unavailable to everyone here -> block all
-                    // (preserves the one-occupant-per-cell invariant across conflicts).
-                    let granted = claimed_cells.insert(entered);
+                    // Granted unless the cell is unavailable, in which case block all
+                    // participants here (preserve one-occupant-per-cell). It is unavailable if
+                    // either (1) another desperate winner already claimed it this tick, or
+                    // (2) it is physically occupied right now by some other vehicle - the
+                    // override must not force a move into a standing vehicle (no same-tick
+                    // following in this CA). `claimed_cells.insert` is only attempted when the
+                    // cell is free, so a denied grant never reserves it.
+                    let occupied_by_other = occupancy
+                        .get(&entered)
+                        .map(|&occ_id| occ_id != win_id)
+                        .unwrap_or(false);
+                    let granted = !occupied_by_other && claimed_cells.insert(entered);
                     if verbose.is_at_least(VerboseLevel::Additional) {
                         verbose.log_with_fields(
                             EVENT_CONFLICT_SOLVE,
-                            if granted { "Patience override - desperate vehicle wins" } else { "Patience override - entered cell already claimed, blocking" },
+                            if granted { "Patience override - desperate vehicle wins" } else { "Patience override - entered cell unavailable (claimed or occupied), blocking" },
                             &[
                                 ("cell", &conflict.cell_id),
                                 ("winner_id", &win_id),
