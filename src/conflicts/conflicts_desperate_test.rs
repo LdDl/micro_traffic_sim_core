@@ -101,6 +101,33 @@ mod tests {
         assert_ne!(speed(&vehicles, 2), 0, "most-starved desperate vehicle wins (single winner)");
     }
 
+    /// Tie-break determinism: when several desperate vehicles share the SAME wait_ticks, the
+    /// winner is the LOWEST vehicle id (earliest spawn), NOT whoever happens to be last in the
+    /// participant list. Proven by flipping the participant order and getting the same winner -
+    /// previously `max_by_key` returned the last equal-maximum, so order silently decided it.
+    #[test]
+    fn test_most_starved_tie_broken_by_lowest_id() {
+        let log = LocalLogger::none();
+
+        // participants [1, 2]: equal wait_ticks -> lower id (1) wins.
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+        vehicles.insert(2, veh(2, 11, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+        let conflicts = vec![CellConflict { cell_id: 15, participants: vec![1, 2], priority_participant_index: 0, conflict_type: ConflictType::MergeForward }];
+        solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+        assert_ne!(speed(&vehicles, 1), 0, "lowest-id desperate vehicle wins the tie");
+        assert_eq!(speed(&vehicles, 2), 0, "higher-id desperate vehicle yields");
+
+        // participants [2, 1]: SAME winner (1) despite reversed order -> order-independent.
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+        vehicles.insert(2, veh(2, 11, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+        let conflicts = vec![CellConflict { cell_id: 15, participants: vec![2, 1], priority_participant_index: 0, conflict_type: ConflictType::MergeForward }];
+        solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+        assert_ne!(speed(&vehicles, 1), 0, "winner unchanged when participant order is reversed");
+        assert_eq!(speed(&vehicles, 2), 0, "tie-break does not depend on iteration order");
+    }
+
     /// Desperation overrides a fixed conflict-zone winner (breaks junction right-of-way
     /// starvation). The zone conflict is intercepted before its normal handling.
     #[test]
