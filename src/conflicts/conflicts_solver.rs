@@ -5,6 +5,7 @@ use crate::maneuver::LaneChangeType;
 use crate::grid::cell::CellID;
 use crate::verbose::*;
 use std::collections::HashSet;
+use std::cmp::Reverse;
 
 use std::fmt;
 
@@ -132,15 +133,19 @@ pub fn solve_conflicts<'b>(
             ConflictType::Tail | ConflictType::SelfTail | ConflictType::TailCrossLaneChange
         );
         if !is_physical {
+            // Most-starved (highest wait_ticks) wins. Ties are broken deterministically by
+            // the LOWEST vehicle id (earliest spawn), NOT by participant iteration order -
+            // `max_by_key` otherwise returns the last of several equal maxima, making the
+            // winner depend on the order participants happen to sit in the conflict.
             let desperate_winner = conflict
                 .participants
                 .iter()
                 .enumerate()
                 .filter_map(|(i, id)| {
-                    vehicles.get(id).filter(|v| v.is_desperate()).map(|v| (i, v.wait_ticks))
+                    vehicles.get(id).filter(|v| v.is_desperate()).map(|v| (i, v.wait_ticks, *id))
                 })
-                .max_by_key(|&(_, wait)| wait);
-            if let Some((win_idx, _)) = desperate_winner {
+                .max_by_key(|&(_, wait, id)| (wait, Reverse(id)));
+            if let Some((win_idx, _, _)) = desperate_winner {
                 let win_id = conflict.participants[win_idx];
                 // The cell the winner actually ENTERS this tick is its first path cell - the
                 // contested intermediate, not the far head cell of a multi-cell move. Reserving
