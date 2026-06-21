@@ -14,7 +14,7 @@ use crate::shortest_path::path::Path;
 use crate::shortest_path::router::AStarError;
 use crate::verbose::*;
 use indexmap::IndexMap;
-use rand::random;
+use crate::utils::rand::random_f64;
 use std::collections::HashMap;
 use std::f64::INFINITY;
 use std::fmt;
@@ -409,7 +409,7 @@ pub fn find_intention<'a>(
     let slowdown_allowed = vehicle.timer_non_slowdown <= 0;
     // tmp code:
     let slow_down_factor = vehicle.slow_down_factor;
-    if slowdown_allowed && intention_speed > 0 && random::<f64>() < slow_down_factor {
+    if slowdown_allowed && intention_speed > 0 && random_f64() < slow_down_factor {
         // @todo: consider to switch two lines below.
         speed_possible = intention_speed;
         // intention_speed = (intention_speed - 1).max(0);

@@ -3,8 +3,7 @@ use crate::agents::{Vehicle, VehicleID};
 use crate::conflicts::ConflictType;
 use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType};
-use rand::Rng;
-use crate::utils::rand::rng;
+use crate::utils::rand::random_bool;
 use indexmap::IndexMap;
 
 const EPS_COOP_LEVEL: f64 = 0.0001;
@@ -254,9 +253,7 @@ pub fn resolve_by_speed_and_cooperativity<'a>(
     let coop_diff = vehicle_one.cooperativity - vehicle_two.cooperativity;
     if coop_diff.abs() < EPS_COOP_LEVEL {
         // Random choice for equal cooperativity
-        // let mut rng = rand::rng(); // This is not working in the test because of the rng() function
-        let mut rng = rng();
-        if rng.random_bool(0.5) {
+        if random_bool(0.5) {
             return (intention_one, ConflictType::MergeForward);
         }
         return (intention_two, ConflictType::MergeForward);
