@@ -817,9 +817,6 @@ impl Session {
         // 8. Collect current vehicles positions for state dump
         let mut states_dump: Vec<VehicleState> = Vec::with_capacity(self.vehicles.len());
         for vehicle in self.vehicles.values() {
-            let pt = vehicles_grid.get_cell(&vehicle.cell_id)
-                .ok_or(SessionError::CellNotFound(vehicle.cell_id))?
-                .get_point();
             let mut occupied_points: Vec<[f64; 2]> = Vec::with_capacity(vehicle.tail_cells.len());
             for &tail_cell_id in &vehicle.tail_cells {
                 if tail_cell_id > 0 {
@@ -831,7 +828,6 @@ impl Session {
             }
             states_dump.push(VehicleState {
                 occupied_points,
-                last_point: [pt.x(), pt.y()],
                 last_cell: vehicle.cell_id,
                 tail_cells: vehicle.tail_cells.clone(),
                 last_intermediate_cells: vehicle.intention.intermediate_cells.clone(),
