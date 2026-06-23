@@ -178,6 +178,18 @@ impl SessionsStorage {
         }
     }
 
+    /// Removes a session by ID and returns the owned [`Session`], if present.
+    ///
+    /// Unlike TTL purge, this is an explicit, immediate removal: the caller takes
+    /// ownership of the session (e.g. to run a long batch operation without
+    /// holding the storage lock, then drop it on completion).
+    /// Returns `None` if no session exists under the ID.
+    /// Expiration is not considered - a not-yet-purged expired
+    /// session is still returned (and thereby removed).
+    pub fn remove_session(&mut self, session_id: &Uuid) -> Option<Session> {
+        self.store.remove(session_id)
+    }
+
     /// Immediately removes all expired sessions and emits a `session_expired`
     /// log event for each one (if storage verbosity allows). This is also
     /// called automatically on access when the throttling interval is reached.
@@ -246,5 +258,26 @@ mod tests {
         sleep(Duration::from_secs(4));
         let exists = storage.with_session_mut(&object_id, |_s| {}).is_some();
         assert!(!exists, "session should be expired after final sleep");
+    }
+
+    #[test]
+    fn test_remove_session() {
+        let mut storage = SessionsStorage::new();
+        let session = crate::simulation::session::Session::default(None);
+        let id = session.get_id();
+        assert!(storage.register_session(id, session, None));
+        assert_eq!(storage.sessions_num(), 1);
+
+        // Explicit removal hands back the owned session and drops it from the store.
+        let removed = storage.remove_session(&id);
+        assert!(removed.is_some(), "remove should return the session");
+        assert_eq!(removed.unwrap().get_id(), id);
+        assert_eq!(storage.sessions_num(), 0);
+
+        // Removing again is a no-op.
+        assert!(storage.remove_session(&id).is_none());
+
+        // After removal the session is no longer accessible.
+        assert!(storage.with_session_mut(&id, |_s| {}).is_none());
     }
 }
