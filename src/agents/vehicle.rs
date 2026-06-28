@@ -105,10 +105,10 @@ pub struct Vehicle {
     /// A boolean indicating if the vehicle is a confclict participant
     pub is_conflict_participant: bool,
     /// Consecutive steps the vehicle has failed to move. Drives the patience-based
-    /// right-of-way override: once `wait_ticks` reaches the vehicle's cooperativity-scaled
+    /// right-of-way override: once `wait_steps` reaches the vehicle's cooperativity-scaled
     /// patience threshold, the vehicle wins contested cells in conflict resolution
     /// ("desperate" - see `Vehicle::is_desperate`). Reset to 0 on any actual move.
-    pub wait_ticks: i32,
+    pub wait_steps: i32,
     /// Corresponding trip identifier
     pub trip: TripID,
     /// Number of transits have been made by the vehicle
@@ -222,7 +222,7 @@ impl Vehicle {
                 destination: -1,
                 trip_destination: -1,
                 is_conflict_participant: false,
-                wait_ticks: 0,
+                wait_steps: 0,
                 trip: -1,
                 transits_made: 0,
                 transit_cells: Vec::new(),
@@ -602,7 +602,7 @@ impl Vehicle {
     /// so a vehicle blocked by an occupied cell (a queue follower) is never desperate in
     /// any useful sense; and it never overrides a `Tail` (physical body) conflict.
     pub fn is_desperate(&self) -> bool {
-        self.wait_ticks >= self.patience()
+        self.wait_steps >= self.patience()
     }
 }
 

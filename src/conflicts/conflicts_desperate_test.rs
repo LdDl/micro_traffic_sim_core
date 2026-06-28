@@ -22,7 +22,7 @@ mod tests {
             .with_aggressive_level(aggr)
             .with_speed(speed)
             .build();
-        v.wait_ticks = wait;
+        v.wait_steps = wait;
         v.set_intention(VehicleIntention {
             intention_maneuver: maneuver,
             intention_cell_id: target,
@@ -88,7 +88,7 @@ mod tests {
     }
 
     /// Several desperate vehicles still yield exactly ONE winner: the most-starved
-    /// (highest wait_ticks) one.
+    /// (highest wait_steps) one.
     #[test]
     fn test_most_starved_wins() {
         let log = LocalLogger::none();
@@ -101,7 +101,7 @@ mod tests {
         assert_ne!(speed(&vehicles, 2), 0, "most-starved desperate vehicle wins (single winner)");
     }
 
-    /// Tie-break determinism: when several desperate vehicles share the SAME wait_ticks, the
+    /// Tie-break determinism: when several desperate vehicles share the SAME wait_steps, the
     /// winner is the LOWEST vehicle id (earliest spawn), NOT whoever happens to be last in the
     /// participant list. Proven by flipping the participant order and getting the same winner -
     /// previously `max_by_key` returned the last equal-maximum, so order silently decided it.
@@ -109,7 +109,7 @@ mod tests {
     fn test_most_starved_tie_broken_by_lowest_id() {
         let log = LocalLogger::none();
 
-        // participants [1, 2]: equal wait_ticks -> lower id (1) wins.
+        // participants [1, 2]: equal wait_steps -> lower id (1) wins.
         let mut vehicles = VehiclesStorage::new();
         vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
         vehicles.insert(2, veh(2, 11, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
@@ -183,7 +183,7 @@ mod tests {
         let mut vehicles = VehiclesStorage::new();
         // Desperate vehicle 1 intends to move 3 cells: current 15 -> 16 -> 17 -> head 18.
         let mut w = Vehicle::new(1).with_cell(15).with_aggressive_level(0.0).with_speed(3).build();
-        w.wait_ticks = 9999;
+        w.wait_steps = 9999;
         w.set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
             intention_cell_id: 18,
@@ -212,7 +212,7 @@ mod tests {
         // Tailed vehicle: head at 15, tail [13, 14] (furthest..nearest). Intends a 3-cell
         // move 15 -> 16 -> 17 -> head 18; its stale tail intention (multi-cell) would be [16,17].
         let mut w = Vehicle::new(1).with_cell(15).with_aggressive_level(0.0).with_speed(3).build();
-        w.wait_ticks = 9999;
+        w.wait_steps = 9999;
         w.tail_cells = vec![13, 14];
         w.set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
@@ -296,9 +296,9 @@ mod tests {
     #[test]
     fn test_is_desperate_threshold() {
         let mut aggressive = Vehicle::new(1).with_aggressive_level(1.0).build(); // patience 300
-        aggressive.wait_ticks = PATIENCE_MIN - 1;
+        aggressive.wait_steps = PATIENCE_MIN - 1;
         assert!(!aggressive.is_desperate(), "below threshold -> not desperate");
-        aggressive.wait_ticks = PATIENCE_MIN;
+        aggressive.wait_steps = PATIENCE_MIN;
         assert!(aggressive.is_desperate(), "at threshold -> desperate");
     }
 }

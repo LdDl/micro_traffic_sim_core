@@ -143,7 +143,7 @@ pub fn solve_conflicts<'b>(
         // A vehicle stuck past its patience threshold (Vehicle::is_desperate) wins the
         // contested cell, overriding normal right-of-way, the fixed conflict-zone winner
         // AND the left/right rule. Among several desperate participants the most-starved
-        // (highest wait_ticks) wins, giving a single deterministic winner. It NEVER applies
+        // (highest wait_steps) wins, giving a single deterministic winner. It NEVER applies
         // to physical Tail conflicts (you cannot force through a body), and `claimed_cells`
         // keeps the one-occupant-per-cell invariant across conflicts. Non-desperate
         // conflicts fall through untouched to the usual resolution below.
@@ -152,7 +152,7 @@ pub fn solve_conflicts<'b>(
             ConflictType::Tail | ConflictType::SelfTail | ConflictType::TailCrossLaneChange
         );
         if !is_physical {
-            // Most-starved (highest wait_ticks) wins. Ties are broken deterministically by
+            // Most-starved (highest wait_steps) wins. Ties are broken deterministically by
             // the LOWEST vehicle id (earliest spawn), NOT by participant iteration order -
             // `max_by_key` otherwise returns the last of several equal maxima, making the
             // winner depend on the order participants happen to sit in the conflict.
@@ -161,7 +161,7 @@ pub fn solve_conflicts<'b>(
                 .iter()
                 .enumerate()
                 .filter_map(|(i, id)| {
-                    vehicles.get(id).filter(|v| v.is_desperate()).map(|v| (i, v.wait_ticks, *id))
+                    vehicles.get(id).filter(|v| v.is_desperate()).map(|v| (i, v.wait_steps, *id))
                 })
                 .max_by_key(|&(_, wait, id)| (wait, Reverse(id)));
             if let Some((win_idx, _, _)) = desperate_winner {
@@ -672,7 +672,7 @@ mod tests {
 
         // Desperate winner of conflict on cell 20 -> reserves cell 20.
         let mut d = create_test_vehicle(1, 1, LaneChangeType::NoChange, 20);
-        d.wait_ticks = 9999;
+        d.wait_steps = 9999;
         vehicles.insert(1, d);
         vehicles.insert(2, create_test_vehicle(2, 1, LaneChangeType::NoChange, 20)); // loser of that conflict
 
