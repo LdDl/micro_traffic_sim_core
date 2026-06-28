@@ -79,8 +79,11 @@ impl fmt::Display for BehaviourType {
 /// Represents behaviour parameters for an agent.
 #[derive(Debug, Clone, Copy)]
 pub struct BehaviourParameters {
-    /// Factor affecting the slowdown of the agent.
-    slowdown_factor: f64,
+    /// Factor affecting the slowdown of the agent (probability of a random dawdle while moving).
+    slowdown_factor_p: f64,
+    /// VDR slow-to-start probability `p0` used while the agent is STOPPED.
+    /// `p0 >= p` (the moving slowdown) produces the realistic capacity drop / metastable jam outflow.
+    slow_to_start_factor_p0: f64,
     /// Speed limit for the agent.
     speed_limit: i32,
     /// Aggressiveness level of the agent.
@@ -90,7 +93,16 @@ pub struct BehaviourParameters {
 }
 
 impl BehaviourParameters {
-    /// Constructs new behaviour parameters based on the behaviour type.
+    /// Constructs `BehaviourParameters` for a behaviour type.
+    ///
+    /// Each type maps to a tuple `(p, p0, speed_limit, aggressive_level, min_safe_distance)` where:
+    /// - `p`  - NaSch moving-dawdle probability;
+    /// - `p0` - VDR slow-to-start probability while stopped.
+    ///   `p0 >= p` is the VDR asymmetry that produces the capacity drop; widen `(p0 - p)` to
+    ///   strengthen the drop / metastability (without amplifying gridlock);
+    /// - `speed_limit`, `aggressive_level`, `min_safe_distance` - per-type movement defaults.
+    ///
+    /// The concrete per-type values are the `match` arms below (the single source of truth).
     ///
     /// # Arguments
     ///
@@ -108,20 +120,31 @@ impl BehaviourParameters {
     /// let behaviour_params = BehaviourParameters::from_behaviour_type(BehaviourType::Aggressive);
     /// ```
     pub fn from_behaviour_type(behaviour: BehaviourType) -> Self {
-        match behaviour {
-            BehaviourType::Block => Self::new(1.0, 0, 1.0, 0),
-            BehaviourType::Aggressive => Self::new(0.1, 5, 0.9, 0),
-            BehaviourType::Cooperative => Self::new(0.5, 4, 0.0, 1),
-            BehaviourType::LimitSpeedByTrip => Self::new(0.7, 3, 0.1, 1),
-            BehaviourType::Undefined => Self::new(0.5, 2, 0.5, 0),
+        let (p, p0, speed_limit, aggressive, min_safe) = match behaviour {
+            BehaviourType::Block => (1.0, 1.0, 0, 1.0, 0),
+            BehaviourType::Aggressive => (0.1, 0.35, 5, 0.9, 0),
+            BehaviourType::Cooperative => (0.5, 0.65, 4, 0.0, 1),
+            BehaviourType::LimitSpeedByTrip => (0.7, 0.8, 3, 0.1, 1),
+            BehaviourType::Undefined => (0.5, 0.6, 2, 0.5, 0),
+        };
+        Self {
+            slowdown_factor_p: p,
+            slow_to_start_factor_p0: p0,
+            speed_limit,
+            aggressive_level: aggressive,
+            min_safe_distance: min_safe,
         }
     }
 
-    /// Constructs a new instance of `BehaviourParameters`.
+    /// Constructs `BehaviourParameters` directly from raw values.
+    ///
+    /// `slow_to_start_factor_p0` is defaulted to `slowdown_factor_p` (`p0 == p`, i.e. NO VDR
+    /// asymmetry and so no capacity drop). Use `from_behaviour_type` for the per-type presets that
+    /// raise `p0` above `p`. When `p0 = p``: no VDR asymmetry by default.
     ///
     /// # Arguments
     ///
-    /// - `slowdown_factor`: Factor affecting the slowdown of the agent.
+    /// - `slowdown_factor_p`: the NaSch random-slowdown probability `p` (while moving).
     /// - `speed_limit`: Speed limit for the agent.
     /// - `aggressive_level`: Aggressiveness level of the agent.
     /// - `min_safe_distance`: Minimum safe distance required by the agent.
@@ -137,9 +160,10 @@ impl BehaviourParameters {
     ///
     /// let behaviour_params = BehaviourParameters::new(0.1, 2, 0.4, 1);
     /// ```
-    pub fn new(slowdown_factor: f64, speed_limit: i32, aggressive_level: f64, min_safe_distance: i32) -> Self {
+    pub fn new(slowdown_factor_p: f64, speed_limit: i32, aggressive_level: f64, min_safe_distance: i32) -> Self {
         Self {
-            slowdown_factor,
+            slowdown_factor_p,
+            slow_to_start_factor_p0: slowdown_factor_p,
             speed_limit,
             aggressive_level,
             min_safe_distance,
@@ -151,9 +175,14 @@ impl BehaviourParameters {
         self.speed_limit
     }
 
-    /// Returns the slowdown factor.
-    pub fn slowdown_factor(&self) -> f64 {
-        self.slowdown_factor
+    /// Returns the slowdown factor (random dawdle probability while moving).
+    pub fn slowdown_factor_p(&self) -> f64 {
+        self.slowdown_factor_p
+    }
+
+    /// Returns the VDR slow-to-start probability used while stopped.
+    pub fn slow_to_start_factor_p0(&self) -> f64 {
+        self.slow_to_start_factor_p0
     }
 
     /// Returns the minimum safe distance.
@@ -178,7 +207,7 @@ mod tests {
     #[test]
     fn test_behaviour_parameters_from() {
         let params = BehaviourParameters::from_behaviour_type(BehaviourType::Aggressive);
-        assert_eq!(params.slowdown_factor(), 0.1);
+        assert_eq!(params.slowdown_factor_p(), 0.1);
         assert_eq!(params.speed_limit(), 5);
         assert_eq!(params.aggressive_level(), 0.9);
         assert_eq!(params.min_safe_distance(), 0);

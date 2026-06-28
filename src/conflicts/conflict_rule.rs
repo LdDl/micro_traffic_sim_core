@@ -39,7 +39,7 @@ static CONFLICT_RULES: &[ConflictRule] = conflict_rules![
     // Both vehicles are changing lane on a single road
     // Two source lanes on one road is going to merge into single lane on another road
     [ |v1, v2| changing_lane(v1) && changing_lane(v2), resolve_merge_lane_change ],
-    
+
     // Both vehicles are moving forward on different lanes of different roads
     // Differet roads are going to merge into single road
     [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && v2.intention.intention_maneuver == LaneChangeType::NoChange, resolve_merge_forward ],

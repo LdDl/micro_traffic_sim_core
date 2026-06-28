@@ -1,2 +1,7 @@
 /target
 examples/complete-example/*
+docs/
+examples/route_bench/
+examples/fundamental_diagram/
+examples/open_road
+examples/open_road_multilane
