@@ -60,6 +60,37 @@ mod tests {
         assert_ne!(speed(&vehicles, 2), 0, "desperate vehicle wins the contested cell");
     }
 
+    /// The "stuck-too-long violator" scenario, spelled out along the SPEED axis: the normal
+    /// rule hands a contested cell to whoever is FASTER (`resolve_by_speed_and_cooperativity`,
+    /// conflict_rule.rs) - so the priority participant here is the fast vehicle (index 0). A
+    /// SLOW vehicle that has starved past its patience threshold violates right-of-way and
+    /// takes the cell anyway; the faster, patient vehicle is forced to brake (yield, speed 0).
+    #[test]
+    fn test_desperate_slow_violator_beats_faster_normal_winner() {
+        let log = LocalLogger::none();
+
+        // Baseline (nobody desperate): the FASTER vehicle (index 0, speed 4) is the rightful
+        // winner by the normal speed rule; the slower one yields. This is exactly the
+        // "intermediate-cell conflicts go to whoever is faster" behaviour.
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, veh(1, 10, 0.5, 4, 0, LaneChangeType::NoChange, 15)); // FAST, patient
+        vehicles.insert(2, veh(2, 11, 0.5, 1, 0, LaneChangeType::NoChange, 15)); // SLOW, patient
+        let conflicts = vec![CellConflict { cell_id: 15, participants: vec![1, 2], priority_participant_index: 0, conflict_type: ConflictType::MergeForward }];
+        solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+        assert_ne!(speed(&vehicles, 1), 0, "faster vehicle is the normal winner");
+        assert_eq!(speed(&vehicles, 2), 0, "slower patient vehicle yields by the normal speed rule");
+
+        // Same conflict, but now the SLOW vehicle has starved past patience: it VIOLATES and
+        // takes the cell; the faster, patient vehicle is forced to brake.
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, veh(1, 10, 0.5, 4, 0, LaneChangeType::NoChange, 15));    // FAST, patient
+        vehicles.insert(2, veh(2, 11, 0.5, 1, 9999, LaneChangeType::NoChange, 15)); // SLOW, DESPERATE
+        let conflicts = vec![CellConflict { cell_id: 15, participants: vec![1, 2], priority_participant_index: 0, conflict_type: ConflictType::MergeForward }];
+        solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+        assert_eq!(speed(&vehicles, 1), 0, "the faster vehicle is forced to brake (yield) to the violator");
+        assert_ne!(speed(&vehicles, 2), 0, "the starved slow vehicle violates right-of-way and wins the cell");
+    }
+
     /// Desperation is orthogonal to aggression: a cooperative-but-desperate vehicle beats
     /// an aggressive-but-patient one even when the latter is the priority participant.
     #[test]
