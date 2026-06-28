@@ -141,6 +141,13 @@ pub struct Vehicle {
     /// weave back (A->B->A) or hop across lanes step-by-step. Does NOT block route-following
     /// maneuvers or the forward roll. 0 = free to react.
     pub timer_reactive_lane_change: i64,
+    /// Lane-change cooldown DURATION (steps): the value `timer_reactive_lane_change` is armed to
+    /// right after a REACTIVE lane change - how many steps another reactive (blocked-escape) change
+    /// stays suppressed (anti-weaving: no A->B->A weave-back / lane-hopping). Route-following
+    /// maneuvers are NOT affected. Per-vehicle / per-driver-type: `0` = changes freely (aggressive),
+    /// larger = more hesitant (cooperative / unsure).
+    /// Could be set from `BehaviourParameters`.
+    pub lc_cooldown: i64,
     /// A value in (0; 1] representing cooperative behaviour of the vehicle.
     /// 0 - when behaviour considered to be "aggressive"
     /// 1 - fully cooperative
@@ -223,6 +230,7 @@ impl Vehicle {
                 slow_to_start_factor_p0: 0.1,
                 change_p1: 1.0,
                 timer_reactive_lane_change: 0,
+                lc_cooldown: 0,
                 cooperativity: 0.0,
                 timer_non_acceleration: 0,
                 timer_non_maneuvers: 0,
@@ -951,6 +959,14 @@ impl VehicleBuilder {
     /// Trucks: P2 <= P1 [@todo: implement trucks' P2]
     pub fn with_change_p1(mut self, p: f64) -> Self {
         self.vehicle.change_p1 = p;
+        self
+    }
+
+    /// Sets the reactive-lane-change cooldown DURATION in steps (see `Vehicle::lc_cooldown`).
+    /// `0` (default) = no cooldown (changes freely);
+    /// larger = more hesitant after a change.
+    pub fn with_lc_cooldown(mut self, steps: i64) -> Self {
+        self.vehicle.lc_cooldown = steps;
         self
     }
 
