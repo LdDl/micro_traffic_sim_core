@@ -489,12 +489,7 @@ pub fn find_intention<'a>(
                 speed_possible.max(1) + 2,
             ) {
                 Ok(path) => path,
-                Err(e) => {
-                    println!(
-                        "----->No path found error: {}", e
-                    );
-                    return Err(IntentionError::NoPathFound(e))
-                }
+                Err(e) => return Err(IntentionError::NoPathFound(e)),
             }
         },
         // Reachability over directed edges is monotone: once the destination is
