@@ -63,6 +63,15 @@ pub const PATIENCE_MIN: i32 = 300;
 /// stall). Vehicles in between scale linearly with cooperativity.
 pub const PATIENCE_MAX: i32 = 700;
 
+/// Aggression threshold above which a driver becomes a CUT-IN aggressor: it bypasses the
+/// rear-safety gap when changing lane (squeezing in front of a follower, forcing it to
+/// brake - see `check_alternate_direction`) AND wins a contested cell against any less
+/// aggressive vehicle, even one moving straight (see `aggressor_advantage`). It is a STRICT
+/// lower bound (aggressive_level > threshold), and since aggressive_level = 1 - cooperativity
+/// it is equivalent to cooperativity < 0.2. Below it, a driver respects the normal
+/// right-of-way and the full rear gap.
+pub const AGGRESSOR_CUT_IN_THRESHOLD: f64 = 0.8;
+
 /// Represents basic agent in simulation
 #[derive(Debug)]
 pub struct Vehicle {
@@ -603,6 +612,21 @@ impl Vehicle {
     /// any useful sense; and it never overrides a `Tail` (physical body) conflict.
     pub fn is_desperate(&self) -> bool {
         self.wait_steps >= self.patience()
+    }
+
+    /// The vehicle's aggressiveness in [0, 1], the complement of its cooperativity
+    /// (`aggressive_level = 1 - cooperativity`). A single style axis: high aggression =
+    /// low cooperativity. Used by the cut-in rules (see `is_aggressor`).
+    pub fn aggressive_level(&self) -> f64 {
+        1.0 - self.cooperativity
+    }
+
+    /// True when the vehicle is a CUT-IN aggressor: its aggressive_level strictly exceeds
+    /// `AGGRESSOR_CUT_IN_THRESHOLD`. Such a driver squeezes in front of followers (bypassing
+    /// the rear-safety gap on a lane change) and wins contested cells against less aggressive
+    /// vehicles, even ones moving straight - it "cuts in", forcing the other to brake.
+    pub fn is_aggressor(&self) -> bool {
+        self.aggressive_level() > AGGRESSOR_CUT_IN_THRESHOLD
     }
 }
 

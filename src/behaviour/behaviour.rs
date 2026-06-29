@@ -212,6 +212,21 @@ impl BehaviourParameters {
     pub fn aggressive_level(&self) -> f64 {
         self.aggressive_level
     }
+
+    /// Stochastic lane-change probability `P1` (`< 1`) for this behaviour. A DISCRETIONARY
+    /// (non-route) lane change that already passed incentive + safety is committed only with
+    /// probability `P1`; otherwise the driver waits this step and retries (see `lc_p1_pass`).
+    /// Route-mandatory changes bypass `P1` entirely. `P1 < 1` models driver hesitation and damps
+    /// weaving (the "tailgating dance").
+    ///
+    /// The `P1` gate itself is the Chechina/Keldysh CA lane-change rule; the affine mapping to
+    /// aggressiveness here is a LOCAL calibration (not from a paper): `P1 = 0.5 + 0.5 * aggressive_level`,
+    /// in `[0.5, 1.0]`. Cooperative drivers hesitate (floor `0.5`); aggressive ones commit readily
+    /// (the `Aggressive` preset, `aggressive_level = 0.9`, gives `~0.95`). The `0.5` floor keeps
+    /// even the meekest driver from freezing in indecision.
+    pub fn change_p1(&self) -> f64 {
+        0.5 + 0.5 * self.aggressive_level
+    }
 }
 
 #[cfg(test)]
@@ -229,6 +244,16 @@ mod tests {
         assert_eq!(params.speed_limit(), 5);
         assert_eq!(params.aggressive_level(), 0.9);
         assert_eq!(params.min_safe_distance(), 0);
+    }
+    #[test]
+    fn test_change_p1_maps_aggressiveness() {
+        // P1 = 0.5 + 0.5 * aggressive_level, in [0.5, 1.0].
+        let coop = BehaviourParameters::from_behaviour_type(BehaviourType::Cooperative); // aggr 0.0
+        assert_eq!(coop.change_p1(), 0.5, "cooperative -> floor 0.5");
+        let undef = BehaviourParameters::from_behaviour_type(BehaviourType::Undefined); // aggr 0.5
+        assert_eq!(undef.change_p1(), 0.75, "middling -> 0.75");
+        let aggr = BehaviourParameters::from_behaviour_type(BehaviourType::Aggressive); // aggr 0.9
+        assert!((aggr.change_p1() - 0.95).abs() < 1e-9, "aggressive -> ~0.95");
     }
     #[test]
     fn test_random_vehicle_behaviour_type() {
