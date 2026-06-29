@@ -219,7 +219,7 @@ impl BehaviourParameters {
     /// Route-mandatory changes bypass `P1` entirely. `P1 < 1` models driver hesitation and damps
     /// weaving (the "tailgating dance").
     ///
-    /// The `P1` gate itself is the Chechina/Keldysh CA lane-change rule; the affine mapping to
+    /// The `P1` gate itself is the CA lane-change rule; the affine mapping to
     /// aggressiveness here is a LOCAL calibration (not from a paper): `P1 = 0.5 + 0.5 * aggressive_level`,
     /// in `[0.5, 1.0]`. Cooperative drivers hesitate (floor `0.5`); aggressive ones commit readily
     /// (the `Aggressive` preset, `aggressive_level = 0.9`, gives `~0.95`). The `0.5` floor keeps
