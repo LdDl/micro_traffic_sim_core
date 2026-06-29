@@ -1,7 +1,6 @@
-use crate::behaviour::BehaviourType;
 use crate::agents::{VehicleID, Vehicle};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
-use crate::conflicts::resolve_simple_rules;
+use crate::conflicts::{resolve_simple_rules, aggressor_advantage};
 use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
 use crate::maneuver::LaneChangeType;
@@ -294,16 +293,18 @@ pub fn find_cross_trajectories_conflict_naive(
     if side_vehicle_cell.get_forward_id() == cell_b {
         // Determine priority based on behavior types and maneuver types
         let priority_vehicle_id = if conflict_type == ConflictType::TailCrossLaneChange {
-            // For tail conflicts, side vehicle has priority
+            // Tail conflict: the TAIL OWNER wins - physical body, you cannot drive through it,
+            // so no aggressor / patience override applies. Here `vehicle`'s tail is the one doing
+            // the crossing maneuver, so it holds the cell.
             vehicle.id
         } else {
-            // Check behavior types for priority
-            if side_vehicle.strategy_type != vehicle.strategy_type && 
-               vehicle.strategy_type == BehaviourType::Aggressive {
-                // Aggressive vehicle has priority
+            // Plain crossing: a CUT-IN aggressor wins (gradient `aggressor_advantage`,
+            // aggressive_level > 0.8 and strictly more aggressive); otherwise the LEFT maneuver
+            // wins (side_vehicle does LEFT - right-hand traffic). Equal aggression -> left wins
+            // (the comparison is strict). Same gradient as MergeForward / ForwardLaneChange.
+            if aggressor_advantage(vehicle, side_vehicle) {
                 vehicle.id
             } else {
-                // Left maneuver has priority over right maneuver (side_vehicle is doing LEFT)
                 side_vehicle.id
             }
         };

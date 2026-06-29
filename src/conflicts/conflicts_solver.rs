@@ -371,8 +371,12 @@ pub fn solve_conflicts<'b>(
             }
             _ => {}
         }
-        // Solve plain trajectories conflict
-        let mut need_to_solve = true;
+        // Solve plain trajectories conflict. Both participants are lane-changing (left vs right);
+        // the winner is the precomputed priority participant - a CUT-IN aggressor if one out-
+        // aggresses the other, otherwise the LEFT maneuver (see `find_cross_trajectories_conflict_naive`).
+        // HONOR `priority_participant_index` here instead of unconditionally letting LEFT win, so the
+        // aggressor gradient covers crossings just like every other rule.
+        let mut has_block = false;
         let mut left_maneuver_index: Option<usize> = None;
         let mut right_maneuver_index: Option<usize> = None;
         for (i, participant_id) in conflict.participants.iter().enumerate() {
@@ -380,30 +384,32 @@ pub fn solve_conflicts<'b>(
             match participant.intention.intention_maneuver {
                 LaneChangeType::ChangeLeft => left_maneuver_index = Some(i),
                 LaneChangeType::ChangeRight => right_maneuver_index = Some(i),
-                LaneChangeType::Block => need_to_solve = false,
+                LaneChangeType::Block => has_block = true,
                 _ => {}
             }
         }
-        if need_to_solve && left_maneuver_index.is_some() && right_maneuver_index.is_some() {
-            // The left maneuver normally wins; but if its target cell was already taken by a
-            // desperate winner, neither may move into it -> block both.
-            let left_id = conflict.participants[left_maneuver_index.unwrap()];
-            let left_target = vehicles.get(&left_id).map(|v| v.intention.intention_cell_id).unwrap_or(-1);
-            if left_target >= 0 && claimed_cells.contains(&left_target) {
+        if !has_block && left_maneuver_index.is_some() && right_maneuver_index.is_some() {
+            // Winner = the priority participant (aggressor cut-in, else left). If the winner's
+            // target cell was already taken by a desperate winner this tick, neither may move into
+            // it -> block all (one-occupant-per-cell).
+            let winner_index = conflict.priority_participant_index;
+            let winner_id = conflict.participants[winner_index];
+            let winner_target = vehicles.get(&winner_id).map(|v| v.intention.intention_cell_id).unwrap_or(-1);
+            if winner_target >= 0 && claimed_cells.contains(&winner_target) {
                 for participant_id in &conflict.participants {
                     if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(0); }
                 }
             } else {
-                // Vehicle which is trying to do maneuver to the right should stop
-                if let Some(right_index) = right_maneuver_index {
-                    let right_id = conflict.participants[right_index];
-                    if let Some(v) = vehicles.get_mut(&right_id) { v.block_with_speed(0); }
+                for (i, participant_id) in conflict.participants.iter().enumerate() {
+                    if let Some(v) = vehicles.get_mut(participant_id) {
+                        if i == winner_index {
+                            // Winner keeps its maneuver and target cell; speed forced to 1.
+                            v.intention.intention_speed = 1;
+                        } else {
+                            v.block_with_speed(0);
+                        }
+                    }
                 }
-                // Vehicle which is trying to do maneuver to the left is allowed to do so
-                // IntentionManeuver is saved
-                // intention_cell is saved
-                // Explicitly make speed to be equal 1 (just in case)
-                if let Some(v) = vehicles.get_mut(&left_id) { v.intention.intention_speed = 1; }
             }
         }
     }
@@ -596,6 +602,29 @@ mod tests {
         // Check that right vehicle is blocked (right maneuver loses to left maneuver)
         assert_eq!(vehicles.get(&2).unwrap().intention.intention_speed, 0, "Right vehicle should be blocked");
         assert_eq!(vehicles.get(&1).unwrap().intention.intention_speed, 1, "Left vehicle should continue");
+    }
+
+    /// CrossLaneChange where the RIGHT maneuver is the precomputed priority winner (a cut-in
+    /// aggressor). The solver must HONOR priority_participant_index - letting the right win and
+    /// blocking the left - rather than unconditionally giving the cell to the left maneuver.
+    #[test]
+    fn test_solve_conflicts_cross_lane_aggressor_priority() {
+        let left_vehicle = create_test_vehicle(1, 2, LaneChangeType::ChangeLeft, 5);
+        let right_vehicle = create_test_vehicle(2, 2, LaneChangeType::ChangeRight, 6);
+        let conflicts = vec![CellConflict {
+            cell_id: -1,
+            participants: vec![1, 2],
+            // right (vehicle 2) is the priority winner (aggressor)
+            priority_participant_index: 1,
+            conflict_type: ConflictType::CrossLaneChange,
+        }];
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, left_vehicle);
+        vehicles.insert(2, right_vehicle);
+        let result = solve_conflicts(conflicts, &mut vehicles, &LocalLogger::none());
+        assert!(result.is_ok());
+        assert_ne!(vehicles.get(&2).unwrap().intention.intention_speed, 0, "right maneuver (priority winner) proceeds");
+        assert_eq!(vehicles.get(&1).unwrap().intention.intention_speed, 0, "left maneuver yields to the priority winner");
     }
 
     #[test]
