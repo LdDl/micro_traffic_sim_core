@@ -110,6 +110,13 @@ pub struct Session {
     /// Current position mapping from cell ID to vehicle ID
     current_position: HashMap<CellID, VehicleID>,
 
+    /// Start-of-step speed snapshot: cell ID -> speed of the vehicle occupying it (head AND tail cells),
+    /// rebuilt alongside `current_position` each step.
+    /// Read by the lane-change REAR safety gap (`rear_safe`): a merge is allowed only when the target-lane
+    /// follower has room to brake (`d >= rear_speed + min_safe`).
+    /// Synchronous start-of-step values, deterministic I believe.
+    speed_snapshot: HashMap<CellID, i32>,
+
     /// Cellular automata grid storage
     grids_storage: GridsStorage,
 
@@ -245,6 +252,7 @@ impl Session {
             conflict_zones: HashMap::new(),
             cells_conflicts_zones: HashMap::new(),
             current_position: HashMap::new(),
+            speed_snapshot: HashMap::new(),
             _updated_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -277,6 +285,7 @@ impl Session {
             conflict_zones: HashMap::new(),
             cells_conflicts_zones: HashMap::new(),
             current_position: HashMap::new(),
+            speed_snapshot: HashMap::new(),
             _updated_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -490,7 +499,10 @@ impl Session {
             .with_cell(trip.from_node)
             .with_speed(trip.initial_speed)
             .with_speed_limit(speed_limit)
-            .with_slowdown(behaviour_params.slowdown_factor())
+            .with_slowdown(behaviour_params.slowdown_factor_p())
+            .with_slow_to_start(behaviour_params.slow_to_start_factor_p0())
+            .with_change_p1(behaviour_params.change_p1())
+            .with_lc_cooldown(behaviour_params.lc_cooldown())
             .with_min_safe_distance(behaviour_params.min_safe_distance())
             .with_aggressive_level(behaviour_params.aggressive_level())
             .with_destination(target_node)
@@ -651,6 +663,7 @@ impl Session {
             );
         }
         self.current_position.clear();
+        self.speed_snapshot.clear();
         for vehicle in self.vehicles.values() {
             if self.verbose.is_at_least(VerboseLevel::Detailed) {
                 self.verbose.log_with_fields(
@@ -676,12 +689,14 @@ impl Session {
                 }
             }
             self.current_position.insert(vehicle.cell_id, vehicle.id);
+            self.speed_snapshot.insert(vehicle.cell_id, vehicle.speed);
             for &tail_cell in &vehicle.tail_cells {
                 // A freshly spawned tailed vehicle carries placeholder tail cells (0) until
                 // its tail materializes as it moves; skip non-positive ids so cell 0 is not
                 // marked as a phantom occupant in the occupancy map.
                 if tail_cell > 0 {
                     self.current_position.insert(tail_cell, vehicle.id);
+                    self.speed_snapshot.insert(tail_cell, vehicle.speed);
                 }
             }
         }
@@ -793,7 +808,7 @@ impl Session {
         let tl_states_dump = self.grids_storage.tick_traffic_lights(&self.verbose)?;
 
         // 4. Create intentions for all vehicles
-    let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose, self.steps, self.routing.reroute_period, self.routing.reconnect_max_depth)?;
+        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &self.speed_snapshot, &mut self.vehicles, &self.verbose, self.steps, self.routing.reroute_period, self.routing.reconnect_max_depth)?;
 
         // 5. Collect conflicts
         let conflicts_data = collect_conflicts(
@@ -806,7 +821,7 @@ impl Session {
         )?;
 
         // 6. Solve conflicts
-    solve_conflicts(conflicts_data, &mut self.vehicles, &self.verbose)?;
+        solve_conflicts(conflicts_data, &mut self.vehicles, &self.verbose)?;
 
         // 7. Move vehicles
         let vehicles_grid = self.grids_storage.get_vehicles_net_ref();
