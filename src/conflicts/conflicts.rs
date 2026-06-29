@@ -1,14 +1,12 @@
-use crate::behaviour::BehaviourType;
 use crate::agents::{VehicleID, Vehicle};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
-use crate::conflicts::resolve_simple_rules;
+use crate::conflicts::{resolve_simple_rules, aggressor_advantage};
 use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
 use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType, Intentions};
-use crate::utils::rand::rng;
+use crate::utils::rand::random_bool;
 use crate::verbose::{LocalLogger, VerboseLevel};
-use rand::Rng;
 
 use std::collections::{HashMap, HashSet};
 use indexmap::IndexMap;
@@ -295,16 +293,18 @@ pub fn find_cross_trajectories_conflict_naive(
     if side_vehicle_cell.get_forward_id() == cell_b {
         // Determine priority based on behavior types and maneuver types
         let priority_vehicle_id = if conflict_type == ConflictType::TailCrossLaneChange {
-            // For tail conflicts, side vehicle has priority
+            // Tail conflict: the TAIL OWNER wins - physical body, you cannot drive through it,
+            // so no aggressor / patience override applies. Here `vehicle`'s tail is the one doing
+            // the crossing maneuver, so it holds the cell.
             vehicle.id
         } else {
-            // Check behavior types for priority
-            if side_vehicle.strategy_type != vehicle.strategy_type && 
-               vehicle.strategy_type == BehaviourType::Aggressive {
-                // Aggressive vehicle has priority
+            // Plain crossing: a CUT-IN aggressor wins (gradient `aggressor_advantage`,
+            // aggressive_level > 0.8 and strictly more aggressive); otherwise the LEFT maneuver
+            // wins (side_vehicle does LEFT - right-hand traffic). Equal aggression -> left wins
+            // (the comparison is strict). Same gradient as MergeForward / ForwardLaneChange.
+            if aggressor_advantage(vehicle, side_vehicle) {
                 vehicle.id
             } else {
-                // Left maneuver has priority over right maneuver (side_vehicle is doing LEFT)
                 side_vehicle.id
             }
         };
@@ -380,8 +380,7 @@ pub fn find_zone_conflict_for_two_intentions(
             _ => {}
         }
         // Random selection (coin flip)
-        let mut rng = rng();
-        if rng.random_bool(0.5) {
+        if random_bool(0.5) {
             return Some(first_edge.source);
         }
         return Some(second_edge.source);
@@ -517,9 +516,7 @@ pub fn find_conflicts_in_conflict_zones(
             },
             _ => {
                 // Random selection (50/50)
-                use rand::Rng;
-                let mut rng = rng();
-                if rng.random_bool(0.5) {
+                if random_bool(0.5) {
                     // First vehicle has priority
                     (vec![vehicle_id, second_cell_intention.get_vehicle_id()], 0)
                 } else {

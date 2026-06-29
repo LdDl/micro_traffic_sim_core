@@ -54,14 +54,23 @@ pub type VehicleRef = Rc<RefCell<Vehicle>>;
 /// Vehicle unique identifier type
 pub type VehicleID = u64;
 
-/// Patience threshold (in ticks) for the most aggressive vehicle (cooperativity 0):
+/// Patience threshold (in steps) for the most aggressive vehicle (cooperativity 0):
 /// how long it loses contested cells before overriding right-of-way. SUMO's
 /// `--time-to-teleport` default is 300 s; we reuse it as the impatient end.
 pub const PATIENCE_MIN: i32 = 300;
-/// Patience threshold (in ticks) for the fully cooperative vehicle (cooperativity 1):
+/// Patience threshold (in steps) for the fully cooperative vehicle (cooperativity 1):
 /// the most patient driver waits longer before forcing, but still finite (no permanent
 /// stall). Vehicles in between scale linearly with cooperativity.
 pub const PATIENCE_MAX: i32 = 700;
+
+/// Aggression threshold above which a driver becomes a CUT-IN aggressor: it bypasses the
+/// rear-safety gap when changing lane (squeezing in front of a follower, forcing it to
+/// brake - see `check_alternate_direction`) AND wins a contested cell against any less
+/// aggressive vehicle, even one moving straight (see `aggressor_advantage`). It is a STRICT
+/// lower bound (aggressive_level > threshold), and since aggressive_level = 1 - cooperativity
+/// it is equivalent to cooperativity < 0.2. Below it, a driver respects the normal
+/// right-of-way and the full rear gap.
+pub const AGGRESSOR_CUT_IN_THRESHOLD: f64 = 0.8;
 
 /// Represents basic agent in simulation
 #[derive(Debug)]
@@ -104,19 +113,50 @@ pub struct Vehicle {
 
     /// A boolean indicating if the vehicle is a confclict participant
     pub is_conflict_participant: bool,
-    /// Consecutive ticks the vehicle has failed to move. Drives the patience-based
-    /// right-of-way override: once `wait_ticks` reaches the vehicle's cooperativity-scaled
+    /// Consecutive steps the vehicle has failed to move. Drives the patience-based
+    /// right-of-way override: once `wait_steps` reaches the vehicle's cooperativity-scaled
     /// patience threshold, the vehicle wins contested cells in conflict resolution
     /// ("desperate" - see `Vehicle::is_desperate`). Reset to 0 on any actual move.
-    pub wait_ticks: i32,
+    pub wait_steps: i32,
     /// Corresponding trip identifier
     pub trip: TripID,
     /// Number of transits have been made by the vehicle
     transits_made: u64,
     /// Cells which must be traversed in exact given order by the vehicle
     pub transit_cells: Vec<CellID>,
-    /// A value in (0; 1] representing the probability of the vehicle randomly slowing down.
-    pub slow_down_factor: f64,
+    /// NaSch random-slowdown (dawdle) probability `p`: a MOVING vehicle (speed > 0) decelerates by one
+    /// with this probability each step (`v -> max(v-1, 0)`). This is the canonical
+    /// Nagel-Schreckenberg randomization parameter. In `[0, 1]` (0 = deterministic behaviour).
+    /// The VDR stopped-vehicle counterpart is `p0` (field `slow_to_start_factor_p0`).
+    pub slow_down_factor_p: f64,
+    /// VDR (Velocity-Dependent Randomization) parameter `p0`, (I use "slow-to-start" probability elsewhere):
+    /// the dawdle probability used while the vehicle is STOPPED (speed == 0),
+    /// as opposed to `p` (the moving probability, field `slow_down_factor_p`).
+    /// VDR makes the random-slowdown probability depend on speed (here two levels: `p0` for stopped, `p` for moving).
+    /// When `p0 > p` a stopped vehicle is more reluctant to start than a moving one dawdles,
+    /// so a jam discharges slower than it fills: this yields the realistic capacity drop
+    /// and the metastable / hysteretic flow near the critical density (the VDR signature).
+    /// `p0 == p` disables the asymmetry and the model reduces to plain NaSch.
+    /// In `[0, 1]`.
+    pub slow_to_start_factor_p0: f64,
+    /// Lane-change probability: once the incentive + safety conditions hold, the
+    /// change is taken only with this probability - the canonical stochastic anti-weaving gate.
+    /// `1.0` (default) = always change when conditions hold (= current behaviour, no refusal).
+    /// Trucks use a smaller value (P2 <= P1) [@todo: not implemented and tested yet].
+    /// In (0, 1].
+    pub change_p1: f64,
+    /// Lane-change hysteresis: steps remaining during which a REACTIVE (blocked-escape) lane
+    /// change is suppressed after the vehicle just changed lanes - so a car cannot immediately
+    /// weave back (A->B->A) or hop across lanes step-by-step. Does NOT block route-following
+    /// maneuvers or the forward roll. 0 = free to react.
+    pub timer_reactive_lane_change: i64,
+    /// Lane-change cooldown DURATION (steps): the value `timer_reactive_lane_change` is armed to
+    /// right after a REACTIVE lane change - how many steps another reactive (blocked-escape) change
+    /// stays suppressed (anti-weaving: no A->B->A weave-back / lane-hopping). Route-following
+    /// maneuvers are NOT affected. Per-vehicle / per-driver-type: `0` = changes freely (aggressive),
+    /// larger = more hesitant (cooperative / unsure).
+    /// Could be set from `BehaviourParameters`.
+    pub lc_cooldown: i64,
     /// A value in (0; 1] representing cooperative behaviour of the vehicle.
     /// 0 - when behaviour considered to be "aggressive"
     /// 1 - fully cooperative
@@ -143,8 +183,8 @@ pub struct Vehicle {
 
     /// Cached route to the destination as an ordered list of cell IDs
     /// (origin first, destination last), built by a full A* at spawn / on reroute.
-    /// Per-tick the vehicle follows this list cheaply instead of re-running A*.
-    /// Empty means "no cached route" (fall back to per-tick routing).
+    /// Per-step the vehicle follows this list cheaply instead of re-running A*.
+    /// Empty means "no cached route" (fall back to per-step routing).
     pub cached_route: Vec<CellID>,
     /// Index into `cached_route` of the vehicle's current head cell.
     pub route_idx: usize,
@@ -191,11 +231,15 @@ impl Vehicle {
                 destination: -1,
                 trip_destination: -1,
                 is_conflict_participant: false,
-                wait_ticks: 0,
+                wait_steps: 0,
                 trip: -1,
                 transits_made: 0,
                 transit_cells: Vec::new(),
-                slow_down_factor: 0.1,
+                slow_down_factor_p: 0.1,
+                slow_to_start_factor_p0: 0.1,
+                change_p1: 1.0,
+                timer_reactive_lane_change: 0,
+                lc_cooldown: 0,
                 cooperativity: 0.0,
                 timer_non_acceleration: 0,
                 timer_non_maneuvers: 0,
@@ -234,7 +278,7 @@ impl Vehicle {
     }
 
     /// Clears the cached route (e.g. when the destination changes), forcing the
-    /// next tick to fall back to full routing.
+    /// next step to fall back to full routing.
     pub fn clear_cached_route(&mut self) {
         self.cached_route.clear();
         self.route_idx = 0;
@@ -551,7 +595,7 @@ impl Vehicle {
         }
     }
 
-    /// The vehicle's patience threshold in ticks: how long it tolerates losing
+    /// The vehicle's patience threshold in steps: how long it tolerates losing
     /// contested cells before overriding right-of-way. Scaled by cooperativity so
     /// every vehicle eventually forces (the threshold is always finite), but more
     /// cooperative drivers wait longer: aggressive (cooperativity 0) -> `PATIENCE_MIN`,
@@ -567,7 +611,22 @@ impl Vehicle {
     /// so a vehicle blocked by an occupied cell (a queue follower) is never desperate in
     /// any useful sense; and it never overrides a `Tail` (physical body) conflict.
     pub fn is_desperate(&self) -> bool {
-        self.wait_ticks >= self.patience()
+        self.wait_steps >= self.patience()
+    }
+
+    /// The vehicle's aggressiveness in [0, 1], the complement of its cooperativity
+    /// (`aggressive_level = 1 - cooperativity`). A single style axis: high aggression =
+    /// low cooperativity. Used by the cut-in rules (see `is_aggressor`).
+    pub fn aggressive_level(&self) -> f64 {
+        1.0 - self.cooperativity
+    }
+
+    /// True when the vehicle is a CUT-IN aggressor: its aggressive_level strictly exceeds
+    /// `AGGRESSOR_CUT_IN_THRESHOLD`. Such a driver squeezes in front of followers (bypassing
+    /// the rear-safety gap on a lane change) and wins contested cells against less aggressive
+    /// vehicles, even ones moving straight - it "cuts in", forcing the other to brake.
+    pub fn is_aggressor(&self) -> bool {
+        self.aggressive_level() > AGGRESSOR_CUT_IN_THRESHOLD
     }
 }
 
@@ -778,6 +837,24 @@ impl VehicleBuilder {
         self
     }
 
+    /// Overrides the trip-completion destination independently of the immediate `destination`.
+    ///
+    /// `with_destination` sets both the immediate `destination` and the `trip_destination`
+    /// (where the trip is considered complete) to the same cell. For a multi-stop bus these
+    /// differ: the immediate destination starts at the FIRST transit stop (and is advanced
+    /// stop-by-stop during movement), while the trip only completes at the LAST stop. Call
+    /// this AFTER `with_destination` to set the completion cell separately.
+    ///
+    /// # Arguments
+    /// * `cell_id` - Cell at which the trip is considered complete
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    pub fn with_trip_destination(mut self, cell_id: CellID) -> Self {
+        self.vehicle.trip_destination = cell_id;
+        self
+    }
+
     /// Establishes source and target cells of maneuver for the vehicle's tail and vehicle's tail intention maneuver (in case when vehicle has size more that one cell)
     ///
     /// # Arguments
@@ -889,7 +966,31 @@ impl VehicleBuilder {
     /// println!("Vehicle: {:?}", vehicle);
     /// ```
     pub fn with_slowdown(mut self, p: f64) -> Self {
-        self.vehicle.slow_down_factor = p;
+        self.vehicle.slow_down_factor_p = p;
+        self
+    }
+
+    /// Sets the VDR slow-to-start probability `p0` used while the vehicle is stopped.
+    /// Should be `>= p` (the moving slowdown) for a capacity drop.
+    /// `p0 == p` disables the VDR asymmetry.
+    pub fn with_slow_to_start(mut self, p0: f64) -> Self {
+        self.vehicle.slow_to_start_factor_p0 = p0;
+        self
+    }
+
+    /// Sets the lane-change probability `p1` stochastic anti-weaving gate).
+    /// `1.0` (default) = always change when incentive + safety hold.
+    /// Trucks: P2 <= P1 [@todo: implement trucks' P2]
+    pub fn with_change_p1(mut self, p: f64) -> Self {
+        self.vehicle.change_p1 = p;
+        self
+    }
+
+    /// Sets the reactive-lane-change cooldown DURATION in steps (see `Vehicle::lc_cooldown`).
+    /// `0` (default) = no cooldown (changes freely);
+    /// larger = more hesitant after a change.
+    pub fn with_lc_cooldown(mut self, steps: i64) -> Self {
+        self.vehicle.lc_cooldown = steps;
         self
     }
 
