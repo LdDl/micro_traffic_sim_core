@@ -9,14 +9,21 @@ use crate::geom::{Point, SRID};
 use crate::intentions::{IntentionError, prepare_intentions};
 use crate::conflicts::{ConflictError, ConflictSolverError, collect_conflicts, solve_conflicts};
 use crate::movement::{MovementError, movement};
+use crate::shortest_path::router::shortest_path;
 use crate::simulation::states::{AutomataState, VehicleState};
 use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
 use crate::verbose::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use uuid::Uuid;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+
+/// Fixed seed for the per-session spawn RNG so vehicle generation is reproducible
+/// run-to-run (replaces the previous unseeded thread-local RNG).
+const SPAWN_SEED: u64 = 0x00C0_FFEE;
 
 /// Custom error types for `Session`.
 #[derive(Debug, Clone)]
@@ -146,6 +153,58 @@ pub struct Session {
 
     /// Cumulative count of vehicles that were lost (reached death zone without reaching destination)
     vehicles_lost: i32,
+
+    /// Routing configuration (SUMO-style). See [`RoutingOptions`].
+    routing: RoutingOptions,
+
+    /// Smoothed per-cell travel speed (cells/tick), updated every
+    /// `routing.adaptation_interval` ticks from current occupancy. Empty until the
+    /// first congestion update; only used when `adaptation_interval > 0`.
+    cell_speed: HashMap<CellID, f64>,
+
+    /// Seeded RNG for vehicle generation: spawn-probability rolls and the fair selection
+    /// among trips that share a source cell. Seeded so spawning is reproducible.
+    spawn_rng: StdRng,
+}
+
+/// SUMO-style routing configuration. Mirrors `device.rerouting.*` options.
+#[derive(Debug, Clone)]
+pub struct RoutingOptions {
+    /// How often (in ticks) a vehicle re-plans its cached route. `0` (the SUMO
+    /// default) disables periodic rerouting - the spawn route is kept and only
+    /// refreshed when the vehicle falls off it. `>0` re-runs a full A* every
+    /// `reroute_period` ticks (staggered by spawn time), the hook congestion-aware
+    /// routing (smoothed weights) will use.
+    pub reroute_period: i32,
+    /// Maximum BFS depth for `reconnect_to_cache` when a vehicle falls off its
+    /// route, before giving up and doing a full A*.
+    pub reconnect_max_depth: usize,
+    /// How often (in ticks) per-cell congestion (smoothed speed) is recomputed and
+    /// pushed into the routing edge costs. `-1` (default) disables congestion-aware
+    /// routing entirely - edge costs stay at free-flow time (current behaviour).
+    /// Mirrors SUMO `device.rerouting.adaptation-interval`.
+    pub adaptation_interval: i32,
+    /// Exponential-moving-average weight for smoothing per-cell speeds:
+    /// `smoothed = old * weight + current * (1 - weight)`. `0.0` = use the latest
+    /// observation; closer to `1.0` = slower to react (more damping against
+    /// reroute oscillation). Mirrors SUMO `device.rerouting.adaptation-weight`.
+    pub adaptation_weight: f64,
+    /// Number of forward cells to average a cell's current speed over, smoothing the
+    /// per-cell signal spatially (a stop-line cell is diluted by the free-flowing
+    /// cells just ahead, like SUMO's whole-edge mean speed). `0` = pure per-cell.
+    pub congestion_window: usize,
+}
+
+impl Default for RoutingOptions {
+    fn default() -> Self {
+        RoutingOptions {
+            reroute_period: 0,
+            reconnect_max_depth: 10,
+            adaptation_interval: -1,
+            adaptation_weight: 0.5,
+            congestion_window: 2,
+        }
+    }
 }
 
 impl Session {
@@ -174,6 +233,9 @@ impl Session {
             world_srid: picked_srid,
             vehicles_completed: 0,
             vehicles_lost: 0,
+            routing: RoutingOptions::default(),
+            cell_speed: HashMap::new(),
+            spawn_rng: StdRng::seed_from_u64(SPAWN_SEED),
         }
     }
 
@@ -203,6 +265,9 @@ impl Session {
             world_srid: picked_srid,
             vehicles_completed: 0,
             vehicles_lost: 0,
+            routing: RoutingOptions::default(),
+            cell_speed: HashMap::new(),
+            spawn_rng: StdRng::seed_from_u64(SPAWN_SEED),
         }
     }
 
@@ -234,6 +299,16 @@ impl Session {
     /// Sets verbose level for the session
     pub fn set_verbose_level(&mut self, verbose: VerboseLevel) {
         self.verbose.set_level(verbose);
+    }
+
+    /// Sets the SUMO-style routing options (rerouting period, reconnect depth).
+    pub fn set_routing_options(&mut self, options: RoutingOptions) {
+        self.routing = options;
+    }
+
+    /// Returns the current routing options.
+    pub fn get_routing_options(&self) -> &RoutingOptions {
+        &self.routing
     }
 
     /// Returns a reference to the cell with the given ID if it exists in the vehicles grid.
@@ -339,47 +414,9 @@ impl Session {
     }
 
     /// Generates a single vehicle based on trip parameters
-    fn generate_vehicle(&self, trip: &Trip, trip_id: TripID) -> Option<Vehicle> {
-        // Check if current time step is within trip time bounds
-        if self.steps < trip.start_time || self.steps > trip.end_time {
-            return None;
-        }
-
-        // Determine if vehicle should be generated based on trip type
-        let should_generate = match trip.trip_type {
-            TripType::Constant => {
-                // Generate vehicle every 'time' seconds
-                if trip.time <= 0 {
-                    false
-                } else {
-                    self.steps % trip.time == 0
-                }
-            }
-            TripType::Random => {
-                // Generate vehicle based on probability
-                let mut rng = rand::rng();
-                let norm_value: f64 = rng.random();
-                norm_value < trip.probability
-            }
-            _ => {
-                if self.verbose.is_at_least(VerboseLevel::Detailed) {
-                    self.verbose.log_with_fields(
-                        EVENT_GEN_VEHICLE,
-                        "Trip type is not supported",
-                        &[
-                            ("trip_id", &trip_id),
-                            ("trip_type", &format!("{:?}", trip.trip_type)),
-                        ]
-                    );
-                }
-                false
-            }
-        };
-
-        if !should_generate {
-            return None;
-        }
-
+    /// Builds the vehicle for a trip. No eligibility / probability roll happens here -
+    /// the caller (`generate_vehicles`) decides whether and which trip spawns this tick.
+    fn build_vehicle(&self, trip: &Trip, trip_id: TripID) -> Vehicle {
         // Determine target node
         let target_node = if trip.allowed_agent_type == AgentType::Bus
             && !trip.transit_cells.is_empty() {
@@ -399,7 +436,7 @@ impl Session {
         };
 
         // Create vehicle using builder pattern
-        let vehicle = Vehicle::new(self.last_vehicle_id)
+        Vehicle::new(self.last_vehicle_id)
             .with_type(trip.allowed_agent_type)
             .with_behaviour(trip.allowed_behaviour_type)
             .with_cell(trip.from_node)
@@ -413,9 +450,7 @@ impl Session {
             .with_tail_size(trip.vehicle_tail_size, vec![]) // Empty tail cells initially
             .with_transit_cells(trip.transit_cells.clone())
             .with_relax_time(trip.relax_time)
-            .build();
-
-        Some(vehicle)
+            .build()
     }
 
     /// Generates vehicles based on the trips data
@@ -431,38 +466,125 @@ impl Session {
                 ]
             );
         }
-        for (trip_id, trip) in &self.trips_data {
-            // Check if there's already a vehicle at the source node
-            let mut create = true;
-            for vehicle in self.vehicles.values() {
-                if vehicle.cell_id == trip.from_node {
-                    create = false;
-                    break;
-                }
-            }
-            if !create {
+        // Group trips by their source cell, in deterministic (sorted) order. A source cell
+        // holds at most one vehicle, so at most ONE trip may spawn there per tick. Each trip
+        // rolls its own probability; among the trips that want to spawn we pick ONE weighted
+        // by probability, so a busy route is not starved by a rarer route that merely has a
+        // smaller trip id (the old HashMap-order, first-wins loop ignored the probabilities of
+        // every trip after the first on a shared source).
+        let mut by_source: BTreeMap<CellID, Vec<TripID>> = BTreeMap::new();
+        for (id, trip) in &self.trips_data {
+            by_source.entry(trip.from_node).or_default().push(*id);
+        }
+        let by_source: Vec<(CellID, Vec<TripID>)> = by_source
+            .into_iter()
+            .map(|(src, mut ids)| {
+                ids.sort_unstable();
+                (src, ids)
+            })
+            .collect();
+
+        for (from_node, trip_ids) in by_source {
+            // Source occupied (by any vehicle's head or tail from a previous tick)? skip.
+            // current_position is the start-of-tick occupancy (rebuilt after this phase last
+            // tick), so this is an O(1) check that also replaces the old O(trips*vehicles) scan.
+            if self.current_position.contains_key(&from_node) {
                 continue;
             }
-            // Generate vehicle for this trip
-            if let Some(generated_vehicle) = self.generate_vehicle(trip, *trip_id) {
-                if self.verbose.is_at_least(VerboseLevel::Additional) {
-                    self.verbose.log_with_fields(
-                        EVENT_GEN_VEHICLES,
-                        "Generate vehicle for trip",
-                        &[
-                            ("step", &self.steps),
-                            ("vehicles_num", &self.vehicles.len()),
-                            ("trips_num", &self.trips_data.len()),
-                            ("trip_id", trip_id),
-                            ("vehicle_id", &generated_vehicle.id),
-                        ]
-                    );
-                }
 
-                let vehicle_id = generated_vehicle.id;
-                self.vehicles.insert(vehicle_id, generated_vehicle);
-                self.last_vehicle_id = vehicle_id + 1; // Increment for next vehicle
+            // Collect the trips that want to spawn this tick, with their selection weight.
+            let mut candidates: Vec<(TripID, f64)> = Vec::new();
+            let mut total_weight = 0.0f64;
+            for &tid in &trip_ids {
+                // Read the Copy fields and drop the trips_data borrow before touching spawn_rng.
+                let (in_bounds, ttype, ttime, prob) = match self.trips_data.get(&tid) {
+                    Some(t) => (
+                        self.steps >= t.start_time && self.steps <= t.end_time,
+                        t.trip_type,
+                        t.time,
+                        t.probability,
+                    ),
+                    None => continue,
+                };
+                if !in_bounds {
+                    continue;
+                }
+                let wants = match ttype {
+                    TripType::Constant => ttime > 0 && self.steps % ttime == 0,
+                    TripType::Random => self.spawn_rng.random::<f64>() < prob,
+                    TripType::Undefined => false,
+                };
+                if wants {
+                    // Random trips compete by probability; Constant trips that fire share evenly.
+                    let weight = match ttype {
+                        TripType::Random => prob.max(f64::MIN_POSITIVE),
+                        _ => 1.0,
+                    };
+                    candidates.push((tid, weight));
+                    total_weight += weight;
+                }
             }
+            if candidates.is_empty() {
+                continue;
+            }
+
+            // Fair weighted pick of a single trip. Candidates are in sorted trip-id order, so
+            // with the seeded RNG the choice is deterministic.
+            let chosen_id = if candidates.len() == 1 {
+                candidates[0].0
+            } else {
+                let threshold = self.spawn_rng.random::<f64>() * total_weight;
+                let mut acc = 0.0;
+                let mut pick = candidates[candidates.len() - 1].0;
+                for &(tid, w) in &candidates {
+                    acc += w;
+                    if threshold < acc {
+                        pick = tid;
+                        break;
+                    }
+                }
+                pick
+            };
+
+            // Build the chosen vehicle (the trips_data borrow ends with the match).
+            let mut generated_vehicle = match self.trips_data.get(&chosen_id) {
+                Some(trip) => self.build_vehicle(trip, chosen_id),
+                None => continue,
+            };
+
+            // Build the cached route once at spawn (full A* to the destination).
+            // Per-tick the vehicle follows this route instead of re-running A*.
+            if generated_vehicle.destination >= 0 {
+                let net = self.grids_storage.get_vehicles_net_ref();
+                if let (Some(s), Some(g)) = (
+                    net.get_cell(&generated_vehicle.cell_id),
+                    net.get_cell(&generated_vehicle.destination),
+                ) {
+                    if let Ok(path) = shortest_path(s, g, net, true, None) {
+                        generated_vehicle.cached_route =
+                            path.vertices().iter().map(|c| c.get_id()).collect();
+                        generated_vehicle.route_idx = 0;
+                        generated_vehicle.last_reroute = self.steps;
+                    }
+                }
+            }
+
+            if self.verbose.is_at_least(VerboseLevel::Additional) {
+                self.verbose.log_with_fields(
+                    EVENT_GEN_VEHICLES,
+                    "Generate vehicle for trip",
+                    &[
+                        ("step", &self.steps),
+                        ("trip_id", &chosen_id),
+                        ("from_node", &from_node),
+                        ("vehicle_id", &generated_vehicle.id),
+                    ]
+                );
+            }
+
+            let vehicle_id = generated_vehicle.id;
+            self.vehicles.insert(vehicle_id, generated_vehicle);
+            self.last_vehicle_id = vehicle_id + 1; // Increment for next vehicle
         }
     }
 
@@ -506,11 +628,76 @@ impl Session {
             }
             self.current_position.insert(vehicle.cell_id, vehicle.id);
             for &tail_cell in &vehicle.tail_cells {
-                self.current_position.insert(tail_cell, vehicle.id);
+                // A freshly spawned tailed vehicle carries placeholder tail cells (0) until
+                // its tail materializes as it moves; skip non-positive ids so cell 0 is not
+                // marked as a phantom occupant in the occupancy map.
+                if tail_cell > 0 {
+                    self.current_position.insert(tail_cell, vehicle.id);
+                }
             }
         }
     }
 
+    /// Recomputes smoothed per-cell travel speed from current occupancy and pushes
+    /// the result into the routing edge costs (`GridRoads::apply_congestion`).
+    ///
+    /// Per-cell congestion (no dependency on client-supplied link ids), measured -
+    /// not modelled - like SUMO: a cell's current speed is the speed of the vehicle
+    /// on it, averaged spatially over the next `congestion_window` forward cells so a
+    /// lone stop-line cell does not dominate (the SUMO whole-edge averaging,
+    /// reconstructed from our own forward topology). Empty cells decay to free-flow,
+    /// so a cleared jam recovers. The value is then blended into the previous one via
+    /// the EMA weight. Global, O(vehicles + cells * window).
+    fn update_cell_speeds(&mut self) {
+        let alpha = self.routing.adaptation_weight;
+        let window = self.routing.congestion_window;
+        // Current occupancy speed per cell (only cells with a vehicle).
+        let mut occ: HashMap<CellID, f64> = HashMap::with_capacity(self.vehicles.len());
+        for (_, v) in self.vehicles.iter() {
+            occ.insert(v.cell_id, v.speed as f64);
+        }
+        // Current sample per cell = forward-window mean of occupied speeds, else free-flow.
+        let mut cur_map: HashMap<CellID, f64> = HashMap::new();
+        {
+            let net = self.grids_storage.get_vehicles_net_ref();
+            for (id, cell) in net.iter() {
+                let free_flow = (cell.get_speed_limit() as f64).max(1.0);
+                let mut sum = 0.0;
+                let mut cnt = 0u32;
+                let mut c = *id;
+                for _ in 0..=window {
+                    if let Some(&sp) = occ.get(&c) {
+                        sum += sp;
+                        cnt += 1;
+                    }
+                    match net.get_cell(&c).map(|cc| cc.get_forward_id()) {
+                        Some(f) if f >= 0 => c = f,
+                        _ => break,
+                    }
+                }
+                let cur = if cnt > 0 {
+                    (sum / cnt as f64).clamp(0.1, free_flow)
+                } else {
+                    free_flow
+                };
+                cur_map.insert(*id, cur);
+            }
+        }
+        // EMA-update the stored smoothed speeds.
+        for (id, cur) in cur_map {
+            let new = match self.cell_speed.get(&id) {
+                Some(&old) => old * alpha + cur * (1.0 - alpha),
+                None => cur,
+            };
+            self.cell_speed.insert(id, new);
+        }
+        // Push smoothed speeds into the grid's edge costs for routing.
+        let cell_speed = self.cell_speed.clone();
+        self.grids_storage
+            .get_vehicles_net_mut()
+            .apply_congestion(&cell_speed);
+    }
+    
     /// Main simulation step function
     /// 
     /// Pipeline is:
@@ -544,11 +731,20 @@ impl Session {
         // 2. Update current positions
         self.update_current_positions();
 
+        // 2b. Congestion update: every adaptation_interval ticks, recompute smoothed
+        // per-cell speeds and push them into the routing edge costs (no-op when
+        // adaptation_interval <= 0, i.e. free-flow routing).
+        if self.routing.adaptation_interval > 0
+            && self.steps % self.routing.adaptation_interval == 0
+        {
+            self.update_cell_speeds();
+        }
+
         // 3. Update and collect TLS state
         let tl_states_dump = self.grids_storage.tick_traffic_lights(&self.verbose)?;
 
         // 4. Create intentions for all vehicles
-    let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose)?;
+    let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose, self.steps, self.routing.reroute_period, self.routing.reconnect_max_depth)?;
 
         // 5. Collect conflicts
         let conflicts_data = collect_conflicts(

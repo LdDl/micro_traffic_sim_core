@@ -3,12 +3,14 @@ use crate::behaviour::BehaviourType;
 use crate::agents::{
     TailIntentionManeuver, Vehicle, VehicleError, VehicleID, VehicleIntention,
 };
-use crate::grid::cell::CellState;
+use crate::grid::cell::{Cell, CellState};
 use crate::maneuver::LaneChangeType;
 use crate::grid::{cell::CellID, road_network::GridRoads};
 use crate::intentions::{intention_type::IntentionType, Intentions};
 use crate::shortest_path;
-use crate::shortest_path::router::{shortest_path, path_no_goal};
+use crate::shortest_path::router::{shortest_path, path_no_goal, reconnect_to_cache};
+use crate::shortest_path::heuristics::edge_time;
+use crate::shortest_path::path::Path;
 use crate::shortest_path::router::AStarError;
 use crate::verbose::*;
 use indexmap::IndexMap;
@@ -77,6 +79,9 @@ pub fn prepare_intentions<'a, 'b>(
     current_state: &HashMap<CellID, VehicleID>,
     vehicles: &'b mut IndexMap<VehicleID, Vehicle>,
     verbose: &LocalLogger,
+    steps: i32,
+    reroute_period: i32,
+    reconnect_max_depth: usize,
 ) -> Result<Intentions, IntentionError> {
     let mut intentions = Intentions::new();
     let track_routing = verbose.is_at_least(VerboseLevel::Main);
@@ -107,6 +112,9 @@ pub fn prepare_intentions<'a, 'b>(
                 ]
             );
         }
+        // Keep the cached route fresh: advance the cursor, periodically reroute,
+        // and reconnect (or full-A* rebuild) when the vehicle fell off its route.
+        refresh_route(net, vehicle, steps, reroute_period, reconnect_max_depth);
         let routing_start = std::time::Instant::now();
         let possible_intention = find_intention(net, current_state, &vehicle, verbose)?;
         if possible_intention.should_stop {
@@ -163,6 +171,131 @@ pub fn prepare_intentions<'a, 'b>(
         );
     }
     Ok(intentions)
+}
+
+/// Keeps a vehicle's cached route usable for this tick:
+/// 1. advances the route cursor to the current cell;
+/// 2. if the cursor still matches and no periodic reroute is due, keeps the cache;
+/// 3. if the vehicle fell off its route, tries a cheap bounded reconnect back onto it;
+/// 4. otherwise (periodic reroute due, or reconnect failed) rebuilds the route with a
+///    fresh full A*.
+/// A no-op for destination-less or confused vehicles.
+fn refresh_route(
+    net: &GridRoads,
+    vehicle: &mut Vehicle,
+    steps: i32,
+    reroute_period: i32,
+    reconnect_max_depth: usize,
+) {
+    if vehicle.destination < 0 || vehicle.confusion {
+        return;
+    }
+    let on_route = vehicle.advance_route_cursor();
+    let due = reroute_period > 0 && (steps - vehicle.last_reroute) >= reroute_period;
+    if on_route && !due {
+        return;
+    }
+    // Off-route with a cache present: try a cheap bounded reconnect first.
+    if !on_route && !vehicle.cached_route.is_empty() {
+        if let Some(spliced) = reconnect_to_cache(
+            vehicle.cell_id,
+            &vehicle.cached_route,
+            vehicle.route_idx,
+            net,
+            reconnect_max_depth,
+        ) {
+            vehicle.cached_route = spliced;
+            vehicle.route_idx = 0;
+            return; // a reconnect is not a reroute - keep last_reroute
+        }
+    }
+    // Periodic reroute, or reconnect failed: rebuild the full route with a fresh A*.
+    if let (Some(s), Some(g)) = (
+        net.get_cell(&vehicle.cell_id),
+        net.get_cell(&vehicle.destination),
+    ) {
+        if let Ok(path) = shortest_path(s, g, net, true, None) {
+            vehicle.cached_route = path.vertices().iter().map(|c| c.get_id()).collect();
+            vehicle.route_idx = 0;
+            vehicle.last_reroute = steps;
+        }
+    }
+}
+
+/// Classifies the edge from `a` to `b` as a forward/left/right maneuver by matching
+/// `b` against `a`'s neighbour links. Defaults to forward for a non-adjacent pair
+/// (which should not occur on a valid cached route).
+fn maneuver_between(a: &Cell, b: &Cell) -> LaneChangeType {
+    let bid = b.get_id();
+    if a.get_left_id() == bid {
+        LaneChangeType::ChangeLeft
+    } else if a.get_right_id() == bid {
+        LaneChangeType::ChangeRight
+    } else {
+        LaneChangeType::NoChange
+    }
+}
+
+/// Builds a short `Path` slice from the vehicle's cached route, starting at its
+/// current cell (`cached_route[route_idx]`), at most `max_len` cells long. Returns
+/// `None` when there is no cache, the cursor does not point at the current cell
+/// (the vehicle fell off its route), or no cell resolves - in all of which the
+/// caller falls back to a full A*. The returned path carries `cost = 0.0` (the
+/// per-tick follow does not need the route's total cost; only `process_path`'s
+/// obstacle/speed scan of the slice matters).
+fn build_path_from_cache<'a>(
+    vehicle: &Vehicle,
+    net: &'a GridRoads,
+    max_len: usize,
+) -> Option<Path<'a>> {
+    let route = &vehicle.cached_route;
+    let start = vehicle.route_idx;
+    // The cursor must point at the vehicle's current cell (advance_route_cursor ran).
+    if route.get(start) != Some(&vehicle.cell_id) {
+        return None;
+    }
+    let end = (start + max_len).min(route.len());
+    let mut vertices: Vec<&Cell> = Vec::with_capacity(end - start);
+    for &id in &route[start..end] {
+        match net.get_cell(&id) {
+            Some(c) => vertices.push(c),
+            None => break, // dangling id - stop; the prefix collected so far is valid
+        }
+    }
+    if vertices.is_empty() {
+        return None;
+    }
+    let mut maneuvers = Vec::with_capacity(vertices.len().saturating_sub(1));
+    for w in vertices.windows(2) {
+        maneuvers.push(maneuver_between(w[0], w[1]));
+    }
+    Some(Path::new(vertices, maneuvers, 0.0))
+}
+
+/// Bounded BFS depth for the forward-fallback reachability guard. The guard only has
+/// to confirm the vehicle can rejoin its cached route after a one-cell forward roll;
+/// a short bound keeps the check cheap (a few cells), and a false "no" only costs the
+/// vehicle a recoverable stall, never a lost trip.
+const FORWARD_FALLBACK_REACH_DEPTH: usize = 16;
+
+/// Returns true when rolling onto `forward_id` keeps the vehicle's destination
+/// reachable, i.e. `forward_id` is still on (or can rejoin) the cached route. Used to
+/// stop the forward-fallback from driving a non-confused vehicle into a one-way pocket
+/// (the sole cause of lost vehicles). Cheap O(1) fast paths first, then a bounded BFS.
+fn forward_keeps_reachable(vehicle: &Vehicle, forward_id: CellID, net: &GridRoads) -> bool {
+    let route = &vehicle.cached_route;
+    let idx = vehicle.route_idx;
+    // The route continues straight onto forward_id (the common case).
+    if route.get(idx + 1) == Some(&forward_id) {
+        return true;
+    }
+    // forward_id is the destination itself (the last route cell, whose neighbours are
+    // not on the cache ahead, so reconnect_to_cache would miss it).
+    if route.last() == Some(&forward_id) {
+        return true;
+    }
+    // Otherwise: can we still get back onto the route from forward_id within the bound?
+    reconnect_to_cache(forward_id, route, idx, net, FORWARD_FALLBACK_REACH_DEPTH).is_some()
 }
 
 /// Computes the movement intention for a single vehicle.
@@ -238,6 +371,27 @@ pub fn find_intention<'a>(
         return Ok(result);
     }
 
+    // Шf stopped at red traffic light do early return
+    let forward_cell_id = source_cell.get_forward_id();
+    if forward_cell_id > 0 {
+        if let Some(forward_cell) = net.get_cell(&forward_cell_id) {
+            if forward_cell.get_state() == CellState::Banned {
+                let result = VehicleIntention {
+                    intention_maneuver: LaneChangeType::Block,
+                    intention_speed: 0,
+                    destination: None,
+                    confusion: None,
+                    intention_cell_id: vehicle.cell_id,
+                    tail_intention_cells: vec![],
+                    intermediate_cells: Vec::with_capacity(0),
+                    tail_maneuver: tail_maneuver,
+                    should_stop: false,
+                };
+                return Ok(result);
+            }
+        }
+    }
+
     // Vehicle's speed should not be greater than speed limit
     let mut intention_speed = vehicle.speed.min(speed_limit);
 
@@ -263,7 +417,7 @@ pub fn find_intention<'a>(
     }
 
     // Considering that vehicle always wants to accelerate:
-    let observe_distance = speed_possible + vehicle.min_safe_distance;
+    let _observe_distance = speed_possible + vehicle.min_safe_distance;
 
     // Check if maneuvers are allowed (they could be prohibeted due the vehicle's tail is not done previous maneuver yet)
     let maneuvers_allowed = vehicle.timer_non_maneuvers <= 0
@@ -285,6 +439,14 @@ pub fn find_intention<'a>(
     //     if _is_slowdown { " (slowdown)" } else { "" }
     // );
 
+    // Try to follow the cached route (O(speed) read) instead of a per-tick full A*.
+    // None when the vehicle has no cache or fell off it (then we fall back to A*).
+    let cache_path = if vehicle.destination >= 0 && !vehicle.confusion {
+        build_path_from_cache(vehicle, net, (speed_possible.max(1) + 2) as usize)
+    } else {
+        None
+    };
+
     let mut path = match vehicle.destination {
         // Handle case when vehicle has no destination,H
         // therefore it should be considered as keep going where possible
@@ -293,7 +455,8 @@ pub fn find_intention<'a>(
                 source_cell,
                 net,
                 maneuvers_allowed,
-                observe_distance + 1,
+                1000,
+                // observe_distance + 1,  // depth-limited
             ) {
                 Ok(path) => path,
                 Err(e) => {
@@ -304,6 +467,26 @@ pub fn find_intention<'a>(
                 }
             }
         },
+        // Reachability over directed edges is monotone: once the destination is
+        // unreachable from the current cell, it is unreachable from every cell the
+        // vehicle can ever get to. Full A* would just fail again (the most expensive
+        // failure mode - it exhausts the whole reachable component), so skip routing
+        // for confused vehicles entirely. NOTE: this holds only while the grid is
+        // static during a session and the destination is not reassigned.
+        _ if vehicle.confusion => {
+            let new_path = match process_no_route_found(source_cell, net) {
+                Ok(path) => path,
+                Err(e) => return Err(IntentionError::NoPathForNoRoute(e)),
+            };
+            intention_speed = 1;
+            speed_possible = intention_speed;
+            new_path
+        },
+        // Follow the cached route if the vehicle is on it (built above): the slice is
+        // fed through the same process_path/assembly below, replacing the per-tick
+        // full A* with an O(speed) cache read.
+        _ if cache_path.is_some() => cache_path.unwrap(),
+        // Off the cached route (or no cache): fall back to a full A*.
         _ => {
             let target_cell = net
                 .get_cell(&vehicle.destination)
@@ -313,15 +496,10 @@ pub fn find_intention<'a>(
                 target_cell,
                 net,
                 maneuvers_allowed,
-                Some(observe_distance + 1),
+                None,
+                // Some(observe_distance + 1),  // depth-limited
             ) {
-                Ok(path) => {
-                    // Clear confusion if vehicle was previously in confusion mode and found path
-                    if vehicle.confusion {
-                        confusion = Some(false);
-                    }
-                    path
-                },
+                Ok(path) => path,
                 Err(e)
                     if e != shortest_path::router::AStarError::NoPathFound {
                         start_id: source_cell.get_id(),
@@ -437,6 +615,72 @@ const UNDEFINED_MANEUVER: LaneChangeType = LaneChangeType::ChangeRight;
 
 /// Attempts to find an alternate maneuver (lane change) for a blocked vehicle.
 ///
+/// Helper: Creates a block intention
+fn create_block_intention(cell_id: CellID, should_stop: bool) -> VehicleIntention {
+    VehicleIntention {
+        intention_maneuver: LaneChangeType::Block,
+        intention_speed: 0,
+        destination: None,
+        confusion: None,
+        intention_cell_id: cell_id,
+        tail_intention_cells: vec![],
+        intermediate_cells: Vec::with_capacity(0),
+        tail_maneuver: TailIntentionManeuver::default(),
+        should_stop,
+    }
+}
+
+/// Helper: Checks if alternate path (left or right) is available and calculates cost
+fn check_alternate_direction(
+    cell_id: CellID,
+    source_cell: &Cell,
+    target_cell: &Cell,
+    net: &GridRoads,
+    current_state: &HashMap<CellID, VehicleID>,
+    direction: &str,
+    max_depth: Option<i32>,
+) -> Result<(CellID, f64), IntentionError> {
+    if cell_id <= 0 {
+        return Ok((-1, INFINITY));
+    }
+
+    let cell = net.get_cell(&cell_id).ok_or_else(|| {
+        if direction == "left" {
+            IntentionError::NoLeftCell(source_cell.get_id())
+        } else {
+            IntentionError::NoRightCell(source_cell.get_id())
+        }
+    })?;
+
+    let is_blocked = current_state
+        .get(&cell_id)
+        .map(|&id| id > 0)
+        .unwrap_or(false);
+
+    if is_blocked || cell.get_state() != CellState::Free {
+        return Ok((-1, INFINITY));
+    }
+
+    match shortest_path(cell, target_cell, net, true, max_depth) {
+        Ok(path) => {
+            // previously source_cell.distance_to(cell) was used as additiona. now it is edge_time(source_cell, cell)
+            // to match units with path.cost() (travel time).
+            let cost = path.cost() + edge_time(source_cell, cell);
+            Ok((cell_id, cost))
+        }
+        Err(shortest_path::router::AStarError::NoPathFound { .. }) => {
+            Ok((-1, INFINITY))
+        }
+        Err(_) => {
+            if direction == "left" {
+                Err(IntentionError::LeftPathFind(cell_id))
+            } else {
+                Err(IntentionError::RightPathFind(cell_id))
+            }
+        }
+    }
+}
+
 /// If the vehicle cannot move forward, tries left or right lane changes
 /// and selects the best available option.
 ///
@@ -453,18 +697,7 @@ pub fn find_alternate_intention<'a>(
 
     // If maneuvers are not allowed (tail still completing previous maneuver), block immediately
     if !maneuvers_allowed {
-        let result = VehicleIntention {
-            intention_maneuver: LaneChangeType::Block,
-            intention_speed: 0,
-            destination: None,
-            confusion: None,
-            intention_cell_id: source_cell_id,
-            tail_intention_cells: vec![],
-            intermediate_cells: Vec::with_capacity(0),
-            tail_maneuver: TailIntentionManeuver::default(),
-            should_stop: false,
-        };
-        return Ok(result);
+        return Ok(create_block_intention(source_cell_id, false));
     }
 
     let source_cell = net
@@ -475,103 +708,105 @@ pub fn find_alternate_intention<'a>(
         .get_cell(&target_cell_id)
         .ok_or(IntentionError::NoTargetCell(target_cell_id))?;
 
-    let mut min_left_dist = INFINITY;
-    let mut min_right_dist = INFINITY;
-
-    // Check left maneuver
-    let mut left_cell_id = source_cell.get_left_id();
-    if left_cell_id > 0 {
-        let left_cell = net
-            .get_cell(&left_cell_id)
-            .ok_or(IntentionError::NoLeftCell(vehicle.cell_id))?;
-
-        // Check if possible maneuver can't be made
-        let is_blocked = current_state
-            .get(&left_cell_id)
-            .map(|&id| id > 0)
-            .unwrap_or(false);
-
-        if !is_blocked && left_cell.get_state() == CellState::Free {
-            match shortest_path(left_cell, target_cell, net, true, Some(vehicle.speed)) {
-                Ok(path) => {
-                    let cost = path.cost();
-                    min_left_dist = cost + source_cell.distance_to(left_cell);
-                }
-                Err(e)
-                    if e != shortest_path::router::AStarError::NoPathFound {
-                        start_id: left_cell_id,
-                        end_id: target_cell_id,
-                    } =>
-                {
-                    return Err(IntentionError::LeftPathFind(left_cell_id))
-                }
-                Err(_) => {
-                    min_left_dist = INFINITY;
-                }
-            }
-        } else {
-            left_cell_id = -1;
-        }
-    }
-
-    // Check right maneuver
-    let mut right_cell_id = source_cell.get_right_id();
-    if right_cell_id > 0 {
-        let right_cell = net
-            .get_cell(&right_cell_id)
-            .ok_or(IntentionError::NoRightCell(vehicle.cell_id))?;
-
-        let is_blocked = current_state
-            .get(&right_cell_id)
-            .map(|&id| id > 0)
-            .unwrap_or(false);
-
-        if !is_blocked && right_cell.get_state() == CellState::Free {
-            match shortest_path(right_cell, target_cell, net, true, Some(vehicle.speed)) {
-                Ok(path) => {
-                    let cost = path.cost();
-                    min_right_dist = cost + source_cell.distance_to(right_cell);
-                }
-                Err(e)
-                    if e != shortest_path::router::AStarError::NoPathFound {
-                        start_id: right_cell_id,
-                        end_id: target_cell_id,
-                    } =>
-                {
-                    return Err(IntentionError::RightPathFind(right_cell_id))
-                }
-                Err(_) => {
-                    min_right_dist = INFINITY;
-                }
-            }
-        } else {
-            right_cell_id = -1;
-        }
-    }
-
-    // Choose best maneuver
-    let mut min_cell: CellID;
-    let mut intention_maneuver: LaneChangeType;
-    if UNDEFINED_MANEUVER == LaneChangeType::ChangeRight {
-        min_cell = right_cell_id;
-        intention_maneuver = LaneChangeType::ChangeRight;
-        if min_left_dist < min_right_dist {
-            min_cell = left_cell_id;
-            intention_maneuver = LaneChangeType::ChangeLeft;
-        }
+    // Check left and right alternate paths (no depth limit to see full route).
+    // A confused vehicle's destination is already proven unreachable, and
+    // reachability is monotone along directed edges - both probes would run a
+    // full failed A* just to return INFINITY, so skip them.
+    let (left_cell_id, min_left_dist) = if vehicle.confusion {
+        (-1, INFINITY)
     } else {
-        min_cell = left_cell_id;
-        intention_maneuver = LaneChangeType::ChangeLeft;
-        if min_right_dist < min_left_dist {
-            min_cell = right_cell_id;
-            intention_maneuver = LaneChangeType::ChangeRight;
+        check_alternate_direction(
+            source_cell.get_left_id(),
+            source_cell,
+            target_cell,
+            net,
+            current_state,
+            "left",
+            None,
+            // Some(vehicle.speed),  // depth-limited
+        )?
+    };
+
+    let (right_cell_id, min_right_dist) = if vehicle.confusion {
+        (-1, INFINITY)
+    } else {
+        check_alternate_direction(
+            source_cell.get_right_id(),
+            source_cell,
+            target_cell,
+            net,
+            current_state,
+            "right",
+            None,
+            // Some(vehicle.speed),  // depth-limited
+        )?
+    };
+
+    // If both paths are impossible (infinite distance), don't attempt a lane change.
+    // Before blocking, try to keep rolling forward: a driver stuck next to a jammed
+    // lane drives along it and merges at a gap further ahead.
+    //
+    // An unguarded roll can push the vehicle off its route into a one-way pocket from
+    // which the destination is unreachable, after which the per-tick A* returns
+    // NoPathFound, confusion latches, and the vehicle is despawned as `lost` (before this
+    // guard existed, this was measured to be the sole cause of lost vehicles). So a
+    // non-confused vehicle is allowed to roll forward only while it can still get back to
+    // its route (`forward_keeps_reachable`); otherwise it waits in place (a recoverable
+    // stall) instead of driving into a trap.
+    //
+    // A vehicle that is ALREADY confused has no reachable route to protect, so it keeps
+    // rolling unconditionally - that is what carries it to a Death zone for removal
+    // (without it, a confused vehicle would block forever as a zombie).
+    if min_left_dist == INFINITY && min_right_dist == INFINITY {
+        let forward_cell_id = source_cell.get_forward_id();
+        if forward_cell_id > 0 {
+            if let Some(forward_cell) = net.get_cell(&forward_cell_id) {
+                let is_occupied = current_state
+                    .get(&forward_cell_id)
+                    .map(|&id| id > 0)
+                    .unwrap_or(false);
+                let safe_to_roll = vehicle.confusion
+                    || forward_keeps_reachable(vehicle, forward_cell_id, net);
+                if !is_occupied
+                    && forward_cell.get_state() == CellState::Free
+                    && forward_cell.get_speed_limit() > 0
+                    && safe_to_roll
+                {
+                    return Ok(VehicleIntention {
+                        intention_maneuver: LaneChangeType::NoChange,
+                        intention_speed: 1,
+                        destination: None,
+                        confusion: None,
+                        intention_cell_id: forward_cell_id,
+                        tail_intention_cells: vec![],
+                        intermediate_cells: Vec::with_capacity(0),
+                        tail_maneuver: TailIntentionManeuver::default(),
+                        should_stop: false,
+                    });
+                }
+            }
         }
+        return Ok(create_block_intention(source_cell_id, true));
     }
 
-    // Apply the chosen maneuver
+    // Choose best maneuver based on distance comparison
+    let (min_cell, intention_maneuver) = if min_left_dist < min_right_dist {
+        (left_cell_id, LaneChangeType::ChangeLeft)
+    } else if min_right_dist < min_left_dist {
+        (right_cell_id, LaneChangeType::ChangeRight)
+    } else {
+        // Equal distances - use UNDEFINED_MANEUVER as tiebreaker
+        if UNDEFINED_MANEUVER == LaneChangeType::ChangeRight {
+            (right_cell_id, LaneChangeType::ChangeRight)
+        } else {
+            (left_cell_id, LaneChangeType::ChangeLeft)
+        }
+    };
+
+    // Apply the chosen maneuver if valid
     if min_cell > 0 {
-        let result = VehicleIntention {
-            intention_maneuver: intention_maneuver,
+        return Ok(VehicleIntention {
+            intention_maneuver,
             intention_speed: 1,
             destination: None,
             confusion: None,
@@ -580,22 +815,9 @@ pub fn find_alternate_intention<'a>(
             intermediate_cells: Vec::with_capacity(0),
             tail_maneuver: TailIntentionManeuver::default(),
             should_stop: true,
-        };
-        return Ok(result);
+        })
     }
-    let result = VehicleIntention {
-        intention_maneuver: LaneChangeType::Block,
-        intention_speed: 0,
-        destination: None,
-        confusion: None,
-        intention_cell_id: source_cell_id,
-        tail_intention_cells: vec![],
-        intermediate_cells: Vec::with_capacity(0),
-        tail_maneuver: TailIntentionManeuver::default(),
-        should_stop: false,
-    };
-
-    Ok(result)
+    Ok(create_block_intention(source_cell_id, false))
 }
 
 #[cfg(test)]

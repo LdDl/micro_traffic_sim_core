@@ -3,7 +3,10 @@ use crate::grid::{
     cell::{Cell, CellID},
     road_network::GridRoads,
 };
-use crate::shortest_path::{heuristics::heuristic, path::Path};
+use crate::shortest_path::{
+    heuristics::{edge_time, GeometricHeuristic, Heuristic},
+    path::Path,
+};
 use indexmap::IndexMap;
 use std::{cell::RefCell, cmp::Ordering, collections::BinaryHeap, fmt, rc::Rc};
 
@@ -155,8 +158,9 @@ impl<'a> Ord for AStarNode<'a> {
 /// ## Search strategy
 /// - **Forward movement**: Always considers forward connections
 /// - **Lane changes**: Optionally considers left and right connections. Penalizes lane changes.
-/// - **Cost calculation**: Uses geometric distance between nodes as edge weights
-/// - **Heuristic**: Straight-line distance to goal
+/// - **Cost calculation**: travel time (edge length / speed) between nodes; with a
+///   congestion-aware grid the speed is the smoothed per-cell speed
+/// - **Heuristic**: admissible travel-time lower bound (straight-line distance / max speed)
 ///
 /// ## Performance characteristics
 /// 
@@ -289,27 +293,44 @@ pub fn shortest_path<'a>(
     maneuver_allowed: bool,
     max_depth_opt: Option<i32>,
 ) -> Result<Path<'a>, AStarError> {
+    let h = GeometricHeuristic::new(net.get_max_speed());
+    shortest_path_with_heuristic(start, goal, net, maneuver_allowed, max_depth_opt, &h)
+}
+
+/// Same as [`shortest_path`] but with a caller-supplied [`Heuristic`] (e.g. a
+/// landmark/ALT heuristic). The heuristic must be admissible for the result to be
+/// optimal. This is the entry point an external heuristic crate plugs into.
+pub fn shortest_path_with_heuristic<'a, H: Heuristic>(
+    start: &'a Cell,
+    goal: &'a Cell,
+    net: &'a GridRoads,
+    maneuver_allowed: bool,
+    max_depth_opt: Option<i32>,
+    h: &H,
+) -> Result<Path<'a>, AStarError> {
+    // Closed set: a cheap O(1) visited marker indexed by cell id. With a consistent
+    // heuristic the first pop of a cell is already optimal, so later pops are stale
+    // duplicates and can be skipped. Sized to the network's id range.
+    let mut finalized: Vec<bool> = vec![false; (net.get_max_cell_id().max(0) + 1) as usize];
     let max_depth = max_depth_opt.unwrap_or(0);
     let mut open_set = BinaryHeap::new();
 
     let start_node = Rc::new(RefCell::new(AStarNode::new(
         start,
         0.0,
-        heuristic(start, goal),
+        h.estimate(start, goal),
         None,
         LaneChangeType::NoChange,
     )));
 
     open_set.push(start_node);
 
-    let mut came_from = IndexMap::new();
     let mut g_score = IndexMap::new();
     g_score.insert(start.get_id(), 0.0);
 
     let mut research_vertices = 0;
 
     while let Some(current_node) = open_set.pop() {
-        // println!("pop with id: {} {} {}", current_node.borrow().cell.get_id(), current_node.borrow().f_cost, current_node.borrow().g_cost);
         research_vertices += 1;
 
         if max_depth > 0 && research_vertices >= max_depth {
@@ -320,6 +341,15 @@ pub fn shortest_path<'a>(
         let current_cell = current_node.borrow().cell;
         if current_cell.get_id() == goal.get_id() {
             return Ok(reconstruct_path(&current_node));
+        }
+
+        // Closed set: skip a cell already finalized by an earlier (optimal) pop.
+        let cid = current_cell.get_id();
+        if cid >= 0 && (cid as usize) < finalized.len() {
+            if finalized[cid as usize] {
+                continue;
+            }
+            finalized[cid as usize] = true;
         }
 
         let forward_id = current_cell.get_forward_id();
@@ -333,7 +363,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::NoChange,
                     &mut g_score,
                     &mut open_set,
-                    &mut came_from,
+                    h,
                 );
             } else {
                 return Err(AStarError::BadData {
@@ -356,7 +386,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::ChangeLeft,
                     &mut g_score,
                     &mut open_set,
-                    &mut came_from,
+                    h,
                 );
             } else {
                 return Err(AStarError::BadData { cell_id: left_id });
@@ -374,7 +404,7 @@ pub fn shortest_path<'a>(
                     LaneChangeType::ChangeRight,
                     &mut g_score,
                     &mut open_set,
-                    &mut came_from,
+                    h,
                 );
             } else {
                 return Err(AStarError::BadData { cell_id: right_id });
@@ -409,30 +439,41 @@ pub fn shortest_path<'a>(
 /// 1. Calculates tentative g_score (current g_cost + edge cost)
 /// 2. Compares with existing best cost to neighbor
 /// 3. If better path found, updates data structures and adds to open set
-/// 4. Uses geometric distance as edge cost (currently, can be changed in future, see [`mod.rs`](crate::shortest_path) of this module) between cells.
-fn process_neighbor<'a>(
+/// 4. Uses travel time (edge length / source-cell speed) as the edge cost between cells.
+fn process_neighbor<'a, H: Heuristic>(
     goal: &Cell,
-    // current_node: AStarNode<'a>,
     current_node: Rc<RefCell<AStarNode<'a>>>,
     neighbor_cell: &'a Cell,
     neighbor_maneuver: LaneChangeType,
     g_score: &mut IndexMap<i64, f64>,
-    // open_set: &mut BinaryHeap<AStarNode<'a>>,
-    // came_from: &mut HashMap<i64, AStarNode<'a>>,
     open_set: &mut BinaryHeap<Rc<RefCell<AStarNode<'a>>>>,
-    came_from: &mut IndexMap<i64, Rc<RefCell<AStarNode<'a>>>>,
+    h: &H,
 ) {
-    let tentative_g_score =
-        current_node.borrow().g_cost + heuristic(current_node.borrow().cell, neighbor_cell);
+    // Edge cost = travel time. Use the precomputed per-cell time (static graph) when
+    // available, otherwise compute it on the fly. Both yield the same value, so routes
+    // are identical whether or not the grid was precomputed.
+    let edge_cost = {
+        let cur = current_node.borrow();
+        let pre = match neighbor_maneuver {
+            LaneChangeType::ChangeLeft => cur.cell.get_left_cost(),
+            LaneChangeType::ChangeRight => cur.cell.get_right_cost(),
+            _ => cur.cell.get_forward_cost(),
+        };
+        if pre.is_nan() {
+            edge_time(cur.cell, neighbor_cell)
+        } else {
+            pre
+        }
+    };
+    let tentative_g_score = current_node.borrow().g_cost + edge_cost;
     let neighbor_cell_id = neighbor_cell.get_id();
     if tentative_g_score < *g_score.get(&neighbor_cell_id).unwrap_or(&f64::INFINITY) {
-        // println!("scan {} {}", neighbor_cell_id, tentative_g_score);
         g_score.insert(neighbor_cell_id, tentative_g_score);
 
         let neighbor = Rc::new(RefCell::new(AStarNode::new(
             neighbor_cell,
             tentative_g_score,
-            tentative_g_score + heuristic(neighbor_cell, goal),
+            tentative_g_score + h.estimate(neighbor_cell, goal),
             // None,
             Some(current_node.clone()),
             neighbor_maneuver,
@@ -445,7 +486,6 @@ fn process_neighbor<'a>(
         //     neighbor.borrow().g_cost
         // );
         open_set.push(neighbor.to_owned());
-        came_from.insert(neighbor_cell_id, current_node);
     }
 }
 
@@ -489,6 +529,75 @@ fn reconstruct_path<'a>(current_node: &Rc<RefCell<AStarNode<'a>>>) -> Path<'a> {
     maneuvers.reverse();
 
     Path::new(vertices, maneuvers, cost)
+}
+
+/// Bounded breadth-first search that reconnects a vehicle that fell off its cached
+/// route back onto it. Searches forward/left/right from `from` (up to `max_depth`
+/// expanded cells) for the nearest cell that lies on `cache` at index >= `min_idx`,
+/// and returns the spliced full route: the reconnect prefix (`from` ... reconnect
+/// cell) followed by the remaining cache tail. Returns `None` if no cache cell is
+/// reachable within the bound (caller then falls back to a full A*).
+///
+/// Cheaper than a full A* to the destination, and SUMO-faithful "get back on route"
+/// behaviour. A dangling neighbour id is skipped (not a hard error) - this fixes the
+/// reference-branch reconnect bug where one bad id aborted the whole search.
+pub fn reconnect_to_cache(
+    from: CellID,
+    cache: &[CellID],
+    min_idx: usize,
+    net: &GridRoads,
+    max_depth: usize,
+) -> Option<Vec<CellID>> {
+    use std::collections::VecDeque;
+    if cache.is_empty() {
+        return None;
+    }
+    // Map each cache cell (from min_idx on) to its index, to detect a hit quickly.
+    let mut cache_idx: std::collections::HashMap<CellID, usize> = std::collections::HashMap::new();
+    for (i, &c) in cache.iter().enumerate().skip(min_idx) {
+        cache_idx.entry(c).or_insert(i); // first (earliest) occurrence wins
+    }
+
+    let mut parent: std::collections::HashMap<CellID, CellID> = std::collections::HashMap::new();
+    let mut visited: std::collections::HashSet<CellID> = std::collections::HashSet::new();
+    let mut queue: VecDeque<(CellID, usize)> = VecDeque::new();
+    queue.push_back((from, 0));
+    visited.insert(from);
+
+    while let Some((cell_id, depth)) = queue.pop_front() {
+        // Hit: cell_id is on the cache ahead - splice and return.
+        if let Some(&idx) = cache_idx.get(&cell_id) {
+            if cell_id != from {
+                // Reconstruct the reconnect prefix (from -> ... -> cell_id).
+                let mut prefix = vec![cell_id];
+                let mut cur = cell_id;
+                while let Some(&p) = parent.get(&cur) {
+                    prefix.push(p);
+                    cur = p;
+                }
+                prefix.reverse(); // now [from, ..., cell_id]
+                // Splice: prefix + cache tail after the reconnect cell.
+                let mut route = prefix;
+                route.extend_from_slice(&cache[idx + 1..]);
+                return Some(route);
+            }
+        }
+        if depth >= max_depth {
+            continue;
+        }
+        let cell = match net.get_cell(&cell_id) {
+            Some(c) => c,
+            None => continue, // dangling id - skip, do not abort the whole search
+        };
+        for nb in [cell.get_forward_id(), cell.get_left_id(), cell.get_right_id()] {
+            if nb > -1 && !visited.contains(&nb) {
+                visited.insert(nb);
+                parent.insert(nb, cell_id);
+                queue.push_back((nb, depth + 1));
+            }
+        }
+    }
+    None
 }
 
 /// Finds a path of exactly `depth` steps starting from `start`, ignoring any goal.
@@ -621,7 +730,7 @@ pub fn path_no_goal<'a>(
             // Calculate cost as sum of heuristic costs
             let mut cost = 0.0;
             for i in 1..vertices.len() {
-                cost += heuristic(vertices[i - 1], vertices[i]);
+                cost += edge_time(vertices[i - 1], vertices[i]);
             }
             return Ok(Path::new(vertices, maneuvers, cost));
         }
@@ -633,7 +742,7 @@ pub fn path_no_goal<'a>(
             // Can't reach requested depth, but at least 2 cells in path
             let mut cost = 0.0;
             for i in 1..vertices.len() {
-                cost += heuristic(vertices[i - 1], vertices[i]);
+                cost += edge_time(vertices[i - 1], vertices[i]);
             }
             return Ok(Path::new(vertices, maneuvers, cost));
         }
@@ -742,7 +851,9 @@ mod tests {
             path_result.err()
         );
         let path = path_result.unwrap();
-        let correct_cost = 1111.414213562373;
+        // Cost is now travel TIME = distance / speed. The one-lane generator uses
+        // speed_limit 3, so the time cost is the former distance cost (1111.414...) / 3.
+        let correct_cost = 370.4714045207875;
         assert!(
             (path.cost() - correct_cost).abs() < 0.001,
             "Cost should be {}, but got {}",
