@@ -66,3 +66,46 @@ fn test_gap_keeps_empty_cells_behind_stopped_leader() {
     assert_eq!(settled_follower_head(1), 8, "one empty cell between follower and leader");
     assert_eq!(settled_follower_head(2), 7, "two empty cells between follower and leader");
 }
+
+/// A leader that still moves at the start of the tick but is kept in place in it (a Block vehicle
+/// right ahead) ends the tick standing; returns the follower head after that one tick.
+fn follower_head_behind_leader_stopping_now(standstill_gap: i32) -> CellID {
+    let mut session = Session::new(straight_road(), None);
+    session.add_vehicles(vec![
+        Vehicle::new(1)
+            .with_cell(12)
+            .with_destination(20)
+            .with_speed(0)
+            .with_behaviour(BehaviourType::Block)
+            .build(),
+        Vehicle::new(2)
+            .with_cell(11)
+            .with_destination(20)
+            .with_speed(1)
+            .with_speed_limit(3)
+            .with_behaviour(BehaviourType::Aggressive)
+            .with_slowdown(0.0)
+            .with_slow_to_start(0.0)
+            .build(),
+        Vehicle::new(3)
+            .with_cell(8)
+            .with_destination(20)
+            .with_speed(2)
+            .with_speed_limit(3)
+            .with_behaviour(BehaviourType::Aggressive)
+            .with_slowdown(0.0)
+            .with_slow_to_start(0.0)
+            .with_standstill_gap(standstill_gap)
+            .build(),
+    ]);
+    session.step().expect("step failed");
+    let vehicles = session.get_vehicles();
+    assert_eq!(vehicles.get(&2).expect("leader").cell_id, 11, "the leader is blocked and stays");
+    vehicles.get(&3).expect("follower").cell_id
+}
+
+#[test]
+fn test_gap_kept_behind_leader_stopping_in_same_tick() {
+    assert_eq!(follower_head_behind_leader_stopping_now(0), 10, "without a gap the follower closes up");
+    assert_eq!(follower_head_behind_leader_stopping_now(1), 9, "the gap is kept behind a leader that stops now");
+}

@@ -662,6 +662,43 @@ impl Vehicle {
         tail
     }
 
+    /// Slow to start probability of a vehicle of `length_cells` cells that keeps `standstill_gap`
+    /// empty cells in a jam, derived from the probability `p0` of a one cell vehicle with the same
+    /// behaviour and gap.
+    ///
+    /// A vehicle leaves a jam after the mean escape delay tau / (1 - p0), and each departure moves the
+    /// downstream jam front back by the space the vehicle occupies in the jam, its length plus its
+    /// gap (Kerner, Klenov, Wolf 2002, doi:10.1088/0305-4470/35/47/303, p. 8: v_g = d / tau_del).
+    /// Empirically the velocity of the downstream front of a wide moving jam does not depend on the
+    /// percentage of trucks, while the jam outflow and the jam density do (Kerner 2004, The Physics
+    /// of Traffic, doi:10.1007/978-3-540-40986-1, p. 308, Fig. 11.2). Keeping the space per escape
+    /// delay equal to that of a one cell vehicle gives
+    /// p0(L) = 1 - (1 - p0) * (1 + g) / (L + g),
+    /// so a longer vehicle departs later, the front speed stays the same for any vehicle mix, and
+    /// lanes with more long vehicles get a lower outflow and a lower jam density, as observed.
+    ///
+    /// # Arguments
+    /// * `p0` - Slow to start probability of a one cell vehicle, clamped to [0, 1].
+    /// * `length_cells` - Cells the vehicle occupies (head plus tail); 1 or less returns `p0`.
+    /// * `standstill_gap` - Empty cells the vehicle keeps in front of a stopped leader (negative counts as 0).
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 1), 0.425);
+    /// // A two cell truck with a one cell gap occupies 3 cells instead of 2.
+    /// let p = Vehicle::slow_to_start_for_length(0.425, 2, 1);
+    /// assert!((p - (1.0 - 0.575 * 2.0 / 3.0)).abs() < 1e-12);
+    /// ```
+    pub fn slow_to_start_for_length(p0: f64, length_cells: i32, standstill_gap: i32) -> f64 {
+        let p0 = p0.clamp(0.0, 1.0);
+        if length_cells <= 1 {
+            return p0;
+        }
+        let gap = standstill_gap.max(0) as f64;
+        1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
+    }
+
     /// The vehicle's patience threshold in steps: how long it tolerates losing
     /// contested cells before overriding right-of-way. Scaled by cooperativity so
     /// every vehicle eventually forces (the threshold is always finite), but more
@@ -1252,6 +1289,26 @@ impl VehicleBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_slow_to_start_for_length() {
+        // A one cell vehicle keeps the behaviour value.
+        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 0), 0.425);
+        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 1), 0.425);
+        for &(p0, len, gap) in &[(0.425, 2, 0), (0.425, 2, 1), (0.425, 3, 1), (0.6, 3, 0), (0.0, 2, 1)] {
+            let p = Vehicle::slow_to_start_for_length(p0, len, gap);
+            // Space per escape delay equals that of a one cell vehicle: (L + g)(1 - p) = (1 + g)(1 - p0).
+            let lhs = (len as f64 + gap as f64) * (1.0 - p);
+            let rhs = (1.0 + gap as f64) * (1.0 - p0);
+            assert!((lhs - rhs).abs() < 1e-12, "invariance for {p0} {len} {gap}");
+            assert!(p >= p0 && p < 1.0, "a longer vehicle departs later but eventually departs");
+        }
+        // Longer vehicles depart later.
+        assert!(Vehicle::slow_to_start_for_length(0.425, 3, 1) > Vehicle::slow_to_start_for_length(0.425, 2, 1));
+        // Out of range inputs.
+        assert_eq!(Vehicle::slow_to_start_for_length(1.5, 1, 0), 1.0);
+        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 2, -3), Vehicle::slow_to_start_for_length(0.425, 2, 0));
+    }
+
     #[test]
     fn test_trim_forward_intention() {
         let mut vehicle = Vehicle::new(1).with_cell(3).with_speed(3).build();

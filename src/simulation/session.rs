@@ -528,6 +528,18 @@ impl Session {
             behaviour_params.standstill_gap()
         };
 
+        // Slow to start: use trip's explicit value if set, otherwise the behaviour value scaled to
+        // the vehicle length, so that long vehicles keep the jam front velocity of cars.
+        let slow_to_start = if trip.slow_to_start >= 0.0 {
+            trip.slow_to_start
+        } else {
+            Vehicle::slow_to_start_for_length(
+                behaviour_params.slow_to_start_factor_p0(),
+                1 + trip.vehicle_tail_size as i32,
+                standstill_gap,
+            )
+        };
+
         // Create vehicle using builder pattern
         Vehicle::new(self.last_vehicle_id)
             .with_type(trip.allowed_agent_type)
@@ -536,7 +548,7 @@ impl Session {
             .with_speed(trip.initial_speed)
             .with_speed_limit(speed_limit)
             .with_slowdown(behaviour_params.slowdown_factor_p())
-            .with_slow_to_start(behaviour_params.slow_to_start_factor_p0())
+            .with_slow_to_start(slow_to_start)
             .with_change_p1(behaviour_params.change_p1())
             .with_lc_cooldown(behaviour_params.lc_cooldown())
             .with_min_safe_distance(behaviour_params.min_safe_distance())
@@ -776,48 +788,61 @@ impl Session {
     }
 
     /// Shortens forward moves so that a vehicle with `standstill_gap > 0` ends that many empty
-    /// cells behind a STOPPED leader. Runs after conflict resolution: the full claim up to the
-    /// leader took part in conflict resolution, only the executed move is shortened, so the cells
-    /// given up stay unentered this tick (nobody else was granted them).
+    /// cells behind a leader that stands at the end of the tick. A leader stands at the end of the
+    /// tick when it was stopped at the start of the tick or when its granted intention keeps it in
+    /// place (it lost a conflict, it is blocked, or it dawdled from speed 1 to 0). Runs after
+    /// conflict resolution, when every granted intention is known: the full claim up to the leader
+    /// took part in conflict resolution, only the executed move is shortened, so the cells given up
+    /// stay unentered this tick. Checking only the start of the tick would let a follower close up
+    /// to a leader that stops in the same tick and stay there, which makes jams denser than the
+    /// gap intends. A shortened move can leave another leader in place, so the pass repeats until
+    /// no move changes; moves only get shorter, so it ends.
     fn apply_standstill_gaps(&mut self) {
-        let net = self.grids_storage.get_vehicles_net_ref();
-        // Body occupancy and speeds at the start of the tick (movement has not run yet).
-        let mut body: HashMap<CellID, (VehicleID, i32)> = HashMap::with_capacity(self.vehicles.len());
-        for v in self.vehicles.values() {
-            body.insert(v.cell_id, (v.id, v.speed));
-            for &t in &v.tail_cells {
-                if t >= 0 {
-                    body.insert(t, (v.id, v.speed));
-                }
-            }
-        }
-        let mut trims: Vec<(VehicleID, usize)> = Vec::new();
-        for v in self.vehicles.values() {
-            let g0 = v.standstill_gap;
-            if g0 <= 0
-                || v.intention.intention_maneuver != LaneChangeType::NoChange
-                || v.intention.intention_cell_id == v.cell_id
-            {
-                continue;
-            }
-            let path_len = v.intention.intermediate_cells.len() + 1;
-            let mut id = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
-            for k in 0..g0 {
-                if id < 0 {
-                    break;
-                }
-                if let Some(&(owner, speed)) = body.get(&id) {
-                    if owner != v.id && speed == 0 {
-                        trims.push((v.id, path_len.saturating_sub((g0 - k) as usize)));
+        loop {
+            let net = self.grids_storage.get_vehicles_net_ref();
+            // Body cells at the start of the tick (movement has not run yet) and whether their
+            // owner stands at the end of the tick.
+            let mut body: HashMap<CellID, (VehicleID, bool)> = HashMap::with_capacity(self.vehicles.len());
+            for v in self.vehicles.values() {
+                let stands = v.speed == 0 || v.intention.intention_cell_id == v.cell_id;
+                body.insert(v.cell_id, (v.id, stands));
+                for &t in &v.tail_cells {
+                    if t >= 0 {
+                        body.insert(t, (v.id, stands));
                     }
-                    break;
                 }
-                id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
             }
-        }
-        for (id, new_len) in trims {
-            if let Some(v) = self.vehicles.get_mut(&id) {
-                v.trim_forward_intention(new_len);
+            let mut trims: Vec<(VehicleID, usize)> = Vec::new();
+            for v in self.vehicles.values() {
+                let g0 = v.standstill_gap;
+                if g0 <= 0
+                    || v.intention.intention_maneuver != LaneChangeType::NoChange
+                    || v.intention.intention_cell_id == v.cell_id
+                {
+                    continue;
+                }
+                let path_len = v.intention.intermediate_cells.len() + 1;
+                let mut id = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+                for k in 0..g0 {
+                    if id < 0 {
+                        break;
+                    }
+                    if let Some(&(owner, stands)) = body.get(&id) {
+                        if owner != v.id && stands {
+                            trims.push((v.id, path_len.saturating_sub((g0 - k) as usize)));
+                        }
+                        break;
+                    }
+                    id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
+                }
+            }
+            if trims.is_empty() {
+                break;
+            }
+            for (id, new_len) in trims {
+                if let Some(v) = self.vehicles.get_mut(&id) {
+                    v.trim_forward_intention(new_len);
+                }
             }
         }
     }
