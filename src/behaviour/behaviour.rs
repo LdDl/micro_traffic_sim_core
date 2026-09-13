@@ -92,6 +92,8 @@ pub struct BehaviourParameters {
     min_safe_distance: i32,
     /// Reactive-lane-change cooldown duration in steps (anti-weaving).
     lc_cooldown: i64,
+    /// Standstill gap in cells: empty cells kept in front of a stopped leader.
+    standstill_gap: i32,
 }
 
 impl BehaviourParameters {
@@ -104,7 +106,10 @@ impl BehaviourParameters {
     ///   `p0 >= p` is the VDR asymmetry that produces the capacity drop; widen `(p0 - p)` to
     ///   strengthen the drop / metastability (without amplifying gridlock);
     /// - `speed_limit`, `aggressive_level`, `min_safe_distance` - per-type movement defaults;
-    /// - `lc_cooldown` - reactive-lane-change cooldown in steps (anti-weaving; 0 = changes freely).
+    /// - `lc_cooldown` - reactive-lane-change cooldown in steps (anti-weaving; 0 = changes freely);
+    /// - `standstill_gap` - empty cells kept in front of a stopped leader (see
+    ///   `Vehicle::standstill_gap`). Careful types keep one cell, aggressive and undefined ones stop
+    ///   bumper to bumper, so a mixed flow gets a realistic average jam spacing.
     ///
     /// The concrete per-type values are the `match` arms below (the single source of truth).
     ///
@@ -124,12 +129,12 @@ impl BehaviourParameters {
     /// let behaviour_params = BehaviourParameters::from_behaviour_type(BehaviourType::Aggressive);
     /// ```
     pub fn from_behaviour_type(behaviour: BehaviourType) -> Self {
-        let (p, p0, speed_limit, aggressive, min_safe, lc_cooldown) = match behaviour {
-            BehaviourType::Block => (1.0, 1.0, 0, 1.0, 0, 0),
-            BehaviourType::Aggressive => (0.1, 0.35, 5, 0.9, 0, 0),
-            BehaviourType::Cooperative => (0.5, 0.65, 4, 0.0, 1, 1),
-            BehaviourType::LimitSpeedByTrip => (0.7, 0.8, 3, 0.1, 1, 2),
-            BehaviourType::Undefined => (0.5, 0.6, 2, 0.5, 0, 1),
+        let (p, p0, speed_limit, aggressive, min_safe, lc_cooldown, standstill_gap) = match behaviour {
+            BehaviourType::Block => (1.0, 1.0, 0, 1.0, 0, 0, 0),
+            BehaviourType::Aggressive => (0.1, 0.35, 5, 0.9, 0, 0, 0),
+            BehaviourType::Cooperative => (0.5, 0.65, 4, 0.0, 1, 1, 1),
+            BehaviourType::LimitSpeedByTrip => (0.7, 0.8, 3, 0.1, 1, 2, 1),
+            BehaviourType::Undefined => (0.5, 0.6, 2, 0.5, 0, 1, 0),
         };
         Self {
             slowdown_factor_p: p,
@@ -138,6 +143,7 @@ impl BehaviourParameters {
             aggressive_level: aggressive,
             min_safe_distance: min_safe,
             lc_cooldown,
+            standstill_gap,
         }
     }
 
@@ -180,7 +186,32 @@ impl BehaviourParameters {
             aggressive_level,
             min_safe_distance,
             lc_cooldown,
+            standstill_gap: 0,
         }
+    }
+
+    /// Returns a copy with the given standstill gap.
+    ///
+    /// # Arguments
+    ///
+    /// - `standstill_gap`: empty cells kept in front of a stopped leader, `0` keeps bumper to bumper.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use micro_traffic_sim_core::behaviour::BehaviourParameters;
+    ///
+    /// let params = BehaviourParameters::new(0.1, 4, 0.2, 0, 0).with_standstill_gap(1);
+    /// assert_eq!(params.standstill_gap(), 1);
+    /// ```
+    pub fn with_standstill_gap(mut self, standstill_gap: i32) -> Self {
+        self.standstill_gap = standstill_gap.max(0);
+        self
+    }
+
+    /// Returns the standstill gap in cells.
+    pub fn standstill_gap(&self) -> i32 {
+        self.standstill_gap
     }
 
     /// Returns the speed limit.
@@ -245,6 +276,18 @@ mod tests {
         assert_eq!(params.aggressive_level(), 0.9);
         assert_eq!(params.min_safe_distance(), 0);
     }
+    #[test]
+    fn test_standstill_gap_presets() {
+        let gap = |b| BehaviourParameters::from_behaviour_type(b).standstill_gap();
+        assert_eq!(gap(BehaviourType::Cooperative), 1);
+        assert_eq!(gap(BehaviourType::LimitSpeedByTrip), 1);
+        assert_eq!(gap(BehaviourType::Aggressive), 0);
+        assert_eq!(gap(BehaviourType::Undefined), 0);
+        assert_eq!(gap(BehaviourType::Block), 0);
+        assert_eq!(BehaviourParameters::new(0.1, 4, 0.2, 0, 0).standstill_gap(), 0);
+        assert_eq!(BehaviourParameters::new(0.1, 4, 0.2, 0, 0).with_standstill_gap(-3).standstill_gap(), 0);
+    }
+
     #[test]
     fn test_change_p1_maps_aggressiveness() {
         // P1 = 0.5 + 0.5 * aggressive_level, in [0.5, 1.0].

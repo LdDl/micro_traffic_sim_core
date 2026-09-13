@@ -1,4 +1,4 @@
-use super::{process_no_route_found, process_path, NoRouteError};
+use super::{process_no_route_found, process_path_for_vehicle, NoRouteError};
 use crate::behaviour::BehaviourType;
 use crate::agents::{
     TailIntentionManeuver, Vehicle, VehicleError, VehicleID, VehicleIntention,
@@ -327,7 +327,7 @@ fn forward_keeps_reachable(vehicle: &Vehicle, forward_id: CellID, net: &GridRoad
 pub fn find_intention<'a>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,
-    _speed_snapshot: &HashMap<CellID, i32>,
+    speed_snapshot: &HashMap<CellID, i32>,
     vehicle: &'a Vehicle,
     _verbose: &LocalLogger,
 ) -> Result<VehicleIntention, IntentionError> {
@@ -571,11 +571,12 @@ pub fn find_intention<'a>(
     //         .collect::<Vec<CellID>>()
     // );
     // Process path to find wanted maneuver, success forward movement and to trim path
-    let observable_path = process_path(
+    let observable_path = process_path_for_vehicle(
         &mut path,
         speed_possible,
         vehicle.destination,
         current_state,
+        Some(vehicle.id),
     );
     // println!(
     //     "  -> Observable path: wanted_maneuver={:?}, last_cell_state={:?}, trimmed_path={:?}, has_vehicle_on_path={}, speed_limit_reached={}, stopped_on_maneuver={}, stopped_speed_possible={}",
@@ -589,7 +590,22 @@ pub fn find_intention<'a>(
     // );
     let wanted_maneuver = observable_path.wanted_maneuver;
     let last_cell_state = observable_path.last_cell_state;
-    let vertices = observable_path.trimmed_path;
+    let mut vertices = observable_path.trimmed_path;
+
+    // Standstill gap: behind a STOPPED leader the vehicle keeps `standstill_gap` empty cells.
+    // If it cannot advance without closing that gap, it is treated exactly like a bumper to
+    // bumper blocked vehicle (should_stop), so lane change alternatives are tried as before.
+    // A longer move keeps the full claim up to the leader here, so neighbours still see a
+    // contested cell; the executed move is shortened after conflict resolution
+    // (Session::apply_standstill_gaps).
+    if vehicle.standstill_gap > 0 && observable_path.has_vehicle_on_path {
+        let blocking = observable_path.blocking_cell_id;
+        let leader_stopped = current_state.get(&blocking).map(|&v| v != vehicle.id).unwrap_or(false)
+            && speed_snapshot.get(&blocking).copied() == Some(0);
+        if leader_stopped && (vertices.len() as i32) <= vehicle.standstill_gap {
+            vertices.clear();
+        }
+    }
 
     // Possible speed should not be greater than success forward movement counter
     // If len(vertices) < speed, then it means that vehicle slow downed due conflict #1.1. Otherwise vehicle could accelerate

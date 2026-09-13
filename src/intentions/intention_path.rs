@@ -28,6 +28,8 @@ pub struct ObservablePath<'a> {
     pub stopped_on_maneuver: bool,
     /// Indicates if movement was stopped due to speed restrictions
     pub stopped_speed_possible: bool,
+    /// Cell occupied by another vehicle where the scan stopped, -1 when no vehicle blocked the path
+    pub blocking_cell_id: CellID,
 }
 
 /// Analyzes a path and determines how far a vehicle can move.
@@ -80,6 +82,25 @@ pub fn process_path<'a>(
     destination: CellID,
     current_state: &HashMap<CellID, VehicleID>,
 ) -> ObservablePath<'a> {
+    process_path_for_vehicle(shortest_path, speed_possible, destination, current_state, None)
+}
+
+/// Same as `process_path`, but cells claimed by the vehicle itself (its front standstill buffer)
+/// do not block it.
+///
+/// # Arguments
+/// * `shortest_path` - Reference to path to process
+/// * `speed_possible` - Maximum possible speed
+/// * `destination` - Vehicle destination cell
+/// * `current_state` - Current occupancy state mapping cells to vehicles (bodies and buffers)
+/// * `self_id` - The vehicle whose own claimed cells are passable, None to treat every claim as an obstacle
+pub fn process_path_for_vehicle<'a>(
+    shortest_path: &'a mut Path,
+    speed_possible: i32,
+    destination: CellID,
+    current_state: &HashMap<CellID, VehicleID>,
+    self_id: Option<VehicleID>,
+) -> ObservablePath<'a> {
     // Remove first cell from path since it's vehicle's position
     shortest_path.vertices_mut().remove(0);
     // Handle edge case where path is empty or speed is 0
@@ -92,6 +113,7 @@ pub fn process_path<'a>(
             speed_limit_reached: false,
             stopped_on_maneuver: false,
             stopped_speed_possible: false,
+            blocking_cell_id: -1,
         };
     }
     let speed_limit = (speed_possible as usize - 1).min(shortest_path.vertices().len() - 1);
@@ -117,6 +139,7 @@ pub fn process_path<'a>(
     let mut speed_limit_reached = false;
     let mut stopped_on_maneuver = false;
     let stopped_speed_possible = false;
+    let mut blocking_cell_id: CellID = -1;
 
     for (i, cell) in vertices.iter().enumerate() {
         let maneuver = maneuvers[i];
@@ -128,10 +151,14 @@ pub fn process_path<'a>(
             break;
         }
 
-        // Check if cell is occupied by another vehicle
-        if let Some(_vehicle_id) = current_state.get(&cell.get_id()) {
-            has_vehicle_on_path = true;
-            break;
+        // Check if cell is occupied by another vehicle. Cells claimed by the vehicle itself
+        // (its front standstill buffer) do not block it.
+        if let Some(&occupant) = current_state.get(&cell.get_id()) {
+            if Some(occupant) != self_id {
+                has_vehicle_on_path = true;
+                blocking_cell_id = cell.get_id();
+                break;
+            }
         }
 
         // Check traffic light state
@@ -164,6 +191,7 @@ pub fn process_path<'a>(
         speed_limit_reached,
         stopped_on_maneuver,
         stopped_speed_possible,
+        blocking_cell_id,
     }
 }
 
@@ -201,6 +229,7 @@ mod tests {
             speed_limit_reached: false,
             stopped_on_maneuver: false,
             stopped_speed_possible: false,
+            blocking_cell_id: -1,
         };
 
         assert_eq!(
@@ -251,6 +280,7 @@ mod tests {
             speed_limit_reached: false,
             stopped_on_maneuver: false,
             stopped_speed_possible: false,
+            blocking_cell_id: -1,
         };
 
         assert_eq!(
@@ -301,6 +331,7 @@ mod tests {
             speed_limit_reached: false,
             stopped_on_maneuver: true,
             stopped_speed_possible: false,
+            blocking_cell_id: -1,
         };
 
         assert_eq!(
@@ -349,6 +380,7 @@ mod tests {
             speed_limit_reached: false,
             stopped_on_maneuver: true,
             stopped_speed_possible: false,
+            blocking_cell_id: -1,
         };
 
         assert_eq!(
@@ -399,6 +431,7 @@ mod tests {
             speed_limit_reached: true,
             stopped_on_maneuver: false,
             stopped_speed_possible: false,
+            blocking_cell_id: -1,
         };
 
         assert_eq!(
@@ -448,6 +481,7 @@ mod tests {
             speed_limit_reached: false,
             stopped_on_maneuver: false,
             stopped_speed_possible: false,
+            blocking_cell_id: -1,
         };
 
         assert_eq!(

@@ -1,3 +1,4 @@
+use crate::maneuver::LaneChangeType;
 use crate::behaviour::BehaviourParameters;
 use crate::agents_types::AgentType;
 use crate::agents::{VehicleID, Vehicle, VehiclesStorage};
@@ -520,6 +521,13 @@ impl Session {
             behaviour_params.speed_limit()
         };
 
+        // Standstill gap: use trip's explicit value if set, otherwise from behaviour
+        let standstill_gap = if trip.standstill_gap >= 0 {
+            trip.standstill_gap
+        } else {
+            behaviour_params.standstill_gap()
+        };
+
         // Create vehicle using builder pattern
         Vehicle::new(self.last_vehicle_id)
             .with_type(trip.allowed_agent_type)
@@ -532,6 +540,7 @@ impl Session {
             .with_change_p1(behaviour_params.change_p1())
             .with_lc_cooldown(behaviour_params.lc_cooldown())
             .with_min_safe_distance(behaviour_params.min_safe_distance())
+            .with_standstill_gap(standstill_gap)
             .with_aggressive_level(behaviour_params.aggressive_level())
             .with_destination(target_node)
             .with_trip_destination(final_destination)
@@ -728,6 +737,89 @@ impl Session {
                 }
             }
         }
+        // Front standstill buffers: a vehicle with standstill_gap > 0 within standstill_gap + 1
+        // cells of a STOPPED leader claims the empty cells between them. For everyone else they
+        // count as occupied, so a queue still looks solid and nobody plans to wedge into the gap;
+        // the owner passes through its own buffer. Buffers get no speed snapshot entry.
+        let mut buffers: Vec<(CellID, VehicleID)> = Vec::new();
+        {
+            let net = self.grids_storage.get_vehicles_net_ref();
+            for vehicle in self.vehicles.values() {
+                let g0 = vehicle.standstill_gap;
+                if g0 <= 0 {
+                    continue;
+                }
+                let mut free_cells: Vec<CellID> = Vec::with_capacity(g0 as usize + 1);
+                let mut id = net.get_cell(&vehicle.cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+                for _ in 0..=g0 {
+                    if id < 0 {
+                        break;
+                    }
+                    if let Some(&occupant) = self.current_position.get(&id) {
+                        let leader_stopped = occupant != vehicle.id
+                            && self.speed_snapshot.get(&id).copied() == Some(0);
+                        if leader_stopped {
+                            for &cell in &free_cells {
+                                buffers.push((cell, vehicle.id));
+                            }
+                        }
+                        break;
+                    }
+                    free_cells.push(id);
+                    id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
+                }
+            }
+        }
+        for (cell, owner) in buffers {
+            self.current_position.entry(cell).or_insert(owner);
+        }
+    }
+
+    /// Shortens forward moves so that a vehicle with `standstill_gap > 0` ends that many empty
+    /// cells behind a STOPPED leader. Runs after conflict resolution: the full claim up to the
+    /// leader took part in conflict resolution, only the executed move is shortened, so the cells
+    /// given up stay unentered this tick (nobody else was granted them).
+    fn apply_standstill_gaps(&mut self) {
+        let net = self.grids_storage.get_vehicles_net_ref();
+        // Body occupancy and speeds at the start of the tick (movement has not run yet).
+        let mut body: HashMap<CellID, (VehicleID, i32)> = HashMap::with_capacity(self.vehicles.len());
+        for v in self.vehicles.values() {
+            body.insert(v.cell_id, (v.id, v.speed));
+            for &t in &v.tail_cells {
+                if t >= 0 {
+                    body.insert(t, (v.id, v.speed));
+                }
+            }
+        }
+        let mut trims: Vec<(VehicleID, usize)> = Vec::new();
+        for v in self.vehicles.values() {
+            let g0 = v.standstill_gap;
+            if g0 <= 0
+                || v.intention.intention_maneuver != LaneChangeType::NoChange
+                || v.intention.intention_cell_id == v.cell_id
+            {
+                continue;
+            }
+            let path_len = v.intention.intermediate_cells.len() + 1;
+            let mut id = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+            for k in 0..g0 {
+                if id < 0 {
+                    break;
+                }
+                if let Some(&(owner, speed)) = body.get(&id) {
+                    if owner != v.id && speed == 0 {
+                        trims.push((v.id, path_len.saturating_sub((g0 - k) as usize)));
+                    }
+                    break;
+                }
+                id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
+            }
+        }
+        for (id, new_len) in trims {
+            if let Some(v) = self.vehicles.get_mut(&id) {
+                v.trim_forward_intention(new_len);
+            }
+        }
     }
 
     /// Recomputes smoothed per-cell travel speed from current occupancy and pushes
@@ -850,6 +942,9 @@ impl Session {
 
         // 6. Solve conflicts
         solve_conflicts(conflicts_data, &mut self.vehicles, &self.verbose)?;
+
+        // 6b. Standstill gaps: shorten granted forward moves that would close the gap to a stopped leader.
+        self.apply_standstill_gaps();
 
         // 7. Move vehicles
         let vehicles_grid = self.grids_storage.get_vehicles_net_ref();

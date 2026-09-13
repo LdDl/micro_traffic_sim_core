@@ -111,6 +111,19 @@ pub struct Vehicle {
     pub bearing: f64,
     /// Minimal safe distance (in cells) to the vehicle in front
     pub min_safe_distance: i32,
+    /// Standstill gap (in cells): empty cells the vehicle keeps in front of a STOPPED leader.
+    /// The gap cells stay claimed by this vehicle for everyone else (front buffer), so a queue
+    /// still looks solid to other vehicles. 0 keeps the classic bumper to bumper standstill.
+    ///
+    /// With one vehicle per cell and no gap the jam density is one vehicle per cell length,
+    /// 222 veh/km at 4.5 m. Calibrated CA models use 7.5 m per vehicle in a jam (133 veh/km): the
+    /// cell stands for the space a vehicle occupies in a jam, its length plus the gap ahead
+    /// (Knospe, Santen, Schadschneider, Schreckenberg 2004, doi:10.1103/PhysRevE.70.016115), and
+    /// KKW models use a vehicle length d = 7.5 m that includes that gap (Kerner, Klenov, Wolf 2002,
+    /// doi:10.1088/0305-4470/35/47/303). By conservation of vehicles at the jam front a too dense
+    /// jam also makes jam fronts too slow. The gap keeps the cell at the physical vehicle length
+    /// and adds the jam spacing explicitly: one empty cell gives 9 m per vehicle in a jam.
+    pub standstill_gap: i32,
     /// Final cell for the vehicle's trip
     pub destination: CellID,
     /// Final trip destination (immutable, used for completion check; destination may change for transit cells)
@@ -233,6 +246,7 @@ impl Vehicle {
                 speed_limit: 4,
                 bearing: 0.0,
                 min_safe_distance: 0,
+                standstill_gap: 0,
                 destination: -1,
                 trip_destination: -1,
                 is_conflict_participant: false,
@@ -600,6 +614,54 @@ impl Vehicle {
         }
     }
 
+    /// Shortens a forward intention to its first `new_len` cells and keeps the tail intention
+    /// consistent with the shorter move. `new_len == 0` means the vehicle stays in place.
+    /// Used by the standstill gap: the claim up to the leader takes part in conflict resolution,
+    /// the executed move stops short of a stopped leader.
+    ///
+    /// # Arguments
+    /// * `new_len` - Number of cells the vehicle actually moves this tick
+    pub fn trim_forward_intention(&mut self, new_len: usize) {
+        let mut path: Vec<CellID> = self.intention.intermediate_cells.clone();
+        path.push(self.intention.intention_cell_id);
+        if new_len >= path.len() {
+            return;
+        }
+        path.truncate(new_len);
+        if let Some(&last) = path.last() {
+            self.intention.intention_cell_id = last;
+            self.intention.intermediate_cells = path[..path.len() - 1].to_vec();
+        } else {
+            self.intention.intention_cell_id = self.cell_id;
+            self.intention.intermediate_cells.clear();
+        }
+        self.intention.intention_speed = new_len as i32;
+        self.intention.tail_intention_cells = self.tail_intention_for_current();
+    }
+
+    /// Tail cells after executing the current intention, same rules as the intention storage uses.
+    fn tail_intention_for_current(&self) -> Vec<CellID> {
+        let tail_size = self.tail_cells.len();
+        if tail_size == 0 {
+            return vec![];
+        }
+        let mut tail = vec![TAIL_PLACEHOLDER; tail_size];
+        let skip = self.intention.intermediate_cells.len();
+        if self.intention.intention_cell_id != self.cell_id && skip > 0 && skip < tail_size {
+            tail[0..(tail_size - skip - 1)].copy_from_slice(&self.tail_cells[(skip + 1)..]);
+            tail[tail_size - skip - 1] = self.cell_id;
+            tail[(tail_size - skip)..].copy_from_slice(&self.intention.intermediate_cells);
+        } else if self.intention.intention_cell_id != self.cell_id && skip >= tail_size {
+            tail.copy_from_slice(&self.intention.intermediate_cells[skip - tail_size..]);
+        } else {
+            for i in 0..tail_size - 1 {
+                tail[i] = self.tail_cells[i + 1];
+            }
+            tail[tail_size - 1] = self.cell_id;
+        }
+        tail
+    }
+
     /// The vehicle's patience threshold in steps: how long it tolerates losing
     /// contested cells before overriding right-of-way. Scaled by cooperativity so
     /// every vehicle eventually forces (the threshold is always finite), but more
@@ -819,6 +881,18 @@ impl VehicleBuilder {
     /// ```
     pub fn with_min_safe_distance(mut self, min_safe_distance: i32) -> Self {
         self.vehicle.min_safe_distance = min_safe_distance;
+        self
+    }
+
+    /// Sets the standstill gap (in cells) kept in front of a stopped leader
+    ///
+    /// # Arguments
+    /// * `standstill_gap` - Empty cells left in front when stopping behind a stopped vehicle, 0 keeps bumper to bumper
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    pub fn with_standstill_gap(mut self, standstill_gap: i32) -> Self {
+        self.vehicle.standstill_gap = standstill_gap.max(0);
         self
     }
 
@@ -1178,6 +1252,48 @@ impl VehicleBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_trim_forward_intention() {
+        let mut vehicle = Vehicle::new(1).with_cell(3).with_speed(3).build();
+        vehicle.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 6,
+            intermediate_cells: vec![4, 5],
+            intention_speed: 3,
+            ..Default::default()
+        });
+        vehicle.trim_forward_intention(5);
+        assert_eq!(vehicle.intention.intention_cell_id, 6, "a longer length keeps the move");
+        vehicle.trim_forward_intention(2);
+        assert_eq!(vehicle.intention.intention_cell_id, 5);
+        assert_eq!(vehicle.intention.intermediate_cells, vec![4]);
+        assert_eq!(vehicle.intention.intention_speed, 2);
+        vehicle.trim_forward_intention(0);
+        assert_eq!(vehicle.intention.intention_cell_id, 3, "length 0 keeps the vehicle in place");
+        assert!(vehicle.intention.intermediate_cells.is_empty());
+        assert_eq!(vehicle.intention.intention_speed, 0);
+    }
+
+    #[test]
+    fn test_trim_forward_intention_moves_tail() {
+        let mut truck = Vehicle::new(1).with_cell(3).with_tail_size(2, vec![1, 2]).with_speed(2).build();
+        truck.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 5,
+            intermediate_cells: vec![4],
+            intention_speed: 2,
+            ..Default::default()
+        });
+        truck.trim_forward_intention(1);
+        assert_eq!(truck.intention.intention_cell_id, 4);
+        assert_eq!(truck.intention.tail_intention_cells, vec![2, 3]);
+        // Staying in place follows the intention storage convention for a vehicle that does not
+        // move; movement applies the tail intention only when the head moves, so the body stays.
+        truck.trim_forward_intention(0);
+        assert_eq!(truck.intention.intention_cell_id, 3);
+        assert_eq!(truck.intention.tail_intention_cells, vec![2, 3]);
+    }
+
     #[test]
     fn test_relaxation_countdown() {
         let relax_time = 9;
