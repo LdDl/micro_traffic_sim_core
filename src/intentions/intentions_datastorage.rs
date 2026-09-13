@@ -214,7 +214,7 @@ impl Intentions {
             self.push_intention(cell_id, vehicle.id, IntentionType::Transit);
         }
         for &int_occupied_cell_id in extracted_tail.iter() {
-            if int_occupied_cell_id < 1 {
+            if int_occupied_cell_id < 0 {
                 continue;
             }
             self.push_intention(int_occupied_cell_id, vehicle.id, IntentionType::Tail);

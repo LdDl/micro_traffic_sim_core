@@ -106,7 +106,7 @@ pub fn solve_conflicts<'b>(
         for (id, v) in vehicles.iter() {
             occ.insert(v.cell_id, *id);
             for &tail_cell in &v.tail_cells {
-                if tail_cell > 0 {
+                if tail_cell >= 0 {
                     occ.insert(tail_cell, *id);
                 }
             }
@@ -315,8 +315,11 @@ pub fn solve_conflicts<'b>(
             if i == priority_index {
                 // Movement to cell is allowed
                 // intention_cell remains the same (especially for vehicles for which conflict Cell ID is just intermediate cell)
-                // intention_cell could be changed only if maneuver has been met
-                if participant.intention.intention_maneuver != LaneChangeType::NoChange {
+                // intention_cell could be changed only if maneuver has been met.
+                // Only a lane change moves into the contested cell; a Block winner stays where it is
+                // (otherwise a standing vehicle that wins a Tail conflict is sent into that cell,
+                // possibly backward into its own tail).
+                if matches!(participant.intention.intention_maneuver, LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight) {
                     participant.intention.intention_cell_id = conflict.cell_id;
                     participant.intention.intention_speed = 1;
                 }
@@ -495,6 +498,40 @@ mod tests {
             ..Default::default()
         });
         vehicle
+    }
+
+    #[test]
+    fn test_block_winner_stays_in_place() {
+        // A standing truck (head 10, tail 8 and 9) wins a Tail conflict for its own tail cell 9
+        // against a vehicle that wants to enter that cell. Winning must not move the truck:
+        // before the fix the winner branch sent any non NoChange maneuver, Block included,
+        // into the contested cell, i.e. backward into its own tail.
+        let mut truck = Vehicle::new(1)
+            .with_behaviour(BehaviourType::Undefined)
+            .with_cell(10)
+            .with_tail_size(2, vec![8, 9])
+            .with_speed(0)
+            .build();
+        truck.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::Block,
+            intention_cell_id: 10,
+            intention_speed: 0,
+            ..Default::default()
+        });
+        let other = create_test_vehicle(2, 1, LaneChangeType::NoChange, 9);
+        let conflicts = vec![CellConflict {
+            cell_id: 9,
+            participants: vec![1, 2],
+            priority_participant_index: 0,
+            conflict_type: ConflictType::Tail,
+        }];
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, truck);
+        vehicles.insert(2, other);
+        solve_conflicts(conflicts, &mut vehicles, &LocalLogger::none()).expect("solve_conflicts failed");
+        let truck = vehicles.get(&1).unwrap();
+        assert_eq!(truck.intention.intention_cell_id, 10, "Block winner must stay on its head cell");
+        assert_eq!(truck.intention.intention_speed, 0, "Block winner must keep zero speed");
     }
 
     #[test]

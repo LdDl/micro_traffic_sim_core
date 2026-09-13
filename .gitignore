@@ -1,6 +1,15 @@
 /target
 examples/complete-example/*
-docs/
+docs/*
+!docs/ca_rules/
+!docs/ca_rules.md
+!docs/videos/
+!docs/diagrams/
+docs/diagrams/*
+!docs/diagrams/*.svg
+!docs/scripts/
+docs/scripts/*
+!docs/scripts/gen_diagrams.py
 examples/route_bench/
 examples/fundamental_diagram/
 examples/open_road

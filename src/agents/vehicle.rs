@@ -73,6 +73,11 @@ pub const PATIENCE_MAX: i32 = 700;
 pub const AGGRESSOR_CUT_IN_THRESHOLD: f64 = 0.8;
 
 /// Represents basic agent in simulation
+/// Id stored in `Vehicle::tail_cells` for a tail cell that has not materialized yet (the vehicle
+/// entered the network head first). Negative ids mean "no cell" everywhere in the core, so every
+/// real cell id, 0 included, is a valid tail position.
+pub const TAIL_PLACEHOLDER: CellID = -1;
+
 #[derive(Debug)]
 pub struct Vehicle {
     /// Unique identifier
@@ -463,7 +468,7 @@ impl Vehicle {
         for (idx, window) in self.tail_cells.windows(2).enumerate() {
             let [from_id, to_id] = window else { continue };
 
-            if *from_id < 1 {
+            if *from_id < 0 {
                 continue;
             }
 
@@ -523,7 +528,7 @@ impl Vehicle {
         }
         Ok(TailIntentionManeuver {
             source_cell_maneuver: self.cell_id,
-            target_cell_maneuver: if self.intention.intention_cell_id < 1 {
+            target_cell_maneuver: if self.intention.intention_cell_id < 0 {
                 self.cell_id
             } else {
                 self.intention.intention_cell_id
@@ -705,6 +710,8 @@ impl VehicleBuilder {
 
     /// Sets currently occupied cells by tail (in case when vehicle has size more that one cell).
     /// The occupied cells must be provided in order: [furthest from head, ..., closest to head].
+    /// With an empty `cells` list the tail starts as `TAIL_PLACEHOLDER` entries and materializes
+    /// as the head moves.
     ///
     /// # Arguments
     /// * `size` - The size of the vehicle's tail (number of cells behind head).
@@ -724,7 +731,7 @@ impl VehicleBuilder {
     /// println!("Vehicle: {:?}", vehicle);
     /// ```
     pub fn with_tail_size(mut self, size: usize, cells: Vec<CellID>) -> Self {
-        self.vehicle.tail_cells = vec![0; size];
+        self.vehicle.tail_cells = vec![TAIL_PLACEHOLDER; size];
         if !cells.is_empty() {
             self.vehicle.tail_cells.copy_from_slice(&cells);
         }

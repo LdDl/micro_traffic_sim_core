@@ -255,7 +255,7 @@ pub fn find_cross_trajectories_conflict_naive(
 
         // Check if any tail cell's forward node matches our target
         for &occ_cell_id in &side_vehicle.tail_cells {
-            if occ_cell_id < 1 {
+            if occ_cell_id < 0 {
                 continue;
             }
             

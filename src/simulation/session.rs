@@ -411,6 +411,34 @@ impl Session {
     /// Returns a reference to the vehicles storage
     pub fn get_vehicles(&self) -> &VehiclesStorage { &self.vehicles }
 
+    /// Tells whether a cell is occupied by any vehicle body: a head or a materialized tail cell.
+    /// Tail placeholders (`TAIL_PLACEHOLDER`, a tail that has not materialized yet) are ignored.
+    /// This is the same occupancy rule the built in spawning uses, for code that adds vehicles by hand.
+    ///
+    /// # Arguments
+    /// * `cell_id` - The cell to check
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// use micro_traffic_sim_core::simulation::session::Session;
+    /// let mut session = Session::default(None);
+    /// session.add_vehicles(vec![Vehicle::new(1).with_cell(13).with_tail_size(2, vec![11, 12]).build()]);
+    /// assert!(session.is_cell_occupied(13));
+    /// assert!(session.is_cell_occupied(11));
+    /// assert!(!session.is_cell_occupied(14));
+    /// // Cell 0 is an ordinary cell: a tail on it is seen, a fresh tail of placeholders is not.
+    /// session.add_vehicles(vec![Vehicle::new(2).with_cell(1).with_tail_size(1, vec![0]).build()]);
+    /// session.add_vehicles(vec![Vehicle::new(3).with_cell(40).with_tail_size(2, vec![]).build()]);
+    /// assert!(session.is_cell_occupied(0));
+    /// assert!(!session.is_cell_occupied(39));
+    /// ```
+    pub fn is_cell_occupied(&self, cell_id: CellID) -> bool {
+        self.vehicles
+            .values()
+            .any(|v| v.cell_id == cell_id || v.tail_cells.iter().any(|&t| t >= 0 && t == cell_id))
+    }
+
     /// Adds cells to the grids. It is shortcut to GridsStorage's add_cells method
     pub fn add_cells(&mut self, cells_data: Vec<crate::grid::cell::Cell>) {
         self.grids_storage.add_cells(cells_data);
@@ -691,10 +719,10 @@ impl Session {
             self.current_position.insert(vehicle.cell_id, vehicle.id);
             self.speed_snapshot.insert(vehicle.cell_id, vehicle.speed);
             for &tail_cell in &vehicle.tail_cells {
-                // A freshly spawned tailed vehicle carries placeholder tail cells (0) until
-                // its tail materializes as it moves; skip non-positive ids so cell 0 is not
-                // marked as a phantom occupant in the occupancy map.
-                if tail_cell > 0 {
+                // A freshly spawned tailed vehicle carries placeholder tail cells (TAIL_PLACEHOLDER,
+                // a negative id) until its tail materializes as it moves; skip them so no phantom
+                // occupant enters the occupancy map. Cell 0 is an ordinary cell.
+                if tail_cell >= 0 {
                     self.current_position.insert(tail_cell, vehicle.id);
                     self.speed_snapshot.insert(tail_cell, vehicle.speed);
                 }
@@ -834,7 +862,7 @@ impl Session {
         for vehicle in self.vehicles.values() {
             let mut occupied_points: Vec<[f64; 2]> = Vec::with_capacity(vehicle.tail_cells.len());
             for &tail_cell_id in &vehicle.tail_cells {
-                if tail_cell_id > 0 {
+                if tail_cell_id >= 0 {
                     if let Some(opt_cell) = vehicles_grid.get_cell(&tail_cell_id) {
                         let opt_pt = opt_cell.get_point();
                         occupied_points.push([opt_pt.x(), opt_pt.y()]);
@@ -844,7 +872,8 @@ impl Session {
             states_dump.push(VehicleState {
                 occupied_points,
                 last_cell: vehicle.cell_id,
-                tail_cells: vehicle.tail_cells.clone(),
+                // Only materialized tail cells leave the core; placeholders are an internal detail.
+                tail_cells: vehicle.tail_cells.iter().copied().filter(|&t| t >= 0).collect(),
                 last_intermediate_cells: vehicle.intention.intermediate_cells.clone(),
                 last_speed: vehicle.speed,
                 last_angle: vehicle.bearing,
