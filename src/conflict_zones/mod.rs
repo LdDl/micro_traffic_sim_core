@@ -59,8 +59,8 @@
 //!     ConflictEdge
 //! };
 //! // Two edges pointing to the same cell
-//! let main_flow = ConflictEdge { source: 10, target: 50 };      // Main road → edges goes to junction center point 
-//! let secondary_flow = ConflictEdge { source: 20, target: 50 }; // Side road → same junction center point
+//! let main_flow = ConflictEdge { source: 10, target: 50 };      // Main road => edges goes to junction center point 
+//! let secondary_flow = ConflictEdge { source: 20, target: 50 }; // Side road => same junction center point
 //! ```
 //!
 //! #### 2. Different target cells  
@@ -69,8 +69,8 @@
 //!     ConflictEdge
 //! };
 //! // Different cells at nearly same coordinates (floating point tolerance)
-//! let main_flow = ConflictEdge { source: 10, target: 51 };      // Main road → edge goes through junction center point
-//! let secondary_flow = ConflictEdge { source: 20, target: 52 }; // Side road → edge goes through junction center point too.
+//! let main_flow = ConflictEdge { source: 10, target: 51 };      // Main road => edge goes through junction center point
+//! let secondary_flow = ConflictEdge { source: 20, target: 52 }; // Side road => edge goes through junction center point too.
 //! ```
 //!
 //! ### Priority System
