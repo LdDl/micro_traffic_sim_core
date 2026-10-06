@@ -437,7 +437,8 @@ pub fn find_intention<'a>(
     // stood at least stop_time_threshold ticks uses slow to start with the unit step; any other
     // vehicle randomizes with the moving probability and a deceleration chosen by the sign of its
     // speed difference to the leader within lookahead cells. The random draw happens under the
-    // same gate as before, so with RelativeRandomization::VDR seeded runs are byte identical.
+    // same gate as in VDR. Unit decelerations and a zero threshold reduce this longitudinal
+    // randomization to VDR; routing and conflict resolution are outside that equivalence.
     let rr = vehicle.relative_randomization;
     let long_stop = vehicle.speed == 0 && vehicle.stop_ticks >= rr.stop_time_threshold;
     let rand_decel = if long_stop {

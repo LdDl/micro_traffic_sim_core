@@ -1319,23 +1319,19 @@ impl VehicleBuilder {
 /// Randomization relative to the leader and the stop time threshold: the three phase layer of
 /// the longitudinal rule.
 ///
-/// The random slowdown keeps its probabilities (`p` while moving, `p0` after a long stop), but the
-/// deceleration extent depends on the sign of the speed difference to the leader within
-/// `lookahead` cells, and the slow to start probability `p0` applies only after the vehicle stood
-/// `stop_time_threshold` consecutive ticks. This is the model of Gao, Jiang, Hu, Wang, Wu 2007
-/// (doi:10.1103/PhysRevE.76.026105, eqs (1) to (4)), which the authors describe as the KKW model
-/// with an infinite synchronization distance: `decel_slower = 0` is the deterministic speed
-/// adaptation toward a faster leader of Kerner, Klenov, Wolf 2002 (doi:10.1088/0305-4470/35/47/303,
-/// rule (3)), and the threshold separates the escape delay from a wide moving jam from the
-/// acceleration in synchronized flow (Kerner 2004, The Physics of Traffic,
-/// doi:10.1007/978-3-540-40986-1, ch. 11 and 16). With `stop_time_threshold = 0`, every
-/// deceleration `1` and `lookahead = 0` the rule is the plain NaSch and VDR rule.
+/// Uses the stop-time threshold and speed-difference-dependent randomization of Gao, Jiang, Hu, Wang and Wu (2007), doi:10.1103/PhysRevE.76.026105, eqs (1) to (4), with the following modifications:
 ///
-/// Measured on the 4.5 m grid (2026-09-13): `KKW` keeps the fundamental diagram and the ring
-/// hysteresis of VDR, pins synchronized flow at a bottleneck, lets wide moving jams emerge in it
-/// and not in free flow, and recovers after a demand peak with a bottleneck capacity drop of about
-/// 26 percent. A deceleration `decel_faster` above 1 (the over-deceleration of Gao) added nothing
-/// on the benches and tripled lane changes on a real network, so the preset keeps it at 1.
+/// - Update order: the core accelerates, applies random slowdown, then clamps the candidate to the available path. Gao brakes to the gap before randomization. These orders can produce different speeds when the gap is binding.
+/// - Interaction range: the nearest leader is probed along the forward chain within `lookahead` cells (15 cells, 67.5 m, in `KKW`). Without a leader in that range, the core uses `decel_equal`. Gao's original rule uses the preceding vehicle without this finite cutoff.
+/// - Calibration: `KKW` selects a stop threshold of 5 ticks and decelerations 0, 1, 1 on the project's 4.5 m grid. In particular, `decel_faster = 1` omits the stronger random deceleration tested in the project's over-deceleration experiments. These values are project choices, not a reproduction of Gao's published parameter set.
+/// - Network integration: the speed comparison uses the follower's current speed clipped to its local speed limit and the leader's start-of-tick snapshot. Acceleration and slowdown timers, claimed cells, conflict resolution and the separate standstill-gap rule also affect the executed movement.
+/// - VDR boundary case: `p0` requires both zero speed and a standing count at least equal to the threshold. Setting the threshold to zero therefore selects `p0` only for stopped vehicles and `p` for moving ones, explicitly defining the VDR reduction.
+///
+/// The separate standstill-gap calibration gives an average jam spacing of about 7.5 m when two thirds of one-cell cars keep one empty cell. This does not change the 4.5 m cell size. The calibrated `p0` and driver-style `p` are supplied by behaviour parameters or trip overrides, not by this struct.
+///
+/// With threshold 0 and unit decelerations, the longitudinal randomization reduces to the core's VDR order. This does not assert equivalence to textbook NaSch's update order, Gao's complete model or the full network behaviour of an older core version.
+///
+/// Project benches reproduce ring hysteresis, low-speed flow near a bottleneck and wide moving jams emerging predominantly in that region under the operational phase classifier. These are measurements of this variant; they do not establish all properties of Gao's model or a persistent two-dimensional region of synchronized states.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RelativeRandomization {
     /// Consecutive ticks of standing after which the slow to start probability `p0` applies; a
@@ -1357,7 +1353,8 @@ pub struct RelativeRandomization {
 
 impl RelativeRandomization {
     /// The plain NaSch and VDR rule: `p0` for every stopped vehicle, deceleration 1, no leader
-    /// search. Reproduces the previous behaviour of the core byte for byte.
+    /// search needed for the speed result. This reduces the longitudinal randomization to VDR;
+    /// it does not imply equivalence of the entire network to older core versions.
     pub const VDR: RelativeRandomization = RelativeRandomization {
         stop_time_threshold: 0,
         decel_slower: 1,
