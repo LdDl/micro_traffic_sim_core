@@ -1,4 +1,5 @@
 use crate::behaviour::BehaviourType;
+
 use crate::agents_types::AgentType;
 use crate::agents::{VehicleIntention, TailIntentionManeuver};
 use crate::grid::cell::CellID;
@@ -124,6 +125,12 @@ pub struct Vehicle {
     /// jam also makes jam fronts too slow. The gap keeps the cell at the physical vehicle length
     /// and adds the jam spacing explicitly: one empty cell gives 9 m per vehicle in a jam.
     pub standstill_gap: i32,
+    /// Randomization relative to the leader and the stop time threshold (three phase layer);
+    /// the default is the plain VDR rule, the behaviour presets use `RelativeRandomization::KKW`.
+    pub relative_randomization: RelativeRandomization,
+    /// Consecutive ticks the vehicle has stood, 0 while it moves (t_st of Gao 2007); updated when
+    /// an intention is applied.
+    pub stop_ticks: i32,
     /// Final cell for the vehicle's trip
     pub destination: CellID,
     /// Final trip destination (immutable, used for completion check; destination may change for transit cells)
@@ -247,6 +254,8 @@ impl Vehicle {
                 bearing: 0.0,
                 min_safe_distance: 0,
                 standstill_gap: 0,
+                relative_randomization: RelativeRandomization::VDR,
+                stop_ticks: 0,
                 destination: -1,
                 trip_destination: -1,
                 is_conflict_participant: false,
@@ -580,6 +589,7 @@ impl Vehicle {
     pub fn apply_intention(&mut self) {
         // No need to update cell_id. It is done in movement.rs
         self.speed = self.intention.intention_speed;
+        self.stop_ticks = if self.speed == 0 { self.stop_ticks.saturating_add(1) } else { 0 };
         // Apply destination if set in intention
         if let Some(destination) = self.intention.destination {
             self.destination = destination;
@@ -933,6 +943,26 @@ impl VehicleBuilder {
         self
     }
 
+    /// Sets the randomization relative to the leader and the stop time threshold (three phase
+    /// layer); `RelativeRandomization::VDR` keeps the plain rule.
+    ///
+    /// # Arguments
+    /// * `randomization` - The parameter set, clamped to non negative values.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::{RelativeRandomization, Vehicle};
+    /// let vehicle = Vehicle::new(1).with_relative_randomization(RelativeRandomization::KKW).build();
+    /// assert_eq!(vehicle.relative_randomization.stop_time_threshold, 5);
+    /// ```
+    pub fn with_relative_randomization(mut self, randomization: RelativeRandomization) -> Self {
+        self.vehicle.relative_randomization = randomization.clamped();
+        self
+    }
+
     /// Sets final cell for the vehicle's trip
     ///
     /// # Arguments
@@ -1283,6 +1313,84 @@ impl VehicleBuilder {
     /// A reference to the `Vehicle` object.
     pub fn build_ref(self) -> VehicleRef {
         Rc::new(RefCell::new(self.vehicle))
+    }
+}
+
+/// Randomization relative to the leader and the stop time threshold: the three phase layer of
+/// the longitudinal rule.
+///
+/// The random slowdown keeps its probabilities (`p` while moving, `p0` after a long stop), but the
+/// deceleration extent depends on the sign of the speed difference to the leader within
+/// `lookahead` cells, and the slow to start probability `p0` applies only after the vehicle stood
+/// `stop_time_threshold` consecutive ticks. This is the model of Gao, Jiang, Hu, Wang, Wu 2007
+/// (doi:10.1103/PhysRevE.76.026105, eqs (1) to (4)), which the authors describe as the KKW model
+/// with an infinite synchronization distance: `decel_slower = 0` is the deterministic speed
+/// adaptation toward a faster leader of Kerner, Klenov, Wolf 2002 (doi:10.1088/0305-4470/35/47/303,
+/// rule (3)), and the threshold separates the escape delay from a wide moving jam from the
+/// acceleration in synchronized flow (Kerner 2004, The Physics of Traffic,
+/// doi:10.1007/978-3-540-40986-1, ch. 11 and 16). With `stop_time_threshold = 0`, every
+/// deceleration `1` and `lookahead = 0` the rule is the plain NaSch and VDR rule.
+///
+/// Measured on the 4.5 m grid (2026-09-13): `KKW` keeps the fundamental diagram and the ring
+/// hysteresis of VDR, pins synchronized flow at a bottleneck, lets wide moving jams emerge in it
+/// and not in free flow, and recovers after a demand peak with a bottleneck capacity drop of about
+/// 26 percent. A deceleration `decel_faster` above 1 (the over-deceleration of Gao) added nothing
+/// on the benches and tripled lane changes on a real network, so the preset keeps it at 1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RelativeRandomization {
+    /// Consecutive ticks of standing after which the slow to start probability `p0` applies; a
+    /// shorter stop randomizes with the moving probability `p` (t_c of Gao 2007). 0 applies `p0`
+    /// to every stopped vehicle (VDR).
+    pub stop_time_threshold: i32,
+    /// Deceleration in cells per tick of the random slowdown when the vehicle is slower than its
+    /// leader (b_- of Gao 2007). 0 means no slowdown while catching up.
+    pub decel_slower: i32,
+    /// Deceleration when the vehicle is as fast as its leader or has no leader within
+    /// `lookahead` cells (b_0). 1 is the NaSch dawdle.
+    pub decel_equal: i32,
+    /// Deceleration when the vehicle is faster than its leader (b_+, b_+ >= b_-).
+    pub decel_faster: i32,
+    /// Cells ahead searched for the leader whose speed selects the deceleration; 0 skips the
+    /// search and uses `decel_equal`.
+    pub lookahead: i32,
+}
+
+impl RelativeRandomization {
+    /// The plain NaSch and VDR rule: `p0` for every stopped vehicle, deceleration 1, no leader
+    /// search. Reproduces the previous behaviour of the core byte for byte.
+    pub const VDR: RelativeRandomization = RelativeRandomization {
+        stop_time_threshold: 0,
+        decel_slower: 1,
+        decel_equal: 1,
+        decel_faster: 1,
+        lookahead: 15,
+    };
+    /// The three phase values of the behaviour presets: no slowdown while catching up with a
+    /// faster leader, slow to start after 5 ticks of standing, leader search over 15 cells (67 m).
+    pub const KKW: RelativeRandomization = RelativeRandomization {
+        stop_time_threshold: 5,
+        decel_slower: 0,
+        decel_equal: 1,
+        decel_faster: 1,
+        lookahead: 15,
+    };
+
+    /// Clamps every field to its admissible range (non negative, decelerations at most the
+    /// maximum speed are not enforced, the executed speed is clamped by the rule itself).
+    pub fn clamped(self) -> Self {
+        RelativeRandomization {
+            stop_time_threshold: self.stop_time_threshold.max(0),
+            decel_slower: self.decel_slower.max(0),
+            decel_equal: self.decel_equal.max(0),
+            decel_faster: self.decel_faster.max(0),
+            lookahead: self.lookahead.max(0),
+        }
+    }
+}
+
+impl Default for RelativeRandomization {
+    fn default() -> Self {
+        RelativeRandomization::VDR
     }
 }
 

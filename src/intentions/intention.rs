@@ -433,15 +433,37 @@ pub fn find_intention<'a>(
     // discharge slower than it fills => CAPACITY DROP and metastable / hysteretic flow near the
     // critical density (the VDR signature). The gate is `speed_possible > 0`, so it also applies to a
     // just-started stopped vehicle (speed_possible == 1) - that is where slow-to-start acts.
+    // Three phase layer (Vehicle::relative_randomization, Gao 2007 eqs (1) to (4)): a vehicle that
+    // stood at least stop_time_threshold ticks uses slow to start with the unit step; any other
+    // vehicle randomizes with the moving probability and a deceleration chosen by the sign of its
+    // speed difference to the leader within lookahead cells. The random draw happens under the
+    // same gate as before, so with RelativeRandomization::VDR seeded runs are byte identical.
+    let rr = vehicle.relative_randomization;
+    let long_stop = vehicle.speed == 0 && vehicle.stop_ticks >= rr.stop_time_threshold;
+    let rand_decel = if long_stop {
+        1
+    } else if rr.lookahead > 0 {
+        match leader_probe(source_cell, net, current_state, speed_snapshot, vehicle.id, rr.lookahead) {
+            Some((_, leader_speed)) if intention_speed < leader_speed => rr.decel_slower,
+            Some((_, leader_speed)) if intention_speed > leader_speed => rr.decel_faster,
+            _ => rr.decel_equal,
+        }
+    } else {
+        rr.decel_equal
+    };
     let slowdown_allowed = vehicle.timer_non_slowdown <= 0;
-    let slowdown_prob = if vehicle.speed == 0 {
+    let slowdown_prob = if long_stop {
         vehicle.slow_to_start_factor_p0
     } else {
         vehicle.slow_down_factor_p
     };
     if slowdown_allowed && speed_possible > 0 && random_f64() < slowdown_prob {
-        speed_possible = (speed_possible - 1).max(0);
+        speed_possible = (speed_possible - rand_decel).max(0);
     }
+    // A random slowdown to zero is a decision to wait this tick, not a blocked vehicle: it must
+    // not trigger the alternatives of a stuck vehicle (lane change, roll forward at speed 1),
+    // which would defeat slow to start on routed networks and turn dawdles into weaving.
+    let dawdled_to_zero = speed_possible == 0 && (acceleration_allowed || intention_speed > 0);
 
     // Considering that vehicle always wants to accelerate:
     let _observe_distance = speed_possible + vehicle.min_safe_distance;
@@ -645,11 +667,12 @@ pub fn find_intention<'a>(
         return Ok(result);
     }
     // Otherwise collect vehicles which can't move forward. This includes:
-    // - Vehicles with speed_possible = 0 (e.g., acceleration blocked by timer after lane change)
+    // - Vehicles with speed_possible = 0 because the acceleration timer blocks a moving vehicle
     // - Vehicles blocked by other reasons (has_vehicle_on_path handled earlier)
     // Then they are trying to lane change in separate loop
     // (in further we could make cooperative drives which allow other vehicles to change lane).
-    // Then we know vehicles which can't move at all.
+    // Then we know vehicles which can't move at all. A vehicle whose speed dropped to zero by the
+    // random slowdown is not stuck: it stands this tick without alternatives (should_stop false).
     let result = VehicleIntention {
         intention_maneuver: LaneChangeType::Block,
         intention_speed: 0,
@@ -659,7 +682,7 @@ pub fn find_intention<'a>(
         tail_intention_cells: vec![],
         intermediate_cells: Vec::with_capacity(0),
         tail_maneuver: tail_maneuver,
-        should_stop: true,
+        should_stop: !dawdled_to_zero,
     };
     Ok(result)
 }
@@ -1021,6 +1044,41 @@ pub fn find_alternate_intention<'a>(
         })
     }
     Ok(create_block_intention(source_cell_id, false))
+}
+
+/// Nearest leader along the forward chain within `max_cells` cells: `(gap, leader speed)`, where
+/// `gap` is the number of free cells in between. Reads the start of tick occupancy and speed
+/// snapshots, so every vehicle sees the same state. Cells claimed by the vehicle itself (its
+/// standstill buffer) count as free; a claimed cell without a speed entry (another vehicle's
+/// buffer) counts as a stopped leader. Draws no random number.
+fn leader_probe(
+    source_cell: &Cell,
+    net: &GridRoads,
+    current_state: &HashMap<CellID, VehicleID>,
+    speed_snapshot: &HashMap<CellID, i32>,
+    self_id: VehicleID,
+    max_cells: i32,
+) -> Option<(i32, i32)> {
+    let source_id = source_cell.get_id();
+    let mut cell_id = source_cell.get_forward_id();
+    let mut gap = 0;
+    for _ in 0..max_cells {
+        if cell_id < 0 || cell_id == source_id {
+            return None;
+        }
+        match current_state.get(&cell_id) {
+            Some(&owner) if owner != self_id => {
+                return Some((gap, speed_snapshot.get(&cell_id).copied().unwrap_or(0)));
+            }
+            _ => {}
+        }
+        gap += 1;
+        cell_id = match net.get_cell(&cell_id) {
+            Some(c) => c.get_forward_id(),
+            None => return None,
+        };
+    }
+    None
 }
 
 #[cfg(test)]

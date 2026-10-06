@@ -1,3 +1,4 @@
+use crate::agents::RelativeRandomization;
 use std::fmt;
 use rand::Rng;
 
@@ -94,6 +95,8 @@ pub struct BehaviourParameters {
     lc_cooldown: i64,
     /// Standstill gap in cells: empty cells kept in front of a stopped leader.
     standstill_gap: i32,
+    /// Randomization relative to the leader and the stop time threshold (three phase layer).
+    relative_randomization: RelativeRandomization,
 }
 
 impl BehaviourParameters {
@@ -101,15 +104,29 @@ impl BehaviourParameters {
     ///
     /// Each type maps to a tuple
     /// `(p, p0, speed_limit, aggressive_level, min_safe_distance, lc_cooldown)` where:
-    /// - `p`  - NaSch moving-dawdle probability;
+    /// - `p`  - NaSch moving-dawdle probability, the style part of the randomization: 0.1 for
+    ///   the aggressive preset up to 0.4 for the speed limiting one, always at most `p0` so that
+    ///   the VDR asymmetry holds for every preset;
     /// - `p0` - VDR slow-to-start probability while stopped.
-    ///   `p0 >= p` is the VDR asymmetry that produces the capacity drop; widen `(p0 - p)` to
-    ///   strengthen the drop / metastability (without amplifying gridlock);
+    ///   `p0 >= p` is the VDR asymmetry that produces the capacity drop. The value is not a
+    ///   driver style but a characteristic of the road: the mean escape delay from a jam
+    ///   tau / (1 - p0) sets the velocity of the downstream jam front, which is the same for
+    ///   every jam under the same road conditions (Kerner 2004, The Physics of Traffic,
+    ///   doi:10.1007/978-3-540-40986-1, ch. 11). Every moving preset therefore uses the line J
+    ///   value 0.425 of Kerner, Klenov, Wolf 2002 (doi:10.1088/0305-4470/35/47/303, Table 3),
+    ///   which with a 7.5 m jam spacing gives a front velocity of 15.5 km/h; a long vehicle
+    ///   derives its own value from it (`Vehicle::slow_to_start_for_length`). Driver style lives
+    ///   in `p`, the aggression gradient, the cooldown and the standstill gap;
     /// - `speed_limit`, `aggressive_level`, `min_safe_distance` - per-type movement defaults;
     /// - `lc_cooldown` - reactive-lane-change cooldown in steps (anti-weaving; 0 = changes freely);
     /// - `standstill_gap` - empty cells kept in front of a stopped leader (see
-    ///   `Vehicle::standstill_gap`). Careful types keep one cell, aggressive and undefined ones stop
-    ///   bumper to bumper, so a mixed flow gets a realistic average jam spacing.
+    ///   `Vehicle::standstill_gap`). Careful and undefined types keep one cell, aggressive ones
+    ///   stop bumper to bumper, so a mixed flow with about two thirds of careful drivers gets the
+    ///   7.5 m jam spacing of the line J calibration (133 veh/km).
+    ///
+    /// Every preset uses `RelativeRandomization::KKW` (see `agents::RelativeRandomization`), the
+    /// three phase layer; `Block` never moves, so its value does not matter. `with_relative_randomization`
+    /// switches a preset back to the plain VDR rule.
     ///
     /// The concrete per-type values are the `match` arms below (the single source of truth).
     ///
@@ -131,10 +148,10 @@ impl BehaviourParameters {
     pub fn from_behaviour_type(behaviour: BehaviourType) -> Self {
         let (p, p0, speed_limit, aggressive, min_safe, lc_cooldown, standstill_gap) = match behaviour {
             BehaviourType::Block => (1.0, 1.0, 0, 1.0, 0, 0, 0),
-            BehaviourType::Aggressive => (0.1, 0.35, 5, 0.9, 0, 0, 0),
-            BehaviourType::Cooperative => (0.5, 0.65, 4, 0.0, 1, 1, 1),
-            BehaviourType::LimitSpeedByTrip => (0.7, 0.8, 3, 0.1, 1, 2, 1),
-            BehaviourType::Undefined => (0.5, 0.6, 2, 0.5, 0, 1, 0),
+            BehaviourType::Aggressive => (0.1, 0.425, 5, 0.9, 0, 0, 0),
+            BehaviourType::Cooperative => (0.3, 0.425, 4, 0.0, 1, 1, 1),
+            BehaviourType::LimitSpeedByTrip => (0.4, 0.425, 3, 0.1, 1, 2, 1),
+            BehaviourType::Undefined => (0.2, 0.425, 2, 0.5, 0, 1, 1),
         };
         Self {
             slowdown_factor_p: p,
@@ -144,6 +161,7 @@ impl BehaviourParameters {
             min_safe_distance: min_safe,
             lc_cooldown,
             standstill_gap,
+            relative_randomization: RelativeRandomization::KKW,
         }
     }
 
@@ -187,6 +205,7 @@ impl BehaviourParameters {
             min_safe_distance,
             lc_cooldown,
             standstill_gap: 0,
+            relative_randomization: RelativeRandomization::VDR,
         }
     }
 
@@ -212,6 +231,32 @@ impl BehaviourParameters {
     /// Returns the standstill gap in cells.
     pub fn standstill_gap(&self) -> i32 {
         self.standstill_gap
+    }
+
+    /// Returns a copy with the given randomization relative to the leader and stop time threshold.
+    ///
+    /// # Arguments
+    ///
+    /// - `randomization`: the parameter set; `RelativeRandomization::VDR` restores the plain rule.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use micro_traffic_sim_core::agents::RelativeRandomization;
+    /// use micro_traffic_sim_core::behaviour::{BehaviourParameters, BehaviourType};
+    ///
+    /// let params = BehaviourParameters::from_behaviour_type(BehaviourType::Cooperative)
+    ///     .with_relative_randomization(RelativeRandomization::VDR);
+    /// assert_eq!(params.relative_randomization(), RelativeRandomization::VDR);
+    /// ```
+    pub fn with_relative_randomization(mut self, randomization: RelativeRandomization) -> Self {
+        self.relative_randomization = randomization.clamped();
+        self
+    }
+
+    /// Returns the randomization relative to the leader and the stop time threshold.
+    pub fn relative_randomization(&self) -> RelativeRandomization {
+        self.relative_randomization
     }
 
     /// Returns the speed limit.
@@ -277,15 +322,38 @@ mod tests {
         assert_eq!(params.min_safe_distance(), 0);
     }
     #[test]
+    fn test_slow_to_start_presets_use_line_j_value() {
+        let p0 = |b| BehaviourParameters::from_behaviour_type(b).slow_to_start_factor_p0();
+        for b in [BehaviourType::Aggressive, BehaviourType::Cooperative, BehaviourType::LimitSpeedByTrip, BehaviourType::Undefined] {
+            assert_eq!(p0(b), 0.425);
+            assert!(p0(b) >= BehaviourParameters::from_behaviour_type(b).slowdown_factor_p());
+        }
+        assert_eq!(p0(BehaviourType::Block), 1.0);
+    }
+
+    #[test]
     fn test_standstill_gap_presets() {
         let gap = |b| BehaviourParameters::from_behaviour_type(b).standstill_gap();
         assert_eq!(gap(BehaviourType::Cooperative), 1);
         assert_eq!(gap(BehaviourType::LimitSpeedByTrip), 1);
         assert_eq!(gap(BehaviourType::Aggressive), 0);
-        assert_eq!(gap(BehaviourType::Undefined), 0);
+        assert_eq!(gap(BehaviourType::Undefined), 1);
         assert_eq!(gap(BehaviourType::Block), 0);
         assert_eq!(BehaviourParameters::new(0.1, 4, 0.2, 0, 0).standstill_gap(), 0);
         assert_eq!(BehaviourParameters::new(0.1, 4, 0.2, 0, 0).with_standstill_gap(-3).standstill_gap(), 0);
+    }
+
+    #[test]
+    fn test_relative_randomization_presets() {
+        for b in [BehaviourType::Aggressive, BehaviourType::Cooperative, BehaviourType::LimitSpeedByTrip, BehaviourType::Undefined] {
+            assert_eq!(BehaviourParameters::from_behaviour_type(b).relative_randomization(), RelativeRandomization::KKW);
+        }
+        assert_eq!(BehaviourParameters::new(0.1, 4, 0.2, 0, 0).relative_randomization(), RelativeRandomization::VDR);
+        let custom = RelativeRandomization { stop_time_threshold: -1, decel_slower: -2, decel_equal: 1, decel_faster: 2, lookahead: 10 };
+        let params = BehaviourParameters::new(0.1, 4, 0.2, 0, 0).with_relative_randomization(custom);
+        assert_eq!(params.relative_randomization().stop_time_threshold, 0);
+        assert_eq!(params.relative_randomization().decel_slower, 0);
+        assert_eq!(params.relative_randomization().decel_faster, 2);
     }
 
     #[test]
