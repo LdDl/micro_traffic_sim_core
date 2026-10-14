@@ -134,6 +134,7 @@ pub fn process_path_for_vehicle<'a>(
 
     // Find max number of cells vehicle can move forward
     let mut success_forward_movement = 0;
+    let mut path_speed = speed_possible;
 
     let mut has_vehicle_on_path = false;
     let mut speed_limit_reached = false;
@@ -167,19 +168,17 @@ pub fn process_path_for_vehicle<'a>(
             break;
         }
 
-        // Check speed limit
-        if speed_possible > cell.get_speed_limit() {
-            if success_forward_movement == 0 {
-                // Ensure at least one cell is moved into if speed limit is lower than possible speed
-                // Happens when very first cell has lower speed limit than vehicle's speed
-                success_forward_movement = 1;
-            }
+        // Keep the longest prefix whose displacement obeys every traversed cell limit.
+        if path_speed > cell.get_speed_limit() {
             speed_limit_reached = true;
-            break;
+            path_speed = cell.get_speed_limit().max(0);
+            if path_speed <= success_forward_movement {
+                break;
+            }
         }
 
         success_forward_movement += 1;
-        if success_forward_movement >= speed_possible {
+        if success_forward_movement >= path_speed {
             break;
         }
     }
