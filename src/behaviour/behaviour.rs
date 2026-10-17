@@ -1,4 +1,4 @@
-use crate::agents::RelativeRandomization;
+use crate::agents::{RelativeRandomization, SynchronizationParameters};
 use std::fmt;
 use rand::Rng;
 
@@ -97,9 +97,25 @@ pub struct BehaviourParameters {
     standstill_gap: i32,
     /// Randomization relative to the leader and the stop time threshold (three phase layer).
     relative_randomization: RelativeRandomization,
+    synchronization: SynchronizationParameters,
 }
 
 impl BehaviourParameters {
+    /// Returns a copy with configured speed adaptation and stochastic corrections.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Synchronization parameters; DISABLED keeps relative randomization.
+    pub fn with_synchronization(mut self, parameters: SynchronizationParameters) -> Self {
+        self.synchronization = parameters.clamped();
+        self
+    }
+
+    /// Returns the synchronization configuration, disabled in existing presets.
+    pub fn synchronization(&self) -> SynchronizationParameters {
+        self.synchronization
+    }
+
     /// Constructs `BehaviourParameters` for a behaviour type.
     ///
     /// Each type maps to a tuple
@@ -162,6 +178,7 @@ impl BehaviourParameters {
             lc_cooldown,
             standstill_gap,
             relative_randomization: RelativeRandomization::KKW,
+            synchronization: SynchronizationParameters::DISABLED,
         }
     }
 
@@ -206,6 +223,7 @@ impl BehaviourParameters {
             lc_cooldown,
             standstill_gap: 0,
             relative_randomization: RelativeRandomization::VDR,
+            synchronization: SynchronizationParameters::DISABLED,
         }
     }
 

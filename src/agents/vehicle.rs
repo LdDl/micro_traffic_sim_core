@@ -1,3 +1,4 @@
+use super::SynchronizationParameters;
 use crate::behaviour::BehaviourType;
 
 use crate::agents_types::AgentType;
@@ -128,6 +129,9 @@ pub struct Vehicle {
     /// Randomization relative to the leader and the stop time threshold (three phase layer);
     /// the default is the plain VDR rule, the behaviour presets use `RelativeRandomization::KKW`.
     pub relative_randomization: RelativeRandomization,
+    /// Speed adaptation and stochastic corrections within a synchronization distance.
+    /// Disabled by default. When enabled, these corrections replace relative randomization.
+    pub synchronization: SynchronizationParameters,
     /// Consecutive ticks the vehicle has stood, 0 while it moves (t_st of Gao 2007); updated when
     /// an intention is applied.
     pub stop_ticks: i32,
@@ -255,6 +259,7 @@ impl Vehicle {
                 min_safe_distance: 0,
                 standstill_gap: 0,
                 relative_randomization: RelativeRandomization::VDR,
+                synchronization: SynchronizationParameters::DISABLED,
                 stop_ticks: 0,
                 destination: -1,
                 trip_destination: -1,
@@ -684,8 +689,11 @@ impl Vehicle {
     /// of Traffic, doi:10.1007/978-3-540-40986-1, p. 308, Fig. 11.2). Keeping the space per escape
     /// delay equal to that of a one cell vehicle gives
     /// p0(L) = 1 - (1 - p0) * (1 + g) / (L + g),
-    /// so a longer vehicle departs later, the front speed stays the same for any vehicle mix, and
+    /// so a longer vehicle departs later. For a fixed gap shared by every length class, the ideal
+    /// renewal front speed stays the same for any vehicle mix, and
     /// lanes with more long vehicles get a lower outflow and a lower jam density, as observed.
+    /// For a heterogeneous gap population, use slow_to_start_for_mean_gap with a common
+    /// class mean; applying this helper to individual gaps does not establish mixture invariance.
     ///
     /// # Arguments
     /// * `p0` - Slow to start probability of a one cell vehicle, clamped to [0, 1].
@@ -706,6 +714,28 @@ impl Vehicle {
             return p0;
         }
         let gap = standstill_gap.max(0) as f64;
+        1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
+    }
+
+    /// Length-scaled slow-to-start probability for a population with a common mean gap.
+    ///
+    /// Under ready-head renewal assumptions, each length class has mean spacing L+g
+    /// and mean delay 1/(1-p). Using the same mean g for every length class preserves
+    /// their common spacing-to-delay ratio when the length mixture changes.
+    /// Length-dependent gap populations require a separate common-reference calibration.
+    /// This does not prove independence from downstream blocking or tail clearance.
+    ///
+    /// # Arguments
+    ///
+    /// * `p0` - Reference one-cell probability, clamped to [0,1].
+    /// * `length_cells` - Materialized body length including the head; at most one keeps p0.
+    /// * `mean_gap` - Common population mean empty cells; negative or non-finite values use zero.
+    pub fn slow_to_start_for_mean_gap(p0: f64, length_cells: i32, mean_gap: f64) -> f64 {
+        let p0 = p0.clamp(0.0, 1.0);
+        if length_cells <= 1 {
+            return p0;
+        }
+        let gap = if mean_gap.is_finite() { mean_gap.max(0.0) } else { 0.0 };
         1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
     }
 
@@ -960,6 +990,16 @@ impl VehicleBuilder {
     /// ```
     pub fn with_relative_randomization(mut self, randomization: RelativeRandomization) -> Self {
         self.vehicle.relative_randomization = randomization.clamped();
+        self
+    }
+
+    /// Sets speed adaptation and its stochastic corrections.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Configuration in cells and ticks; DISABLED preserves the legacy rule.
+    pub fn with_synchronization(mut self, parameters: SynchronizationParameters) -> Self {
+        self.vehicle.synchronization = parameters.clamped();
         self
     }
 
@@ -1332,6 +1372,9 @@ impl VehicleBuilder {
 /// With threshold 0 and unit decelerations, the longitudinal randomization reduces to the core's VDR order. This does not assert equivalence to textbook NaSch's update order, Gao's complete model or the full network behaviour of an older core version.
 ///
 /// Project benches reproduce ring hysteresis, low-speed flow near a bottleneck and wide moving jams emerging predominantly in that region under the operational phase classifier. These are measurements of this variant; they do not establish all properties of Gao's model or a persistent two-dimensional region of synchronized states.
+///
+/// Used while synchronization is disabled. An enabled SynchronizationParameters
+/// configuration supplies its own stochastic correction and restart threshold.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RelativeRandomization {
     /// Consecutive ticks of standing after which the slow to start probability `p0` applies; a

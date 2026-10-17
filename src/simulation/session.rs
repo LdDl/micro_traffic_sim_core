@@ -521,17 +521,27 @@ impl Session {
             behaviour_params.speed_limit()
         };
 
-        // Standstill gap: use trip's explicit value if set, otherwise from behaviour
-        let standstill_gap = if trip.standstill_gap >= 0 {
+        // Resolve a configured population mixture before fixed trip and behaviour gaps.
+        let standstill_gap = if let Some(share) = trip.standstill_gap_share {
+            // 0x9E3779B97F4A7C15 - use a golden-ratio-based multiplier to assign standstill gaps deterministically
+            // from vehicle IDs without consuming RNG draws. The requested share is approximate.
+            i32::from((self.last_vehicle_id.wrapping_mul(0x9E3779B97F4A7C15) % 10000) as f64 / 10000.0 < share)
+        } else if trip.standstill_gap >= 0 {
             trip.standstill_gap
         } else {
             behaviour_params.standstill_gap()
         };
 
         // Slow to start: use trip's explicit value if set, otherwise the behaviour value scaled to
-        // the vehicle length, so that long vehicles keep the jam front velocity of cars.
+        // the vehicle length to preserve the ideal ready-head spacing-to-delay ratio.
         let slow_to_start = if trip.slow_to_start >= 0.0 {
             trip.slow_to_start
+        } else if let Some(share) = trip.standstill_gap_share {
+            Vehicle::slow_to_start_for_mean_gap(
+                behaviour_params.slow_to_start_factor_p0(),
+                1 + trip.vehicle_tail_size as i32,
+                share,
+            )
         } else {
             Vehicle::slow_to_start_for_length(
                 behaviour_params.slow_to_start_factor_p0(),
@@ -550,6 +560,7 @@ impl Session {
             .with_slowdown(if trip.slowdown >= 0.0 { trip.slowdown } else { behaviour_params.slowdown_factor_p() })
             .with_slow_to_start(slow_to_start)
             .with_relative_randomization(trip.relative_randomization.unwrap_or(behaviour_params.relative_randomization()))
+            .with_synchronization(trip.synchronization.unwrap_or(behaviour_params.synchronization()))
             .with_change_p1(behaviour_params.change_p1())
             .with_lc_cooldown(behaviour_params.lc_cooldown())
             .with_min_safe_distance(behaviour_params.min_safe_distance())

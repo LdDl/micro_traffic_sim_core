@@ -1,4 +1,4 @@
-use crate::agents::RelativeRandomization;
+use crate::agents::{RelativeRandomization, SynchronizationParameters};
 use crate::behaviour::{BehaviourType};
 use crate::agents_types::AgentType;
 use crate::grid::cell::CellID;
@@ -153,6 +153,13 @@ pub struct Trip {
     // Randomization relative to the leader and stop time threshold for generated vehicles. If set,
     // overrides the behaviour preset. Default: None (meaning "from behaviour type").
     pub relative_randomization: Option<RelativeRandomization>,
+    /// Overrides the behaviour's synchronization configuration when present.
+    /// Some(DISABLED) explicitly disables it; None inherits the behaviour setting.
+    pub synchronization: Option<SynchronizationParameters>,
+    /// Optional share of generated vehicles assigned one empty standstill cell; others get zero.
+    /// Uses a deterministic vehicle-ID assignment without consuming random draws. When present,
+    /// this population setting overrides the fixed standstill gap and behaviour preset.
+    pub standstill_gap_share: Option<f64>,
 }
 
 /// A builder pattern implementation for constructing `Trip` objects.
@@ -206,6 +213,8 @@ impl Trip {
                 slow_to_start: -1.0,
                 slowdown: -1.0,
                 relative_randomization: None,
+                synchronization: None,
+                standstill_gap_share: None,
             },
         }
     }
@@ -533,6 +542,30 @@ impl TripBuilder {
     /// ```
     pub fn with_relative_randomization(mut self, randomization: RelativeRandomization) -> Self {
         self.trip.relative_randomization = Some(randomization);
+        self
+    }
+
+    /// Assigns a configurable mixture of zero-cell and one-cell standstill gaps.
+    ///
+    /// # Arguments
+    ///
+    /// * `share` - Fraction assigned one cell, clamped to [0,1]; non-finite values become zero.
+    pub fn with_standstill_gap_share(mut self, share: f64) -> Self {
+        self.trip.standstill_gap_share = Some(if share.is_finite() {
+            share.clamp(0.0, 1.0)
+        } else {
+            0.0
+        });
+        self
+    }
+
+    /// Sets speed adaptation and stochastic corrections for generated vehicles.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Per-trip override; DISABLED explicitly keeps the legacy rule.
+    pub fn with_synchronization(mut self, parameters: SynchronizationParameters) -> Self {
+        self.trip.synchronization = Some(parameters.clamped());
         self
     }
 

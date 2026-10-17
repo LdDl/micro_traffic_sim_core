@@ -418,11 +418,23 @@ pub fn find_intention<'a>(
     // Vehicle's speed should not be greater than speed limit
     let mut intention_speed = vehicle.speed.min(speed_limit);
 
-    // NaSch acceleration: a moving vehicle tries to speed up by one cell/step, bounded by the speed limit.
-    // Stopped vehicle (speed == 0) may start even while its acceleration timer is active.
+    // Adapt to a leader within the configured synchronization distance, otherwise accelerate.
+    // A stopped vehicle may start even while its acceleration timer is active.
+    let sync = vehicle.synchronization;
+    let sync_gap = (sync.time_gap * intention_speed as f64).floor() as i32;
+    let sync_leader = if sync.time_gap > 0.0 && intention_speed > 0 {
+        synchronization_leader(source_cell, net, current_state, speed_snapshot, vehicle, sync_gap.saturating_add(1))
+    } else {
+        None
+    };
     let mut speed_possible = intention_speed;
     let acceleration_allowed = vehicle.timer_non_acceleration <= 0 || vehicle.speed == 0;
-    if acceleration_allowed {
+    if let Some((_, leader_speed)) = sync_leader {
+        let change = (leader_speed - intention_speed).signum();
+        if change <= 0 || acceleration_allowed {
+            speed_possible = (intention_speed + change).clamp(0, speed_limit);
+        }
+    } else if acceleration_allowed {
         speed_possible = (speed_possible + 1).min(speed_limit);
     }
 
@@ -458,13 +470,37 @@ pub fn find_intention<'a>(
     } else {
         vehicle.slow_down_factor_p
     };
-    if slowdown_allowed && speed_possible > 0 && random_f64() < slowdown_prob {
-        speed_possible = (speed_possible - rand_decel).max(0);
+    let mut synchronization_blocked = false;
+    if sync.time_gap > 0.0 {
+        // KKW equations (11) to (15): clamp the preliminary speed before noise.
+        let safe_gap = synchronization_leader(source_cell, net, current_state, speed_snapshot, vehicle, speed_limit + 1)
+            .map(|(gap, _)| gap).unwrap_or(speed_limit);
+        synchronization_blocked = safe_gap == 0;
+        speed_possible = speed_possible.min(safe_gap);
+        if slowdown_allowed {
+            let pb = if vehicle.speed == 0 && vehicle.stop_ticks >= sync.start_delay {
+                vehicle.slow_to_start_factor_p0
+            } else if speed_limit > 0 && vehicle.speed == speed_limit {
+                sync.free_speed_noise.unwrap_or(sync.noise)
+            } else {
+                sync.noise
+            };
+            let pa = if intention_speed < sync.pinch_speed { sync.over_acceleration_low } else { sync.over_acceleration };
+            let draw = random_f64();
+            let noise = if draw < pb { -1 } else if draw < pb + pa { 1 } else { 0 };
+            let acceleration_cap = if acceleration_allowed { intention_speed + 1 } else { intention_speed };
+            speed_possible = (speed_possible + noise).max(0).min(acceleration_cap).min(speed_limit).min(safe_gap);
+        }
+    } else if slowdown_allowed && speed_possible > 0 {
+        let draw = random_f64();
+        if draw < slowdown_prob {
+            speed_possible = (speed_possible - rand_decel).max(0);
+        }
     }
     // A random slowdown to zero is a decision to wait this tick, not a blocked vehicle: it must
     // not trigger the alternatives of a stuck vehicle (lane change, roll forward at speed 1),
     // which would defeat slow to start on routed networks and turn dawdles into weaving.
-    let dawdled_to_zero = speed_possible == 0 && (acceleration_allowed || intention_speed > 0);
+    let dawdled_to_zero = !synchronization_blocked && speed_possible == 0 && (acceleration_allowed || intention_speed > 0);
 
     // Considering that vehicle always wants to accelerate:
     let _observe_distance = speed_possible + vehicle.min_safe_distance;
@@ -1045,6 +1081,31 @@ pub fn find_alternate_intention<'a>(
         })
     }
     Ok(create_block_intention(source_cell_id, false))
+}
+
+// Longitudinal adaptation must not react to a queue beyond a planned lane exit.
+// Actual lateral feasibility and conflict handling remain in path processing.
+fn synchronization_leader(
+    source: &Cell,
+    net: &GridRoads,
+    occupancy: &HashMap<CellID, VehicleID>,
+    speeds: &HashMap<CellID, i32>,
+    vehicle: &Vehicle,
+    max_cells: i32,
+) -> Option<(i32, i32)> {
+    let mut distance = max_cells;
+    if vehicle.destination >= 0 && !vehicle.confusion
+        && vehicle.cached_route.get(vehicle.route_idx) == Some(&vehicle.cell_id) {
+        distance = 0;
+        let mut previous = source;
+        for id in vehicle.cached_route.iter().skip(vehicle.route_idx + 1).take(max_cells as usize) {
+            if previous.get_forward_id() != *id { break; }
+            let Some(next) = net.get_cell(id) else { break; };
+            distance += 1;
+            previous = next;
+        }
+    }
+    leader_probe(source, net, occupancy, speeds, vehicle.id, distance)
 }
 
 /// Nearest leader along the forward chain within `max_cells` cells: `(gap, leader speed)`, where
