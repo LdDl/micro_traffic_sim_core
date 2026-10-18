@@ -36,6 +36,11 @@ pub struct SynchronizationParameters {
     /// Optional negative-correction probability at the positive effective speed limit.
     /// Eligibility uses current speed. None keeps the ordinary noise probability.
     pub free_speed_noise: Option<f64>,
+    /// Optional positive-correction probability at the positive effective speed limit.
+    /// Eligibility uses current speed before adaptation. This can attenuate an
+    /// approaching speed disturbance while retaining noise below the limit.
+    /// None preserves the probabilities selected by pinch_speed.
+    pub free_speed_over_acceleration: Option<f64>,
     /// Positive-correction probability at or above pinch_speed.
     pub over_acceleration: f64,
     /// Positive-correction probability below pinch_speed.
@@ -52,6 +57,7 @@ impl SynchronizationParameters {
         time_gap: 0.0,
         noise: 0.0,
         free_speed_noise: None,
+        free_speed_over_acceleration: None,
         over_acceleration: 0.0,
         over_acceleration_low: 0.0,
         pinch_speed: 0,
@@ -68,6 +74,7 @@ impl SynchronizationParameters {
         time_gap: 2.55,
         noise: 0.2 / 9.0,
         free_speed_noise: Some(0.0),
+        free_speed_over_acceleration: None,
         over_acceleration: 0.052 / 9.0,
         over_acceleration_low: 0.2 / 9.0,
         pinch_speed: 4,
@@ -92,6 +99,7 @@ impl SynchronizationParameters {
             },
             noise: probability(self.noise),
             free_speed_noise: self.free_speed_noise.map(probability),
+            free_speed_over_acceleration: self.free_speed_over_acceleration.map(probability),
             over_acceleration: probability(self.over_acceleration),
             over_acceleration_low: probability(self.over_acceleration_low),
             pinch_speed: self.pinch_speed.max(0),

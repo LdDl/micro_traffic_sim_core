@@ -799,62 +799,52 @@ impl Session {
         }
     }
 
-    /// Shortens forward moves so that a vehicle with `standstill_gap > 0` ends that many empty
-    /// cells behind a leader that stands at the end of the tick. A leader stands at the end of the
-    /// tick when it was stopped at the start of the tick or when its granted intention keeps it in
-    /// place (it lost a conflict, it is blocked, or it dawdled from speed 1 to 0). Runs after
-    /// conflict resolution, when every granted intention is known: the full claim up to the leader
-    /// took part in conflict resolution, only the executed move is shortened, so the cells given up
-    /// stay unentered this tick. Checking only the start of the tick would let a follower close up
-    /// to a leader that stops in the same tick and stay there, which makes jams denser than the
-    /// gap intends. A shortened move can leave another leader in place, so the pass repeats until
-    /// no move changes; moves only get shorter, so it ends.
+    /// Reserves the configured clearance behind each physical leader before movement.
+    /// The reserve also applies while moving, so a later stop cannot require a
+    /// chain-wide correction. With initial gap d and reserve g, forward motion is
+    /// bounded by max(d - g, 0); nonnegative leader motion preserves d >= g.
+    /// Initially smaller gaps cannot shrink further under this longitudinal rule.
+    /// Conflict resolution has already granted paths. Shortening releases cells but
+    /// does not grant them to another vehicle during this tick.
     fn apply_standstill_gaps(&mut self) {
-        loop {
-            let net = self.grids_storage.get_vehicles_net_ref();
-            // Body cells at the start of the tick (movement has not run yet) and whether their
-            // owner stands at the end of the tick.
-            let mut body: HashMap<CellID, (VehicleID, bool)> = HashMap::with_capacity(self.vehicles.len());
-            for v in self.vehicles.values() {
-                let stands = v.speed == 0 || v.intention.intention_cell_id == v.cell_id;
-                body.insert(v.cell_id, (v.id, stands));
-                for &t in &v.tail_cells {
-                    if t >= 0 {
-                        body.insert(t, (v.id, stands));
-                    }
+        let net = self.grids_storage.get_vehicles_net_ref();
+        // Read physical bodies from one immutable start-of-tick snapshot.
+        let mut body: HashMap<CellID, VehicleID> = HashMap::with_capacity(self.vehicles.len());
+        for v in self.vehicles.values() {
+            body.insert(v.cell_id, v.id);
+            for &t in &v.tail_cells {
+                if t >= 0 {
+                    body.insert(t, v.id);
                 }
             }
-            let mut trims: Vec<(VehicleID, usize)> = Vec::new();
-            for v in self.vehicles.values() {
-                let g0 = v.standstill_gap;
-                if g0 <= 0
-                    || v.intention.intention_maneuver != LaneChangeType::NoChange
-                    || v.intention.intention_cell_id == v.cell_id
-                {
-                    continue;
-                }
-                let path_len = v.intention.intermediate_cells.len() + 1;
-                let mut id = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
-                for k in 0..g0 {
-                    if id < 0 {
-                        break;
-                    }
-                    if let Some(&(owner, stands)) = body.get(&id) {
-                        if owner != v.id && stands {
-                            trims.push((v.id, path_len.saturating_sub((g0 - k) as usize)));
-                        }
-                        break;
-                    }
-                    id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
-                }
+        }
+        let mut trims: Vec<(VehicleID, usize)> = Vec::new();
+        for v in self.vehicles.values() {
+            let g0 = v.standstill_gap;
+            if g0 <= 0
+                || v.intention.intention_maneuver != LaneChangeType::NoChange
+                || v.intention.intention_cell_id == v.cell_id
+            {
+                continue;
             }
-            if trims.is_empty() {
-                break;
-            }
-            for (id, new_len) in trims {
-                if let Some(v) = self.vehicles.get_mut(&id) {
-                    v.trim_forward_intention(new_len);
+            let path_len = v.intention.intermediate_cells.len() + 1;
+            let mut id = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+            for k in 0..g0 {
+                if id < 0 {
+                    break;
                 }
+                if let Some(&owner) = body.get(&id) {
+                    if owner != v.id {
+                        trims.push((v.id, path_len.saturating_sub((g0 - k) as usize)));
+                    }
+                    break;
+                }
+                id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
+            }
+        }
+        for (id, new_len) in trims {
+            if let Some(v) = self.vehicles.get_mut(&id) {
+                v.trim_forward_intention(new_len);
             }
         }
     }
@@ -980,7 +970,7 @@ impl Session {
         // 6. Solve conflicts
         solve_conflicts(conflicts_data, &mut self.vehicles, &self.verbose)?;
 
-        // 6b. Standstill gaps: shorten granted forward moves that would close the gap to a stopped leader.
+        // 6b. Reserve longitudinal clearance from initial body positions in one pass.
         self.apply_standstill_gaps();
 
         // 7. Move vehicles

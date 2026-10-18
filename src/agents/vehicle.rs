@@ -113,9 +113,12 @@ pub struct Vehicle {
     pub bearing: f64,
     /// Minimal safe distance (in cells) to the vehicle in front
     pub min_safe_distance: i32,
-    /// Standstill gap (in cells): empty cells the vehicle keeps in front of a STOPPED leader.
-    /// The gap cells stay claimed by this vehicle for everyone else (front buffer), so a queue
-    /// still looks solid to other vehicles. 0 keeps the classic bumper to bumper standstill.
+    /// Reserved longitudinal clearance (in cells), also enforced during forward motion.
+    /// A granted move leaves this reserve behind the leader's initial physical body.
+    /// With nonnegative leader motion, a valid initial gap remains at least this large.
+    /// An initially smaller gap is not compressed further; this does not move cars backward.
+    /// Close stopped queues also claim the gap as a front occupancy buffer.
+    /// Zero keeps the classic bumper to bumper rule. Lateral moves use conflict handling.
     ///
     /// With one vehicle per cell and no gap the jam density is one vehicle per cell length,
     /// 222 veh/km at 4.5 m. Calibrated CA models use 7.5 m per vehicle in a jam (133 veh/km): the
@@ -632,7 +635,7 @@ impl Vehicle {
     /// Shortens a forward intention to its first `new_len` cells and keeps the tail intention
     /// consistent with the shorter move. `new_len == 0` means the vehicle stays in place.
     /// Used by the standstill gap: the claim up to the leader takes part in conflict resolution,
-    /// the executed move stops short of a stopped leader.
+    /// the executed move leaves a reserve behind the leader's initial body.
     ///
     /// # Arguments
     /// * `new_len` - Number of cells the vehicle actually moves this tick
@@ -961,10 +964,10 @@ impl VehicleBuilder {
         self
     }
 
-    /// Sets the standstill gap (in cells) kept in front of a stopped leader
+    /// Sets the reserved longitudinal clearance (in cells), during motion and at rest
     ///
     /// # Arguments
-    /// * `standstill_gap` - Empty cells left in front when stopping behind a stopped vehicle, 0 keeps bumper to bumper
+    /// * `standstill_gap` - Reserved empty cells ahead during forward motion; 0 keeps bumper to bumper
     ///
     /// # Returns
     /// A `VehicleBuilder` instance for further method chaining.

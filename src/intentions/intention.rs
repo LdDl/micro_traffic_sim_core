@@ -485,7 +485,12 @@ pub fn find_intention<'a>(
             } else {
                 sync.noise
             };
-            let pa = if intention_speed < sync.pinch_speed { sync.over_acceleration_low } else { sync.over_acceleration };
+            let ordinary_pa = if intention_speed < sync.pinch_speed { sync.over_acceleration_low } else { sync.over_acceleration };
+            let pa = if speed_limit > 0 && vehicle.speed == speed_limit {
+                sync.free_speed_over_acceleration.unwrap_or(ordinary_pa)
+            } else {
+                ordinary_pa
+            };
             let draw = random_f64();
             let noise = if draw < pb { -1 } else if draw < pb + pa { 1 } else { 0 };
             let acceleration_cap = if acceleration_allowed { intention_speed + 1 } else { intention_speed };
@@ -1475,18 +1480,22 @@ mod tests {
     let collected_intention = find_alternate_intention(&net, &current_state, &HashMap::new(), &vehicle, true, 10, 0);
         assert!(collected_intention.is_ok());
         let unwrapped_intention = collected_intention.unwrap();
+        assert_eq!(unwrapped_intention.intention_cell_id, source_cell.get_id());
+        assert_eq!(unwrapped_intention.intention_speed, 0);
+        assert_eq!(unwrapped_intention.intention_maneuver, LaneChangeType::Block);
     vehicle.set_intention(unwrapped_intention);
     intentions.add_intention(&mut vehicle, IntentionType::Target);
 
-        // Speed should be 1 for cases when the vehicle can move, and 0 for cases when it could not move
+        // Cell 500 has no incoming edge, and the forward cell is occupied.
+        // An unreachable goal cannot justify entering the adjacent lane.
         let mut correct_vehicle = Vehicle::new(42)
             .with_cell(source_cell.get_id())
             .with_destination(dest_cell.get_id())
             .build();
         let mut correct_intention = VehicleIntention::default();
-        correct_intention.intention_cell_id = source_cell.get_right_id();
-        correct_intention.intention_maneuver = LaneChangeType::ChangeRight;
-        correct_intention.intention_speed = 1;
+        correct_intention.intention_cell_id = source_cell.get_id();
+        correct_intention.intention_maneuver = LaneChangeType::Block;
+        correct_intention.intention_speed = 0;
         let mut correct_intentions = Intentions::new();
         correct_vehicle.set_intention(correct_intention);
         correct_intentions.add_intention(&mut correct_vehicle, IntentionType::Target);
