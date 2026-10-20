@@ -18,7 +18,7 @@ use crate::grid::zones::ZoneType;
 /// Vector of [`Cell`] objects representing the complete road network with:
 /// - Forward connections within each lane
 /// - Left/right connections between adjacent lanes
-/// - Proper zone types (Birth → Common → Death)
+/// - Proper zone types (Birth => Common => Death)
 ///
 /// # Layout
 ///

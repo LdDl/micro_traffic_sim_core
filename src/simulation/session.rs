@@ -1,3 +1,4 @@
+use crate::maneuver::LaneChangeType;
 use crate::behaviour::BehaviourParameters;
 use crate::agents_types::AgentType;
 use crate::agents::{VehicleID, Vehicle, VehiclesStorage};
@@ -110,6 +111,13 @@ pub struct Session {
     /// Current position mapping from cell ID to vehicle ID
     current_position: HashMap<CellID, VehicleID>,
 
+    /// Start-of-step speed snapshot: cell ID -> speed of the vehicle occupying it (head AND tail cells),
+    /// rebuilt alongside `current_position` each step.
+    /// Read by the lane-change REAR safety gap (`rear_safe`): a merge is allowed only when the target-lane
+    /// follower has room to brake (`d >= rear_speed + min_safe`).
+    /// Synchronous start-of-step values, deterministic I believe.
+    speed_snapshot: HashMap<CellID, i32>,
+
     /// Cellular automata grid storage
     grids_storage: GridsStorage,
 
@@ -168,6 +176,24 @@ pub struct Session {
 }
 
 /// SUMO-style routing configuration. Mirrors `device.rerouting.*` options.
+///
+/// # Option coupling: congestion needs an A* to be applied
+///
+/// Congestion-aware routing (`adaptation_interval > 0`) only smooths per-cell speeds and
+/// folds them into the edge costs. Those updated costs change a vehicle's path ONLY WHEN
+/// an A* actually runs for that vehicle. A* runs in three places:
+///
+/// 1. periodic reroute: gated by `reroute_period > 0` (the only knob tied to it);
+/// 2. spawn: every new vehicle builds its cached route with a full A*, regardless of
+///    `reroute_period`;
+/// 3. off-route rebuild: when a vehicle falls off its cached route and the bounded
+///    reconnect fails, regardless of `reroute_period`.
+///
+/// Therefore `adaptation_interval > 0` with `reroute_period == 0` is NOT a no-op:
+/// congestion still shapes spawn routes (2) and off-route rebuilds (3). What it does NOT
+/// do is periodically re-plan vehicles that stay on their cached route for that you
+/// must also set `reroute_period > 0`. `set_routing_options` logs a warning for this combo
+/// so it is not mistaken for full congestion-aware rerouting.
 #[derive(Debug, Clone)]
 pub struct RoutingOptions {
     /// How often (in ticks) a vehicle re-plans its cached route. `0` (the SUMO
@@ -183,6 +209,9 @@ pub struct RoutingOptions {
     /// pushed into the routing edge costs. `-1` (default) disables congestion-aware
     /// routing entirely - edge costs stay at free-flow time (current behaviour).
     /// Mirrors SUMO `device.rerouting.adaptation-interval`.
+    ///
+    /// To re-plan on-route vehicles around the updated congestion, also set
+    /// `reroute_period > 0` - see the "Option coupling" note on [`RoutingOptions`].
     pub adaptation_interval: i32,
     /// Exponential-moving-average weight for smoothing per-cell speeds:
     /// `smoothed = old * weight + current * (1 - weight)`. `0.0` = use the latest
@@ -224,6 +253,7 @@ impl Session {
             conflict_zones: HashMap::new(),
             cells_conflicts_zones: HashMap::new(),
             current_position: HashMap::new(),
+            speed_snapshot: HashMap::new(),
             _updated_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -256,6 +286,7 @@ impl Session {
             conflict_zones: HashMap::new(),
             cells_conflicts_zones: HashMap::new(),
             current_position: HashMap::new(),
+            speed_snapshot: HashMap::new(),
             _updated_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -302,7 +333,29 @@ impl Session {
     }
 
     /// Sets the SUMO-style routing options (rerouting period, reconnect depth).
+    ///
+    /// Does NOT mutate the supplied options - it only warns (at `VerboseLevel::Main`)
+    /// about the one inconsistent combo: congestion enabled (`adaptation_interval > 0`)
+    /// without periodic rerouting (`reroute_period <= 0`). That combo is valid but easy to
+    /// misread - congestion then shapes only spawn routes and off-route rebuilds, never a
+    /// periodic re-plan of on-route vehicles. See the "Option coupling" note on
+    /// [`RoutingOptions`]. We deliberately do not auto-enable rerouting (a hidden, expensive
+    /// full A* for every vehicle) nor auto-disable congestion (it still does useful work).
     pub fn set_routing_options(&mut self, options: RoutingOptions) {
+        if options.adaptation_interval > 0
+            && options.reroute_period <= 0
+            && self.verbose.is_at_least(VerboseLevel::Main) {
+            self.verbose.log_with_fields(
+                EVENT_ROUTING_CONFIG,
+                "congestion enabled but periodic rerouting is off: congestion will shape \
+                 spawn routes and off-route rebuilds, but on-route vehicles are not \
+                 periodically re-planned - set reroute_period > 0 for that",
+                &[
+                    ("adaptation_interval", &options.adaptation_interval),
+                    ("reroute_period", &options.reroute_period),
+                ]
+            );
+        }
         self.routing = options;
     }
 
@@ -358,6 +411,34 @@ impl Session {
 
     /// Returns a reference to the vehicles storage
     pub fn get_vehicles(&self) -> &VehiclesStorage { &self.vehicles }
+
+    /// Tells whether a cell is occupied by any vehicle body: a head or a materialized tail cell.
+    /// Tail placeholders (`TAIL_PLACEHOLDER`, a tail that has not materialized yet) are ignored.
+    /// This is the same occupancy rule the built in spawning uses, for code that adds vehicles by hand.
+    ///
+    /// # Arguments
+    /// * `cell_id` - The cell to check
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// use micro_traffic_sim_core::simulation::session::Session;
+    /// let mut session = Session::default(None);
+    /// session.add_vehicles(vec![Vehicle::new(1).with_cell(13).with_tail_size(2, vec![11, 12]).build()]);
+    /// assert!(session.is_cell_occupied(13));
+    /// assert!(session.is_cell_occupied(11));
+    /// assert!(!session.is_cell_occupied(14));
+    /// // Cell 0 is an ordinary cell: a tail on it is seen, a fresh tail of placeholders is not.
+    /// session.add_vehicles(vec![Vehicle::new(2).with_cell(1).with_tail_size(1, vec![0]).build()]);
+    /// session.add_vehicles(vec![Vehicle::new(3).with_cell(40).with_tail_size(2, vec![]).build()]);
+    /// assert!(session.is_cell_occupied(0));
+    /// assert!(!session.is_cell_occupied(39));
+    /// ```
+    pub fn is_cell_occupied(&self, cell_id: CellID) -> bool {
+        self.vehicles
+            .values()
+            .any(|v| v.cell_id == cell_id || v.tail_cells.iter().any(|&t| t >= 0 && t == cell_id))
+    }
 
     /// Adds cells to the grids. It is shortcut to GridsStorage's add_cells method
     pub fn add_cells(&mut self, cells_data: Vec<crate::grid::cell::Cell>) {
@@ -417,12 +498,17 @@ impl Session {
     /// Builds the vehicle for a trip. No eligibility / probability roll happens here -
     /// the caller (`generate_vehicles`) decides whether and which trip spawns this tick.
     fn build_vehicle(&self, trip: &Trip, trip_id: TripID) -> Vehicle {
-        // Determine target node
-        let target_node = if trip.allowed_agent_type == AgentType::Bus
+        // Determine the immediate destination and the trip-completion destination.
+        // A bus drives through its transit stops in order: its immediate destination is the
+        // FIRST stop (advanced stop-by-stop in movement), but the trip is only "completed" at
+        // the LAST stop. Setting trip_destination to the first stop made buses despawn as
+        // "completed" the moment they reached stop #1. Other vehicles go straight to `to_node`
+        // for both.
+        let (target_node, final_destination) = if trip.allowed_agent_type == AgentType::Bus
             && !trip.transit_cells.is_empty() {
-            trip.transit_cells[0] // First transit cell for buses
+            (trip.transit_cells[0], *trip.transit_cells.last().unwrap())
         } else {
-            trip.to_node
+            (trip.to_node, trip.to_node)
         };
 
         // Create behaviour parameters based on allowed behaviour type
@@ -435,6 +521,35 @@ impl Session {
             behaviour_params.speed_limit()
         };
 
+        // Resolve a configured population mixture before fixed trip and behaviour gaps.
+        let standstill_gap = if let Some(share) = trip.standstill_gap_share {
+            // 0x9E3779B97F4A7C15 - use a golden-ratio-based multiplier to assign standstill gaps deterministically
+            // from vehicle IDs without consuming RNG draws. The requested share is approximate.
+            i32::from((self.last_vehicle_id.wrapping_mul(0x9E3779B97F4A7C15) % 10000) as f64 / 10000.0 < share)
+        } else if trip.standstill_gap >= 0 {
+            trip.standstill_gap
+        } else {
+            behaviour_params.standstill_gap()
+        };
+
+        // Slow to start: use trip's explicit value if set, otherwise the behaviour value scaled to
+        // the vehicle length to preserve the ideal ready-head spacing-to-delay ratio.
+        let slow_to_start = if trip.slow_to_start >= 0.0 {
+            trip.slow_to_start
+        } else if let Some(share) = trip.standstill_gap_share {
+            Vehicle::slow_to_start_for_mean_gap(
+                behaviour_params.slow_to_start_factor_p0(),
+                1 + trip.vehicle_tail_size as i32,
+                share,
+            )
+        } else {
+            Vehicle::slow_to_start_for_length(
+                behaviour_params.slow_to_start_factor_p0(),
+                1 + trip.vehicle_tail_size as i32,
+                standstill_gap,
+            )
+        };
+
         // Create vehicle using builder pattern
         Vehicle::new(self.last_vehicle_id)
             .with_type(trip.allowed_agent_type)
@@ -442,10 +557,17 @@ impl Session {
             .with_cell(trip.from_node)
             .with_speed(trip.initial_speed)
             .with_speed_limit(speed_limit)
-            .with_slowdown(behaviour_params.slowdown_factor())
+            .with_slowdown(if trip.slowdown >= 0.0 { trip.slowdown } else { behaviour_params.slowdown_factor_p() })
+            .with_slow_to_start(slow_to_start)
+            .with_relative_randomization(trip.relative_randomization.unwrap_or(behaviour_params.relative_randomization()))
+            .with_synchronization(trip.synchronization.unwrap_or(behaviour_params.synchronization()))
+            .with_change_p1(behaviour_params.change_p1())
+            .with_lc_cooldown(behaviour_params.lc_cooldown())
             .with_min_safe_distance(behaviour_params.min_safe_distance())
+            .with_standstill_gap(standstill_gap)
             .with_aggressive_level(behaviour_params.aggressive_level())
             .with_destination(target_node)
+            .with_trip_destination(final_destination)
             .with_trip(trip_id)
             .with_tail_size(trip.vehicle_tail_size, vec![]) // Empty tail cells initially
             .with_transit_cells(trip.transit_cells.clone())
@@ -602,6 +724,7 @@ impl Session {
             );
         }
         self.current_position.clear();
+        self.speed_snapshot.clear();
         for vehicle in self.vehicles.values() {
             if self.verbose.is_at_least(VerboseLevel::Detailed) {
                 self.verbose.log_with_fields(
@@ -627,13 +750,101 @@ impl Session {
                 }
             }
             self.current_position.insert(vehicle.cell_id, vehicle.id);
+            self.speed_snapshot.insert(vehicle.cell_id, vehicle.speed);
             for &tail_cell in &vehicle.tail_cells {
-                // A freshly spawned tailed vehicle carries placeholder tail cells (0) until
-                // its tail materializes as it moves; skip non-positive ids so cell 0 is not
-                // marked as a phantom occupant in the occupancy map.
-                if tail_cell > 0 {
+                // A freshly spawned tailed vehicle carries placeholder tail cells (TAIL_PLACEHOLDER,
+                // a negative id) until its tail materializes as it moves; skip them so no phantom
+                // occupant enters the occupancy map. Cell 0 is an ordinary cell.
+                if tail_cell >= 0 {
                     self.current_position.insert(tail_cell, vehicle.id);
+                    self.speed_snapshot.insert(tail_cell, vehicle.speed);
                 }
+            }
+        }
+        // Front standstill buffers: a vehicle with standstill_gap > 0 within standstill_gap + 1
+        // cells of a STOPPED leader claims the empty cells between them. For everyone else they
+        // count as occupied, so a queue still looks solid and nobody plans to wedge into the gap;
+        // the owner passes through its own buffer. Buffers get no speed snapshot entry.
+        let mut buffers: Vec<(CellID, VehicleID)> = Vec::new();
+        {
+            let net = self.grids_storage.get_vehicles_net_ref();
+            for vehicle in self.vehicles.values() {
+                let g0 = vehicle.standstill_gap;
+                if g0 <= 0 {
+                    continue;
+                }
+                let mut free_cells: Vec<CellID> = Vec::with_capacity(g0 as usize + 1);
+                let mut id = net.get_cell(&vehicle.cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+                for _ in 0..=g0 {
+                    if id < 0 {
+                        break;
+                    }
+                    if let Some(&occupant) = self.current_position.get(&id) {
+                        let leader_stopped = occupant != vehicle.id
+                            && self.speed_snapshot.get(&id).copied() == Some(0);
+                        if leader_stopped {
+                            for &cell in &free_cells {
+                                buffers.push((cell, vehicle.id));
+                            }
+                        }
+                        break;
+                    }
+                    free_cells.push(id);
+                    id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
+                }
+            }
+        }
+        for (cell, owner) in buffers {
+            self.current_position.entry(cell).or_insert(owner);
+        }
+    }
+
+    /// Reserves the configured clearance behind each physical leader before movement.
+    /// The reserve also applies while moving, so a later stop cannot require a
+    /// chain-wide correction. With initial gap d and reserve g, forward motion is
+    /// bounded by max(d - g, 0); nonnegative leader motion preserves d >= g.
+    /// Initially smaller gaps cannot shrink further under this longitudinal rule.
+    /// Conflict resolution has already granted paths. Shortening releases cells but
+    /// does not grant them to another vehicle during this tick.
+    fn apply_standstill_gaps(&mut self) {
+        let net = self.grids_storage.get_vehicles_net_ref();
+        // Read physical bodies from one immutable start-of-tick snapshot.
+        let mut body: HashMap<CellID, VehicleID> = HashMap::with_capacity(self.vehicles.len());
+        for v in self.vehicles.values() {
+            body.insert(v.cell_id, v.id);
+            for &t in &v.tail_cells {
+                if t >= 0 {
+                    body.insert(t, v.id);
+                }
+            }
+        }
+        let mut trims: Vec<(VehicleID, usize)> = Vec::new();
+        for v in self.vehicles.values() {
+            let g0 = v.standstill_gap;
+            if g0 <= 0
+                || v.intention.intention_maneuver != LaneChangeType::NoChange
+                || v.intention.intention_cell_id == v.cell_id
+            {
+                continue;
+            }
+            let path_len = v.intention.intermediate_cells.len() + 1;
+            let mut id = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+            for k in 0..g0 {
+                if id < 0 {
+                    break;
+                }
+                if let Some(&owner) = body.get(&id) {
+                    if owner != v.id {
+                        trims.push((v.id, path_len.saturating_sub((g0 - k) as usize)));
+                    }
+                    break;
+                }
+                id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
+            }
+        }
+        for (id, new_len) in trims {
+            if let Some(v) = self.vehicles.get_mut(&id) {
+                v.trim_forward_intention(new_len);
             }
         }
     }
@@ -744,7 +955,7 @@ impl Session {
         let tl_states_dump = self.grids_storage.tick_traffic_lights(&self.verbose)?;
 
         // 4. Create intentions for all vehicles
-    let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &mut self.vehicles, &self.verbose, self.steps, self.routing.reroute_period, self.routing.reconnect_max_depth)?;
+        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &self.speed_snapshot, &mut self.vehicles, &self.verbose, self.steps, self.routing.reroute_period, self.routing.reconnect_max_depth)?;
 
         // 5. Collect conflicts
         let conflicts_data = collect_conflicts(
@@ -757,7 +968,10 @@ impl Session {
         )?;
 
         // 6. Solve conflicts
-    solve_conflicts(conflicts_data, &mut self.vehicles, &self.verbose)?;
+        solve_conflicts(conflicts_data, &mut self.vehicles, &self.verbose)?;
+
+        // 6b. Reserve longitudinal clearance from initial body positions in one pass.
+        self.apply_standstill_gaps();
 
         // 7. Move vehicles
         let vehicles_grid = self.grids_storage.get_vehicles_net_ref();
@@ -770,7 +984,7 @@ impl Session {
         for vehicle in self.vehicles.values() {
             let mut occupied_points: Vec<[f64; 2]> = Vec::with_capacity(vehicle.tail_cells.len());
             for &tail_cell_id in &vehicle.tail_cells {
-                if tail_cell_id > 0 {
+                if tail_cell_id >= 0 {
                     if let Some(opt_cell) = vehicles_grid.get_cell(&tail_cell_id) {
                         let opt_pt = opt_cell.get_point();
                         occupied_points.push([opt_pt.x(), opt_pt.y()]);
@@ -780,7 +994,8 @@ impl Session {
             states_dump.push(VehicleState {
                 occupied_points,
                 last_cell: vehicle.cell_id,
-                tail_cells: vehicle.tail_cells.clone(),
+                // Only materialized tail cells leave the core; placeholders are an internal detail.
+                tail_cells: vehicle.tail_cells.iter().copied().filter(|&t| t >= 0).collect(),
                 last_intermediate_cells: vehicle.intention.intermediate_cells.clone(),
                 last_speed: vehicle.speed,
                 last_angle: vehicle.bearing,

@@ -1,4 +1,6 @@
+use super::SynchronizationParameters;
 use crate::behaviour::BehaviourType;
+
 use crate::agents_types::AgentType;
 use crate::agents::{VehicleIntention, TailIntentionManeuver};
 use crate::grid::cell::CellID;
@@ -54,16 +56,30 @@ pub type VehicleRef = Rc<RefCell<Vehicle>>;
 /// Vehicle unique identifier type
 pub type VehicleID = u64;
 
-/// Patience threshold (in ticks) for the most aggressive vehicle (cooperativity 0):
+/// Patience threshold (in steps) for the most aggressive vehicle (cooperativity 0):
 /// how long it loses contested cells before overriding right-of-way. SUMO's
 /// `--time-to-teleport` default is 300 s; we reuse it as the impatient end.
 pub const PATIENCE_MIN: i32 = 300;
-/// Patience threshold (in ticks) for the fully cooperative vehicle (cooperativity 1):
+/// Patience threshold (in steps) for the fully cooperative vehicle (cooperativity 1):
 /// the most patient driver waits longer before forcing, but still finite (no permanent
 /// stall). Vehicles in between scale linearly with cooperativity.
 pub const PATIENCE_MAX: i32 = 700;
 
+/// Aggression threshold above which a driver becomes a CUT-IN aggressor: it bypasses the
+/// rear-safety gap when changing lane (squeezing in front of a follower, forcing it to
+/// brake - see `check_alternate_direction`) AND wins a contested cell against any less
+/// aggressive vehicle, even one moving straight (see `aggressor_advantage`). It is a STRICT
+/// lower bound (aggressive_level > threshold), and since aggressive_level = 1 - cooperativity
+/// it is equivalent to cooperativity < 0.2. Below it, a driver respects the normal
+/// right-of-way and the full rear gap.
+pub const AGGRESSOR_CUT_IN_THRESHOLD: f64 = 0.8;
+
 /// Represents basic agent in simulation
+/// Id stored in `Vehicle::tail_cells` for a tail cell that has not materialized yet (the vehicle
+/// entered the network head first). Negative ids mean "no cell" everywhere in the core, so every
+/// real cell id, 0 included, is a valid tail position.
+pub const TAIL_PLACEHOLDER: CellID = -1;
+
 #[derive(Debug)]
 pub struct Vehicle {
     /// Unique identifier
@@ -97,6 +113,35 @@ pub struct Vehicle {
     pub bearing: f64,
     /// Minimal safe distance (in cells) to the vehicle in front
     pub min_safe_distance: i32,
+    /// Reserved longitudinal clearance (in cells), also enforced during forward motion.
+    /// A granted move leaves this reserve behind the leader's initial physical body.
+    /// With nonnegative leader motion, a valid initial gap remains at least this large.
+    /// An initially smaller gap is not compressed further; this does not move cars backward.
+    /// Close stopped queues also claim the gap as a front occupancy buffer.
+    /// Zero keeps the classic bumper to bumper rule. Lateral moves use conflict handling.
+    ///
+    /// With one vehicle per cell and no gap the jam density is one vehicle per cell length,
+    /// 222 veh/km at 4.5 m. Calibrated CA models use 7.5 m per vehicle in a jam (133 veh/km): the
+    /// cell stands for the space a vehicle occupies in a jam, its length plus the gap ahead
+    /// (Knospe, Santen, Schadschneider, Schreckenberg 2004, doi:10.1103/PhysRevE.70.016115), and
+    /// KKW models use a vehicle length d = 7.5 m that includes that gap (Kerner, Klenov, Wolf 2002,
+    /// doi:10.1088/0305-4470/35/47/303). By conservation of vehicles at the jam front a too dense
+    /// jam also makes jam fronts too slow. The gap keeps the cell at the physical vehicle length
+    /// and adds the jam spacing explicitly: one empty cell gives 9 m per vehicle in a jam.
+    pub standstill_gap: i32,
+    /// Randomization relative to the leader and the stop time threshold (three phase layer);
+    /// the default is the plain VDR rule, the behaviour presets use `RelativeRandomization::KKW`.
+    pub relative_randomization: RelativeRandomization,
+    /// Speed adaptation and stochastic corrections within a synchronization distance.
+    /// Disabled by default. When enabled, these corrections replace relative randomization.
+    pub synchronization: SynchronizationParameters,
+    /// Consecutive ticks the vehicle has stood, 0 while it moves (t_st of Gao 2007); updated when
+    /// an intention is applied.
+    ///
+    /// This counter alone does not classify synchronized flow or a wide moving jam.
+    /// Keep stopped vehicles in phase measurements; see the phase-observation discussion
+    /// in [`SynchronizationParameters`].
+    pub stop_ticks: i32,
     /// Final cell for the vehicle's trip
     pub destination: CellID,
     /// Final trip destination (immutable, used for completion check; destination may change for transit cells)
@@ -104,19 +149,50 @@ pub struct Vehicle {
 
     /// A boolean indicating if the vehicle is a confclict participant
     pub is_conflict_participant: bool,
-    /// Consecutive ticks the vehicle has failed to move. Drives the patience-based
-    /// right-of-way override: once `wait_ticks` reaches the vehicle's cooperativity-scaled
+    /// Consecutive steps the vehicle has failed to move. Drives the patience-based
+    /// right-of-way override: once `wait_steps` reaches the vehicle's cooperativity-scaled
     /// patience threshold, the vehicle wins contested cells in conflict resolution
     /// ("desperate" - see `Vehicle::is_desperate`). Reset to 0 on any actual move.
-    pub wait_ticks: i32,
+    pub wait_steps: i32,
     /// Corresponding trip identifier
     pub trip: TripID,
     /// Number of transits have been made by the vehicle
     transits_made: u64,
     /// Cells which must be traversed in exact given order by the vehicle
     pub transit_cells: Vec<CellID>,
-    /// A value in (0; 1] representing the probability of the vehicle randomly slowing down.
-    pub slow_down_factor: f64,
+    /// NaSch random-slowdown (dawdle) probability `p`: a MOVING vehicle (speed > 0) decelerates by one
+    /// with this probability each step (`v -> max(v-1, 0)`). This is the canonical
+    /// Nagel-Schreckenberg randomization parameter. In `[0, 1]` (0 = deterministic behaviour).
+    /// The VDR stopped-vehicle counterpart is `p0` (field `slow_to_start_factor_p0`).
+    pub slow_down_factor_p: f64,
+    /// VDR (Velocity-Dependent Randomization) parameter `p0`, (I use "slow-to-start" probability elsewhere):
+    /// the dawdle probability used while the vehicle is STOPPED (speed == 0),
+    /// as opposed to `p` (the moving probability, field `slow_down_factor_p`).
+    /// VDR makes the random-slowdown probability depend on speed (here two levels: `p0` for stopped, `p` for moving).
+    /// When `p0 > p` a stopped vehicle is more reluctant to start than a moving one dawdles,
+    /// so a jam discharges slower than it fills: this yields the realistic capacity drop
+    /// and the metastable / hysteretic flow near the critical density (the VDR signature).
+    /// `p0 == p` disables the asymmetry and the model reduces to plain NaSch.
+    /// In `[0, 1]`.
+    pub slow_to_start_factor_p0: f64,
+    /// Lane-change probability: once the incentive + safety conditions hold, the
+    /// change is taken only with this probability - the canonical stochastic anti-weaving gate.
+    /// `1.0` (default) = always change when conditions hold (= current behaviour, no refusal).
+    /// Trucks use a smaller value (P2 <= P1) [@todo: not implemented and tested yet].
+    /// In (0, 1].
+    pub change_p1: f64,
+    /// Lane-change hysteresis: steps remaining during which a REACTIVE (blocked-escape) lane
+    /// change is suppressed after the vehicle just changed lanes - so a car cannot immediately
+    /// weave back (A->B->A) or hop across lanes step-by-step. Does NOT block route-following
+    /// maneuvers or the forward roll. 0 = free to react.
+    pub timer_reactive_lane_change: i64,
+    /// Lane-change cooldown DURATION (steps): the value `timer_reactive_lane_change` is armed to
+    /// right after a REACTIVE lane change - how many steps another reactive (blocked-escape) change
+    /// stays suppressed (anti-weaving: no A->B->A weave-back / lane-hopping). Route-following
+    /// maneuvers are NOT affected. Per-vehicle / per-driver-type: `0` = changes freely (aggressive),
+    /// larger = more hesitant (cooperative / unsure).
+    /// Could be set from `BehaviourParameters`.
+    pub lc_cooldown: i64,
     /// A value in (0; 1] representing cooperative behaviour of the vehicle.
     /// 0 - when behaviour considered to be "aggressive"
     /// 1 - fully cooperative
@@ -143,8 +219,8 @@ pub struct Vehicle {
 
     /// Cached route to the destination as an ordered list of cell IDs
     /// (origin first, destination last), built by a full A* at spawn / on reroute.
-    /// Per-tick the vehicle follows this list cheaply instead of re-running A*.
-    /// Empty means "no cached route" (fall back to per-tick routing).
+    /// Per-step the vehicle follows this list cheaply instead of re-running A*.
+    /// Empty means "no cached route" (fall back to per-step routing).
     pub cached_route: Vec<CellID>,
     /// Index into `cached_route` of the vehicle's current head cell.
     pub route_idx: usize,
@@ -188,14 +264,22 @@ impl Vehicle {
                 speed_limit: 4,
                 bearing: 0.0,
                 min_safe_distance: 0,
+                standstill_gap: 0,
+                relative_randomization: RelativeRandomization::VDR,
+                synchronization: SynchronizationParameters::DISABLED,
+                stop_ticks: 0,
                 destination: -1,
                 trip_destination: -1,
                 is_conflict_participant: false,
-                wait_ticks: 0,
+                wait_steps: 0,
                 trip: -1,
                 transits_made: 0,
                 transit_cells: Vec::new(),
-                slow_down_factor: 0.1,
+                slow_down_factor_p: 0.1,
+                slow_to_start_factor_p0: 0.1,
+                change_p1: 1.0,
+                timer_reactive_lane_change: 0,
+                lc_cooldown: 0,
                 cooperativity: 0.0,
                 timer_non_acceleration: 0,
                 timer_non_maneuvers: 0,
@@ -234,7 +318,7 @@ impl Vehicle {
     }
 
     /// Clears the cached route (e.g. when the destination changes), forcing the
-    /// next tick to fall back to full routing.
+    /// next step to fall back to full routing.
     pub fn clear_cached_route(&mut self) {
         self.cached_route.clear();
         self.route_idx = 0;
@@ -419,7 +503,7 @@ impl Vehicle {
         for (idx, window) in self.tail_cells.windows(2).enumerate() {
             let [from_id, to_id] = window else { continue };
 
-            if *from_id < 1 {
+            if *from_id < 0 {
                 continue;
             }
 
@@ -479,7 +563,7 @@ impl Vehicle {
         }
         Ok(TailIntentionManeuver {
             source_cell_maneuver: self.cell_id,
-            target_cell_maneuver: if self.intention.intention_cell_id < 1 {
+            target_cell_maneuver: if self.intention.intention_cell_id < 0 {
                 self.cell_id
             } else {
                 self.intention.intention_cell_id
@@ -517,6 +601,7 @@ impl Vehicle {
     pub fn apply_intention(&mut self) {
         // No need to update cell_id. It is done in movement.rs
         self.speed = self.intention.intention_speed;
+        self.stop_ticks = if self.speed == 0 { self.stop_ticks.saturating_add(1) } else { 0 };
         // Apply destination if set in intention
         if let Some(destination) = self.intention.destination {
             self.destination = destination;
@@ -551,7 +636,117 @@ impl Vehicle {
         }
     }
 
-    /// The vehicle's patience threshold in ticks: how long it tolerates losing
+    /// Shortens a forward intention to its first `new_len` cells and keeps the tail intention
+    /// consistent with the shorter move. `new_len == 0` means the vehicle stays in place.
+    /// Used by the standstill gap: the claim up to the leader takes part in conflict resolution,
+    /// the executed move leaves a reserve behind the leader's initial body.
+    ///
+    /// # Arguments
+    /// * `new_len` - Number of cells the vehicle actually moves this tick
+    pub fn trim_forward_intention(&mut self, new_len: usize) {
+        let mut path: Vec<CellID> = self.intention.intermediate_cells.clone();
+        path.push(self.intention.intention_cell_id);
+        if new_len >= path.len() {
+            return;
+        }
+        path.truncate(new_len);
+        if let Some(&last) = path.last() {
+            self.intention.intention_cell_id = last;
+            self.intention.intermediate_cells = path[..path.len() - 1].to_vec();
+        } else {
+            self.intention.intention_cell_id = self.cell_id;
+            self.intention.intermediate_cells.clear();
+        }
+        self.intention.intention_speed = new_len as i32;
+        self.intention.tail_intention_cells = self.tail_intention_for_current();
+    }
+
+    /// Tail cells after executing the current intention, same rules as the intention storage uses.
+    fn tail_intention_for_current(&self) -> Vec<CellID> {
+        let tail_size = self.tail_cells.len();
+        if tail_size == 0 {
+            return vec![];
+        }
+        let mut tail = vec![TAIL_PLACEHOLDER; tail_size];
+        let skip = self.intention.intermediate_cells.len();
+        if self.intention.intention_cell_id != self.cell_id && skip > 0 && skip < tail_size {
+            tail[0..(tail_size - skip - 1)].copy_from_slice(&self.tail_cells[(skip + 1)..]);
+            tail[tail_size - skip - 1] = self.cell_id;
+            tail[(tail_size - skip)..].copy_from_slice(&self.intention.intermediate_cells);
+        } else if self.intention.intention_cell_id != self.cell_id && skip >= tail_size {
+            tail.copy_from_slice(&self.intention.intermediate_cells[skip - tail_size..]);
+        } else {
+            for i in 0..tail_size - 1 {
+                tail[i] = self.tail_cells[i + 1];
+            }
+            tail[tail_size - 1] = self.cell_id;
+        }
+        tail
+    }
+
+    /// Slow to start probability of a vehicle of `length_cells` cells that keeps `standstill_gap`
+    /// empty cells in a jam, derived from the probability `p0` of a one cell vehicle with the same
+    /// behaviour and gap.
+    ///
+    /// A vehicle leaves a jam after the mean escape delay tau / (1 - p0), and each departure moves the
+    /// downstream jam front back by the space the vehicle occupies in the jam, its length plus its
+    /// gap (Kerner, Klenov, Wolf 2002, doi:10.1088/0305-4470/35/47/303, p. 8: v_g = d / tau_del).
+    /// Empirically the velocity of the downstream front of a wide moving jam does not depend on the
+    /// percentage of trucks, while the jam outflow and the jam density do (Kerner 2004, The Physics
+    /// of Traffic, doi:10.1007/978-3-540-40986-1, p. 308, Fig. 11.2). Keeping the space per escape
+    /// delay equal to that of a one cell vehicle gives
+    /// p0(L) = 1 - (1 - p0) * (1 + g) / (L + g),
+    /// so a longer vehicle departs later. For a fixed gap shared by every length class, the ideal
+    /// renewal front speed stays the same for any vehicle mix, and
+    /// lanes with more long vehicles get a lower outflow and a lower jam density, as observed.
+    /// For a heterogeneous gap population, use slow_to_start_for_mean_gap with a common
+    /// class mean; applying this helper to individual gaps does not establish mixture invariance.
+    ///
+    /// # Arguments
+    /// * `p0` - Slow to start probability of a one cell vehicle, clamped to [0, 1].
+    /// * `length_cells` - Cells the vehicle occupies (head plus tail); 1 or less returns `p0`.
+    /// * `standstill_gap` - Empty cells the vehicle keeps in front of a stopped leader (negative counts as 0).
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 1), 0.425);
+    /// // A two cell truck with a one cell gap occupies 3 cells instead of 2.
+    /// let p = Vehicle::slow_to_start_for_length(0.425, 2, 1);
+    /// assert!((p - (1.0 - 0.575 * 2.0 / 3.0)).abs() < 1e-12);
+    /// ```
+    pub fn slow_to_start_for_length(p0: f64, length_cells: i32, standstill_gap: i32) -> f64 {
+        let p0 = p0.clamp(0.0, 1.0);
+        if length_cells <= 1 {
+            return p0;
+        }
+        let gap = standstill_gap.max(0) as f64;
+        1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
+    }
+
+    /// Length-scaled slow-to-start probability for a population with a common mean gap.
+    ///
+    /// Under ready-head renewal assumptions, each length class has mean spacing L+g
+    /// and mean delay 1/(1-p). Using the same mean g for every length class preserves
+    /// their common spacing-to-delay ratio when the length mixture changes.
+    /// Length-dependent gap populations require a separate common-reference calibration.
+    /// This does not prove independence from downstream blocking or tail clearance.
+    ///
+    /// # Arguments
+    ///
+    /// * `p0` - Reference one-cell probability, clamped to [0,1].
+    /// * `length_cells` - Materialized body length including the head; at most one keeps p0.
+    /// * `mean_gap` - Common population mean empty cells; negative or non-finite values use zero.
+    pub fn slow_to_start_for_mean_gap(p0: f64, length_cells: i32, mean_gap: f64) -> f64 {
+        let p0 = p0.clamp(0.0, 1.0);
+        if length_cells <= 1 {
+            return p0;
+        }
+        let gap = if mean_gap.is_finite() { mean_gap.max(0.0) } else { 0.0 };
+        1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
+    }
+
+    /// The vehicle's patience threshold in steps: how long it tolerates losing
     /// contested cells before overriding right-of-way. Scaled by cooperativity so
     /// every vehicle eventually forces (the threshold is always finite), but more
     /// cooperative drivers wait longer: aggressive (cooperativity 0) -> `PATIENCE_MIN`,
@@ -567,7 +762,22 @@ impl Vehicle {
     /// so a vehicle blocked by an occupied cell (a queue follower) is never desperate in
     /// any useful sense; and it never overrides a `Tail` (physical body) conflict.
     pub fn is_desperate(&self) -> bool {
-        self.wait_ticks >= self.patience()
+        self.wait_steps >= self.patience()
+    }
+
+    /// The vehicle's aggressiveness in [0, 1], the complement of its cooperativity
+    /// (`aggressive_level = 1 - cooperativity`). A single style axis: high aggression =
+    /// low cooperativity. Used by the cut-in rules (see `is_aggressor`).
+    pub fn aggressive_level(&self) -> f64 {
+        1.0 - self.cooperativity
+    }
+
+    /// True when the vehicle is a CUT-IN aggressor: its aggressive_level strictly exceeds
+    /// `AGGRESSOR_CUT_IN_THRESHOLD`. Such a driver squeezes in front of followers (bypassing
+    /// the rear-safety gap on a lane change) and wins contested cells against less aggressive
+    /// vehicles, even ones moving straight - it "cuts in", forcing the other to brake.
+    pub fn is_aggressor(&self) -> bool {
+        self.aggressive_level() > AGGRESSOR_CUT_IN_THRESHOLD
     }
 }
 
@@ -646,6 +856,8 @@ impl VehicleBuilder {
 
     /// Sets currently occupied cells by tail (in case when vehicle has size more that one cell).
     /// The occupied cells must be provided in order: [furthest from head, ..., closest to head].
+    /// With an empty `cells` list the tail starts as `TAIL_PLACEHOLDER` entries and materializes
+    /// as the head moves.
     ///
     /// # Arguments
     /// * `size` - The size of the vehicle's tail (number of cells behind head).
@@ -665,7 +877,7 @@ impl VehicleBuilder {
     /// println!("Vehicle: {:?}", vehicle);
     /// ```
     pub fn with_tail_size(mut self, size: usize, cells: Vec<CellID>) -> Self {
-        self.vehicle.tail_cells = vec![0; size];
+        self.vehicle.tail_cells = vec![TAIL_PLACEHOLDER; size];
         if !cells.is_empty() {
             self.vehicle.tail_cells.copy_from_slice(&cells);
         }
@@ -756,6 +968,48 @@ impl VehicleBuilder {
         self
     }
 
+    /// Sets the reserved longitudinal clearance (in cells), during motion and at rest
+    ///
+    /// # Arguments
+    /// * `standstill_gap` - Reserved empty cells ahead during forward motion; 0 keeps bumper to bumper
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    pub fn with_standstill_gap(mut self, standstill_gap: i32) -> Self {
+        self.vehicle.standstill_gap = standstill_gap.max(0);
+        self
+    }
+
+    /// Sets the randomization relative to the leader and the stop time threshold (three phase
+    /// layer); `RelativeRandomization::VDR` keeps the plain rule.
+    ///
+    /// # Arguments
+    /// * `randomization` - The parameter set, clamped to non negative values.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::{RelativeRandomization, Vehicle};
+    /// let vehicle = Vehicle::new(1).with_relative_randomization(RelativeRandomization::KKW).build();
+    /// assert_eq!(vehicle.relative_randomization.stop_time_threshold, 5);
+    /// ```
+    pub fn with_relative_randomization(mut self, randomization: RelativeRandomization) -> Self {
+        self.vehicle.relative_randomization = randomization.clamped();
+        self
+    }
+
+    /// Sets speed adaptation and its stochastic corrections.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Configuration in cells and ticks; DISABLED preserves the legacy rule.
+    pub fn with_synchronization(mut self, parameters: SynchronizationParameters) -> Self {
+        self.vehicle.synchronization = parameters.clamped();
+        self
+    }
+
     /// Sets final cell for the vehicle's trip
     ///
     /// # Arguments
@@ -774,6 +1028,24 @@ impl VehicleBuilder {
     /// ```
     pub fn with_destination(mut self, cell_id: CellID) -> Self {
         self.vehicle.destination = cell_id;
+        self.vehicle.trip_destination = cell_id;
+        self
+    }
+
+    /// Overrides the trip-completion destination independently of the immediate `destination`.
+    ///
+    /// `with_destination` sets both the immediate `destination` and the `trip_destination`
+    /// (where the trip is considered complete) to the same cell. For a multi-stop bus these
+    /// differ: the immediate destination starts at the FIRST transit stop (and is advanced
+    /// stop-by-stop during movement), while the trip only completes at the LAST stop. Call
+    /// this AFTER `with_destination` to set the completion cell separately.
+    ///
+    /// # Arguments
+    /// * `cell_id` - Cell at which the trip is considered complete
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    pub fn with_trip_destination(mut self, cell_id: CellID) -> Self {
         self.vehicle.trip_destination = cell_id;
         self
     }
@@ -889,7 +1161,31 @@ impl VehicleBuilder {
     /// println!("Vehicle: {:?}", vehicle);
     /// ```
     pub fn with_slowdown(mut self, p: f64) -> Self {
-        self.vehicle.slow_down_factor = p;
+        self.vehicle.slow_down_factor_p = p;
+        self
+    }
+
+    /// Sets the VDR slow-to-start probability `p0` used while the vehicle is stopped.
+    /// Should be `>= p` (the moving slowdown) for a capacity drop.
+    /// `p0 == p` disables the VDR asymmetry.
+    pub fn with_slow_to_start(mut self, p0: f64) -> Self {
+        self.vehicle.slow_to_start_factor_p0 = p0;
+        self
+    }
+
+    /// Sets the lane-change probability `p1` stochastic anti-weaving gate).
+    /// `1.0` (default) = always change when incentive + safety hold.
+    /// Trucks: P2 <= P1 [@todo: implement trucks' P2]
+    pub fn with_change_p1(mut self, p: f64) -> Self {
+        self.vehicle.change_p1 = p;
+        self
+    }
+
+    /// Sets the reactive-lane-change cooldown DURATION in steps (see `Vehicle::lc_cooldown`).
+    /// `0` (default) = no cooldown (changes freely);
+    /// larger = more hesitant after a change.
+    pub fn with_lc_cooldown(mut self, steps: i64) -> Self {
+        self.vehicle.lc_cooldown = steps;
         self
     }
 
@@ -1067,9 +1363,149 @@ impl VehicleBuilder {
     }
 }
 
+/// Randomization relative to the leader and the stop time threshold: the three phase layer of
+/// the longitudinal rule.
+///
+/// Uses the stop-time threshold and speed-difference-dependent randomization of Gao, Jiang, Hu, Wang and Wu (2007), doi:10.1103/PhysRevE.76.026105, eqs (1) to (4), with the following modifications:
+///
+/// - Update order: the core accelerates, applies random slowdown, then clamps the candidate to the available path. Gao brakes to the gap before randomization. These orders can produce different speeds when the gap is binding.
+/// - Interaction range: the nearest leader is probed along the forward chain within `lookahead` cells (15 cells, 67.5 m, in `KKW`). Without a leader in that range, the core uses `decel_equal`. Gao's original rule uses the preceding vehicle without this finite cutoff.
+/// - Calibration: `KKW` selects a stop threshold of 5 ticks and decelerations 0, 1, 1 on the project's 4.5 m grid. In particular, `decel_faster = 1` omits the stronger random deceleration tested in the project's over-deceleration experiments. These values are project choices, not a reproduction of Gao's published parameter set.
+/// - Network integration: the speed comparison uses the follower's current speed clipped to its local speed limit and the leader's start-of-tick snapshot. Acceleration and slowdown timers, claimed cells, conflict resolution and the separate standstill-gap rule also affect the executed movement.
+/// - VDR boundary case: `p0` requires both zero speed and a standing count at least equal to the threshold. Setting the threshold to zero therefore selects `p0` only for stopped vehicles and `p` for moving ones, explicitly defining the VDR reduction.
+///
+/// The separate standstill-gap calibration gives an average jam spacing of about 7.5 m when two thirds of one-cell cars keep one empty cell. This does not change the 4.5 m cell size. The calibrated `p0` and driver-style `p` are supplied by behaviour parameters or trip overrides, not by this struct.
+///
+/// With threshold 0 and unit decelerations, the longitudinal randomization reduces to the core's VDR order. This does not assert equivalence to textbook NaSch's update order, Gao's complete model or the full network behaviour of an older core version.
+///
+/// Project benches reproduce ring hysteresis, low-speed flow near a bottleneck and wide moving jams emerging predominantly in that region under the operational phase classifier. These are measurements of this variant; they do not establish all properties of Gao's model or a persistent two-dimensional region of synchronized states.
+///
+/// Used while synchronization is disabled. An enabled SynchronizationParameters
+/// configuration supplies its own stochastic correction and restart threshold.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RelativeRandomization {
+    /// Consecutive ticks of standing after which the slow to start probability `p0` applies; a
+    /// shorter stop randomizes with the moving probability `p` (t_c of Gao 2007). 0 applies `p0`
+    /// to every stopped vehicle (VDR).
+    pub stop_time_threshold: i32,
+    /// Deceleration in cells per tick of the random slowdown when the vehicle is slower than its
+    /// leader (b_- of Gao 2007). 0 means no slowdown while catching up.
+    pub decel_slower: i32,
+    /// Deceleration when the vehicle is as fast as its leader or has no leader within
+    /// `lookahead` cells (b_0). 1 is the NaSch dawdle.
+    pub decel_equal: i32,
+    /// Deceleration when the vehicle is faster than its leader (b_+, b_+ >= b_-).
+    pub decel_faster: i32,
+    /// Cells ahead searched for the leader whose speed selects the deceleration; 0 skips the
+    /// search and uses `decel_equal`.
+    pub lookahead: i32,
+}
+
+impl RelativeRandomization {
+    /// The plain NaSch and VDR rule: `p0` for every stopped vehicle, deceleration 1, no leader
+    /// search needed for the speed result. This reduces the longitudinal randomization to VDR;
+    /// it does not imply equivalence of the entire network to older core versions.
+    pub const VDR: RelativeRandomization = RelativeRandomization {
+        stop_time_threshold: 0,
+        decel_slower: 1,
+        decel_equal: 1,
+        decel_faster: 1,
+        lookahead: 15,
+    };
+    /// The three phase values of the behaviour presets: no slowdown while catching up with a
+    /// faster leader, slow to start after 5 ticks of standing, leader search over 15 cells (67 m).
+    pub const KKW: RelativeRandomization = RelativeRandomization {
+        stop_time_threshold: 5,
+        decel_slower: 0,
+        decel_equal: 1,
+        decel_faster: 1,
+        lookahead: 15,
+    };
+
+    /// Clamps every field to its admissible range (non negative, decelerations at most the
+    /// maximum speed are not enforced, the executed speed is clamped by the rule itself).
+    pub fn clamped(self) -> Self {
+        RelativeRandomization {
+            stop_time_threshold: self.stop_time_threshold.max(0),
+            decel_slower: self.decel_slower.max(0),
+            decel_equal: self.decel_equal.max(0),
+            decel_faster: self.decel_faster.max(0),
+            lookahead: self.lookahead.max(0),
+        }
+    }
+}
+
+impl Default for RelativeRandomization {
+    fn default() -> Self {
+        RelativeRandomization::VDR
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_slow_to_start_for_length() {
+        // A one cell vehicle keeps the behaviour value.
+        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 0), 0.425);
+        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 1), 0.425);
+        for &(p0, len, gap) in &[(0.425, 2, 0), (0.425, 2, 1), (0.425, 3, 1), (0.6, 3, 0), (0.0, 2, 1)] {
+            let p = Vehicle::slow_to_start_for_length(p0, len, gap);
+            // Space per escape delay equals that of a one cell vehicle: (L + g)(1 - p) = (1 + g)(1 - p0).
+            let lhs = (len as f64 + gap as f64) * (1.0 - p);
+            let rhs = (1.0 + gap as f64) * (1.0 - p0);
+            assert!((lhs - rhs).abs() < 1e-12, "invariance for {p0} {len} {gap}");
+            assert!(p >= p0 && p < 1.0, "a longer vehicle departs later but eventually departs");
+        }
+        // Longer vehicles depart later.
+        assert!(Vehicle::slow_to_start_for_length(0.425, 3, 1) > Vehicle::slow_to_start_for_length(0.425, 2, 1));
+        // Out of range inputs.
+        assert_eq!(Vehicle::slow_to_start_for_length(1.5, 1, 0), 1.0);
+        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 2, -3), Vehicle::slow_to_start_for_length(0.425, 2, 0));
+    }
+
+    #[test]
+    fn test_trim_forward_intention() {
+        let mut vehicle = Vehicle::new(1).with_cell(3).with_speed(3).build();
+        vehicle.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 6,
+            intermediate_cells: vec![4, 5],
+            intention_speed: 3,
+            ..Default::default()
+        });
+        vehicle.trim_forward_intention(5);
+        assert_eq!(vehicle.intention.intention_cell_id, 6, "a longer length keeps the move");
+        vehicle.trim_forward_intention(2);
+        assert_eq!(vehicle.intention.intention_cell_id, 5);
+        assert_eq!(vehicle.intention.intermediate_cells, vec![4]);
+        assert_eq!(vehicle.intention.intention_speed, 2);
+        vehicle.trim_forward_intention(0);
+        assert_eq!(vehicle.intention.intention_cell_id, 3, "length 0 keeps the vehicle in place");
+        assert!(vehicle.intention.intermediate_cells.is_empty());
+        assert_eq!(vehicle.intention.intention_speed, 0);
+    }
+
+    #[test]
+    fn test_trim_forward_intention_moves_tail() {
+        let mut truck = Vehicle::new(1).with_cell(3).with_tail_size(2, vec![1, 2]).with_speed(2).build();
+        truck.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 5,
+            intermediate_cells: vec![4],
+            intention_speed: 2,
+            ..Default::default()
+        });
+        truck.trim_forward_intention(1);
+        assert_eq!(truck.intention.intention_cell_id, 4);
+        assert_eq!(truck.intention.tail_intention_cells, vec![2, 3]);
+        // Staying in place follows the intention storage convention for a vehicle that does not
+        // move; movement applies the tail intention only when the head moves, so the body stays.
+        truck.trim_forward_intention(0);
+        assert_eq!(truck.intention.intention_cell_id, 3);
+        assert_eq!(truck.intention.tail_intention_cells, vec![2, 3]);
+    }
+
     #[test]
     fn test_relaxation_countdown() {
         let relax_time = 9;

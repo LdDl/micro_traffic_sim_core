@@ -17,6 +17,12 @@ pub struct GridRoads {
     /// Largest cell id seen so far (`-1` if empty). Maintained in `add_cell`; used to
     /// size the A* closed-set marker array.
     max_cell_id: CellID,
+    /// Reverse (forward-predecessor) index: `back[f]` is a cell whose FORWARD neighbour is `f`,
+    /// i.e. the cell directly BEHIND `f` in the same lane.
+    /// Maintained in `add_cell`; enables the lane-change look-back (rear safety gap `D >= Vmax + A`)
+    /// on a graph whose links are forward-only.
+    /// WARNING [@todo: reconsider this]: At a merge (several cells forward into one) it keeps the first predecessor.
+    back: HashMap<CellID, CellID>,
 }
 
 impl GridRoads {
@@ -35,6 +41,7 @@ impl GridRoads {
             cells: HashMap::new(),
             max_speed: 1.0,
             max_cell_id: -1,
+            back: HashMap::new(),
         }
     }
 
@@ -48,6 +55,13 @@ impl GridRoads {
     /// scratch arrays (e.g. the A* closed set).
     pub fn get_max_cell_id(&self) -> CellID {
         self.max_cell_id
+    }
+
+    /// The cell directly BEHIND `cell_id` in its lane (the forward-predecessor), or `-1` if none.
+    /// Enables the lane-change look-back / rear safety gap on a forward-only graph.
+    /// At a merge it returns one of the predecessors (the first added).
+    pub fn get_back_id(&self, cell_id: CellID) -> CellID {
+        self.back.get(&cell_id).copied().unwrap_or(-1)
     }
 
     /// Adds a `GridRoads` to the grid.
@@ -74,6 +88,11 @@ impl GridRoads {
         }
         if cell.get_id() > self.max_cell_id {
             self.max_cell_id = cell.get_id();
+        }
+        // Record the forward-predecessor (cell behind `forward_id` in its lane) for look-back.
+        let fwd = cell.get_forward_id();
+        if fwd >= 0 {
+            self.back.entry(fwd).or_insert(cell.get_id());
         }
         self.cells.insert(cell.get_id(), cell);
     }

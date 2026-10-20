@@ -217,7 +217,61 @@ mod tests {
         // Vehicle 2 (left maneuver) should have priority over vehicle 1 (right maneuver)
         assert_eq!(info.priority_vehicle_id, 2, "Left maneuver should have priority over right maneuver");
     }
-    
+
+    /// Plain CrossLaneChange: a CUT-IN aggressor (aggressive_level > AGGRESSOR_CUT_IN_THRESHOLD, strictly more aggressive)
+    /// gets priority over the left maneuver - the gradient `aggressor_advantage` now covers crossings,
+    /// not just the old enum check.
+    /// Same X/A/Y/B grid as the test above, vehicle 1 = ChangeRight.
+    #[test]
+    fn test_cross_lane_change_aggressor_gets_priority() {
+        let mut net = GridRoads::new();
+        net.add_cell(Cell::new(1).with_forward_node(2).with_right_node(4).build());
+        net.add_cell(Cell::new(2).build());
+        net.add_cell(Cell::new(3).with_forward_node(4).with_left_node(1).build());
+        net.add_cell(Cell::new(4).build());
+
+        // Vehicle 1 (X=1, ChangeRight to B=4) is a cut-in aggressor.
+        let mut vehicle1 = Vehicle::new(1)
+            .with_cell(1)
+            .with_behaviour(BehaviourType::Aggressive)
+            // > AGGRESSOR_CUT_IN_THRESHOLD and strictly above vehicle 2
+            .with_aggressive_level(0.9)
+            .with_speed(2)
+            .build();
+        vehicle1.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeRight,
+            intention_cell_id: 4,
+            ..Default::default()
+        });
+
+        // Vehicle 2 (Y=3, ChangeLeft to A=2) is cooperative - out-aggressed.
+        let mut vehicle2 = Vehicle::new(2)
+            .with_cell(3)
+            .with_behaviour(BehaviourType::Cooperative)
+            .with_aggressive_level(0.0)
+            .with_speed(2)
+            .build();
+        vehicle2.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::ChangeLeft,
+            intention_cell_id: 2,
+            ..Default::default()
+        });
+
+        let mut collected_intentions = Intentions::new();
+        collected_intentions.add_intention(&mut vehicle2, IntentionType::Target);
+        let vehicle1_intention = CellIntention::new(vehicle1.id, IntentionType::Target);
+        let intention_cell = net.get_cell(&4).unwrap();
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, vehicle1);
+        vehicles.insert(2, vehicle2);
+
+        let info = find_cross_trajectories_conflict_naive(
+            &vehicle1_intention, intention_cell, &collected_intentions, &net, &vehicles,
+        ).unwrap().expect("crossing conflict should be detected");
+        assert_eq!(info.conflict_type, ConflictType::CrossLaneChange);
+        assert_eq!(info.priority_vehicle_id, 1, "cut-in aggressor (right maneuver) out-aggresses the left and wins");
+    }
+
     #[test]
     fn test_find_conflict_type() {
         // Test 1: Tail vs Transit conflict - Tail should win
@@ -244,10 +298,10 @@ mod tests {
         });
         let correct_id = vehicle_one.id;
         let intention_one = CellIntention::new(vehicle_one.id, IntentionType::Tail);
-    let intention_two = CellIntention::new(vehicle_two.id, IntentionType::Transit);
-    let mut vehicles = VehiclesStorage::new();
-    vehicles.insert(vehicle_one.id, vehicle_one);
-    vehicles.insert(vehicle_two.id, vehicle_two);
+        let intention_two = CellIntention::new(vehicle_two.id, IntentionType::Transit);
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(vehicle_one.id, vehicle_one);
+        vehicles.insert(vehicle_two.id, vehicle_two);
 
         let (winner, conflict_type) = find_conflict_type(
             15,
@@ -339,10 +393,10 @@ mod tests {
 
         let correct_id = vehicle_five.id;
         let intention_five = CellIntention::new(vehicle_five.id, IntentionType::Target);
-    let intention_six = CellIntention::new(vehicle_six.id, IntentionType::Target);
-    let mut vehicles = VehiclesStorage::new();
-    vehicles.insert(5, vehicle_five);
-    vehicles.insert(6, vehicle_six);
+        let intention_six = CellIntention::new(vehicle_six.id, IntentionType::Target);
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(5, vehicle_five);
+        vehicles.insert(6, vehicle_six);
 
         let (winner, conflict_type) = find_conflict_type(
             25,
@@ -381,10 +435,10 @@ mod tests {
 
         let correct_id = vehicle_seven.id;
         let intention_seven = CellIntention::new(vehicle_seven.id, IntentionType::Target);
-    let intention_eight = CellIntention::new(vehicle_eight.id, IntentionType::Target);
-    let mut vehicles = VehiclesStorage::new();
-    vehicles.insert(7, vehicle_seven);
-    vehicles.insert(8, vehicle_eight);
+        let intention_eight = CellIntention::new(vehicle_eight.id, IntentionType::Target);
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(7, vehicle_seven);
+        vehicles.insert(8, vehicle_eight);
 
         let (winner, conflict_type) = find_conflict_type(
             35,
@@ -404,6 +458,8 @@ mod tests {
         let mut vehicle1 = Vehicle::new(1)
             .with_cell(10)
             .with_behaviour(BehaviourType::Aggressive)
+            // aggressive_level > AGGRESSOR_CUT_IN_THRESHOLD -> out-aggresses the cooperative one
+            .with_aggressive_level(0.9)
             .with_speed(2)
             .build();
         vehicle1.set_intention(VehicleIntention {
@@ -415,6 +471,8 @@ mod tests {
         let mut vehicle2 = Vehicle::new(2)
             .with_cell(11)
             .with_behaviour(BehaviourType::Cooperative)
+            // fully cooperative
+            .with_aggressive_level(0.0)
             .with_speed(2)
             .build();
         vehicle2.set_intention(VehicleIntention {
@@ -429,9 +487,9 @@ mod tests {
         ];
 
         let cell = Cell::new(15).build();
-            let conflict_zones = HashMap::new();
-            let cells_conflicts_zones = HashMap::new();
-            let mut vehicles = VehiclesStorage::new();
+        let conflict_zones = HashMap::new();
+        let cells_conflicts_zones = HashMap::new();
+        let mut vehicles = VehiclesStorage::new();
         vehicles.insert(1, vehicle1);
         vehicles.insert(2, vehicle2);
 
@@ -449,6 +507,48 @@ mod tests {
         assert_eq!(*priority_vehicle, 1);
     }
 
+    /// Order-invariance of the full-tie tie-break in a 3-vehicle merge: three vehicles with
+    /// EQUAL speed and EQUAL cooperativity all contend the same cell.
+    /// The winner (priority participant) must be the LOWEST id regardless of the order the intentions are folded in
+    /// `new_conflict_multiple` - proving the coin-flip-free tie-break is order-invariant (closes
+    /// the "participant order must not matter" concern at the last resolution step).
+    #[test]
+    fn test_full_tie_winner_is_order_invariant() {
+        let build = |id: u64, cell: CellID| {
+            let mut v = Vehicle::new(id)
+                .with_cell(cell)
+                .with_behaviour(BehaviourType::Undefined)
+                .with_cooperative_level(0.5)
+                .with_speed(2)
+                .build();
+            v.set_intention(VehicleIntention {
+                intention_cell_id: 15,
+                intention_maneuver: LaneChangeType::NoChange,
+                intention_speed: 2,
+                ..Default::default()
+            });
+            v
+        };
+        let cell = Cell::new(15).build();
+        let conflict_zones = HashMap::new();
+        let cells_conflicts_zones = HashMap::new();
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, build(1, 10));
+        vehicles.insert(2, build(2, 11));
+        vehicles.insert(3, build(3, 12));
+
+        // Every fold order of the intention list must yield the same winner: vehicle 1 (lowest id).
+        for order in [[1u64, 2, 3], [3, 2, 1], [2, 3, 1], [3, 1, 2]] {
+            let intentions: Vec<CellIntention> = order
+                .iter()
+                .map(|&id| CellIntention::new(id, IntentionType::Target))
+                .collect();
+            let conflict = new_conflict_multiple(&cell, &conflict_zones, &cells_conflicts_zones, &intentions, &vehicles).unwrap();
+            let winner = conflict.participants[conflict.priority_participant_index];
+            assert_eq!(winner, 1, "full-tie winner must be the lowest id (1) regardless of fold order {:?}", order);
+        }
+    }
+
     #[test]
     fn test_new_conflict_multiple_deduplication() {
         let vehicle1 = Vehicle::new(1)
@@ -462,7 +562,7 @@ mod tests {
         ];
 
         let cell = Cell::new(15).build();
-            let mut vehicles = VehiclesStorage::new();
+        let mut vehicles = VehiclesStorage::new();
         vehicles.insert(1, vehicle1);
         let result = new_conflict_multiple(&cell, &HashMap::new(), &HashMap::new(), &intentions, &vehicles);
         

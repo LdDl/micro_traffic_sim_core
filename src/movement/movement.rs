@@ -2,7 +2,7 @@
 use crate::agents_types::AgentType;
 use crate::agents::{VehicleID, Vehicle};
 use crate::grid::road_network::GridRoads;
-use crate::grid::cell::CellID;
+use crate::grid::cell::{CellID, CellState};
 use crate::grid::zones::ZoneType;
 use crate::maneuver::LaneChangeType;
 use crate::geom::get_bearing;
@@ -179,7 +179,8 @@ pub fn movement(
         // stays put even if it intended to move. Head, tail, timers and bearing must all
         // key off this single decision-otherwise a dwelling tailed vehicle's tail would
         // advance while its head stays, leaving the head inside its own tail.
-        let final_cell = if vehicle.get_relax_countdown() > 0 {
+        let was_dwelling = vehicle.get_relax_countdown() > 0;
+        let final_cell = if was_dwelling {
             vehicle.relax_countdown_dec();
             // Stay in current cell
             vehicle.cell_id
@@ -230,9 +231,9 @@ pub fn movement(
             }
         }
 
-        // Decrement timers only if vehicle moved
+        // Tail/maneuver timers count down with FORWARD MOVEMENT (they track the tail completing the
+        // maneuver over `tail_size` cells), so they are decremented only when the vehicle moved.
         if moved {
-            // Decrement timers
             if vehicle.timer_non_acceleration > 0 {
                 vehicle.timer_non_acceleration -= 1;
             }
@@ -242,6 +243,12 @@ pub fn movement(
             if vehicle.timer_non_slowdown > 0 {
                 vehicle.timer_non_slowdown -= 1;
             }
+        }
+        // The reactive-lane-change cooldown is a WALL-CLOCK timer ("steps since the last change"), so
+        // it ticks down EVERY step, even when the vehicle is stuck. Otherwise a stuck vehicle would
+        // keep the cooldown frozen and could never make the escape lane change it actually needs.
+        if vehicle.timer_reactive_lane_change > 0 {
+            vehicle.timer_reactive_lane_change -= 1;
         }
 
         // Update tail cells only if vehicle is actually moving
@@ -253,22 +260,54 @@ pub fn movement(
             }
         }
 
-        // Set timers for lane change maneuvers
-        if vehicle.intention.intention_maneuver == LaneChangeType::ChangeLeft || 
-           vehicle.intention.intention_maneuver == LaneChangeType::ChangeRight {
+        // Set timers for a lane change maneuver - ONLY when it was actually PERFORMED (the head moved
+        // into the new lane this step), not on mere intention. `moved` = the head's cell changed; a
+        // lane change always changes the cell, so this excludes exactly the "wanted but blocked" case.
+        if moved
+            && (vehicle.intention.intention_maneuver == LaneChangeType::ChangeLeft
+                || vehicle.intention.intention_maneuver == LaneChangeType::ChangeRight)
+        {
             let tail_size = vehicle.tail_cells.len() as i64;
             vehicle.timer_non_acceleration = tail_size;
             vehicle.timer_non_maneuvers = tail_size;
             vehicle.timer_non_slowdown = tail_size;
+            // Reactive-lane-change hysteresis (MOBIL-like I think? @todo: need to investigate it better):
+            // block only the next REACTIVE escape, not routing.
+            // Duration is the per-vehicle / per-type `lc_cooldown` (0 = off).
+            vehicle.timer_reactive_lane_change = vehicle.lc_cooldown;
         }
 
         // Patience accrual: reset on any real move, otherwise the vehicle is stuck this
-        // tick. Once wait_ticks reaches the patience threshold the vehicle is "desperate"
+        // tick. Once wait_steps reaches the patience threshold the vehicle is "desperate"
         // and overrides right-of-way in the conflict solver (see Vehicle::is_desperate).
-        if moved {
-            vehicle.wait_ticks = 0;
-        } else {
-            vehicle.wait_ticks = vehicle.wait_ticks.saturating_add(1);
+        //
+        // A non-contention stop must NOT accrue patience: a vehicle held by a red light
+        // ahead (forward cell Banned) or still dwelling at a stop (relax_countdown) is not
+        // being starved of right-of-way, so it must not be pushed into the desperate
+        // override for a reason that has nothing to do with conflicts. Pause accrual in
+        // those cases (do not reset, so genuine prior starvation is preserved).
+        // Reset ONLY on genuine FORWARD progress. A pure lateral lane change (ChangeLeft/Right) does
+        // not advance the vehicle toward its goal, so it must NOT reset patience - otherwise a car
+        // crossing several lanes re-earns patience on every hop and never stays desperate long enough
+        // to force its way in (needed for the route-merger desperate override). On a lateral hop we
+        // HOLD wait_steps (neither reset nor accrue).
+        let lateral_hop = matches!(
+            vehicle.intention.intention_maneuver,
+            LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight
+        );
+        if moved && !lateral_hop {
+            vehicle.wait_steps = 0;
+        } else if !moved {
+            let held_by_red = net
+                .get_cell(&vehicle.cell_id)
+                .map(|c| c.get_forward_id())
+                .filter(|&fwd| fwd > 0)
+                .and_then(|fwd| net.get_cell(&fwd))
+                .map(|fwd_cell| fwd_cell.get_state() == CellState::Banned)
+                .unwrap_or(false);
+            if !was_dwelling && !held_by_red {
+                vehicle.wait_steps = vehicle.wait_steps.saturating_add(1);
+            }
         }
 
         vehicle.cell_id = final_cell;
@@ -402,5 +441,127 @@ mod tests {
         assert_eq!(v.cell_id, 3, "head stays put while dwelling");
         assert_eq!(v.tail_cells, vec![1, 2], "tail must NOT advance while the head dwells");
         assert!(!v.tail_cells.contains(&v.cell_id), "head cell is not inside its own tail");
+    }
+
+    /// Regression: a multi-stop bus must complete its trip at the LAST transit stop, not the
+    /// first. `trip_destination` used to be set to the FIRST stop, so a bus despawned as
+    /// "completed" the instant it reached stop #1 and never served the rest of its route.
+    #[test]
+    fn test_bus_completes_at_last_stop_not_first() {
+        // Linear road 1 -> 2 -> 3 -> 4; cells 2 and 4 are Transit stops.
+        let mut net = GridRoads::new();
+        for (id, fwd, x, zone) in [
+            (1, 2, 0.0, ZoneType::Common),
+            (2, 3, 1.0, ZoneType::Transit),
+            (3, 4, 2.0, ZoneType::Common),
+            (4, -1, 3.0, ZoneType::Transit),
+        ] {
+            net.add_cell(
+                Cell::new(id)
+                    .with_point(new_point(x, 0.0, None))
+                    .with_forward_node(fwd)
+                    .with_speed_limit(3)
+                    .with_zone_type(zone)
+                    .build(),
+            );
+        }
+
+        // Bus #1 arriving at the FIRST stop (cell 2): its immediate destination is the first
+        // stop, but the trip only completes at the LAST stop (cell 4). It must survive the
+        // stop and re-target to the next one.
+        let mut bus_first = Vehicle::new(1)
+            .with_type(AgentType::Bus)
+            .with_cell(1)
+            .with_speed_limit(3)
+            .with_destination(2)
+            .with_trip_destination(4)
+            .with_transit_cells(vec![2, 4])
+            .build();
+        bus_first.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 2,
+            intention_speed: 1,
+            ..Default::default()
+        });
+
+        // Bus #2 arriving at the LAST stop (cell 4), one transit already served: it must
+        // despawn as completed here.
+        let mut bus_last = Vehicle::new(2)
+            .with_type(AgentType::Bus)
+            .with_cell(3)
+            .with_speed_limit(3)
+            .with_destination(4)
+            .with_trip_destination(4)
+            .with_transit_cells(vec![2, 4])
+            .build();
+        bus_last.transits_made_inc(); // already served stop #1
+        bus_last.set_intention(VehicleIntention {
+            intention_maneuver: LaneChangeType::NoChange,
+            intention_cell_id: 4,
+            intention_speed: 1,
+            ..Default::default()
+        });
+
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, bus_first);
+        vehicles.insert(2, bus_last);
+        let (completed, _lost) = movement(&net, &mut vehicles, &LocalLogger::none()).unwrap();
+
+        // Only the bus at its LAST stop completes.
+        assert_eq!(completed, 1, "exactly one bus (at its last stop) completes");
+
+        let bus_first = vehicles.get(&1).expect("bus must NOT despawn at the first stop");
+        assert_eq!(bus_first.cell_id, 2, "bus #1 reached the first stop");
+        assert_eq!(bus_first.destination, 4, "bus #1 re-targeted to the next (last) stop");
+        assert_eq!(bus_first.get_transits_made(), 1, "bus #1 registered one transit");
+
+        assert!(
+            vehicles.get(&2).is_none(),
+            "bus #2 completed and was removed at the last stop"
+        );
+    }
+
+    /// Patience (`wait_steps`) must accrue only under right-of-way starvation, not for a
+    /// non-contention stop. A vehicle held by a red light ahead (forward cell Banned) or
+    /// still dwelling at a stop must NOT gain patience (else it would wrongly become
+    /// "desperate" and override right-of-way); a vehicle blocked by traffic still does.
+    #[test]
+    fn test_wait_steps_not_accrued_on_red_or_dwell() {
+        let mut net = GridRoads::new();
+        // Red-light lane: 1 -> 2 (Banned).
+        net.add_cell(Cell::new(1).with_speed_limit(3).with_forward_node(2).with_point(new_point(0.0, 0.0, None)).build());
+        let mut banned = Cell::new(2).with_speed_limit(3).with_point(new_point(1.0, 0.0, None)).build();
+        banned.set_state(CellState::Banned);
+        net.add_cell(banned);
+        // Traffic-block lane: 3 -> 4 (Free).
+        net.add_cell(Cell::new(3).with_speed_limit(3).with_forward_node(4).with_point(new_point(0.0, 1.0, None)).build());
+        net.add_cell(Cell::new(4).with_speed_limit(3).with_point(new_point(1.0, 1.0, None)).build());
+        // Dwell lane: 5 -> 6.
+        net.add_cell(Cell::new(5).with_speed_limit(3).with_forward_node(6).with_point(new_point(0.0, 2.0, None)).build());
+        net.add_cell(Cell::new(6).with_speed_limit(3).with_point(new_point(1.0, 2.0, None)).build());
+
+        // v1: held by the red light (forward Banned), blocked in place.
+        let mut v1 = Vehicle::new(1).with_cell(1).build();
+        v1.wait_steps = 10;
+        v1.set_intention(VehicleIntention { intention_maneuver: LaneChangeType::Block, intention_cell_id: 1, intention_speed: 0, ..Default::default() });
+        // v2: blocked by traffic (forward Free, not red), blocked in place -> control.
+        let mut v2 = Vehicle::new(2).with_cell(3).build();
+        v2.wait_steps = 10;
+        v2.set_intention(VehicleIntention { intention_maneuver: LaneChangeType::Block, intention_cell_id: 3, intention_speed: 0, ..Default::default() });
+        // v3: dwelling at a stop - intends to move but stays put this tick.
+        let mut v3 = Vehicle::new(3).with_cell(5).with_relax_time(5).build();
+        v3.relax_countdown_reset();
+        v3.wait_steps = 10;
+        v3.set_intention(VehicleIntention { intention_maneuver: LaneChangeType::NoChange, intention_cell_id: 6, intention_speed: 1, ..Default::default() });
+
+        let mut vehicles = VehiclesStorage::new();
+        vehicles.insert(1, v1);
+        vehicles.insert(2, v2);
+        vehicles.insert(3, v3);
+        movement(&net, &mut vehicles, &LocalLogger::none()).unwrap();
+
+        assert_eq!(vehicles.get(&1).unwrap().wait_steps, 10, "red light: patience must NOT accrue");
+        assert_eq!(vehicles.get(&2).unwrap().wait_steps, 11, "traffic block: patience accrues");
+        assert_eq!(vehicles.get(&3).unwrap().wait_steps, 10, "dwell: patience must NOT accrue");
     }
 }
