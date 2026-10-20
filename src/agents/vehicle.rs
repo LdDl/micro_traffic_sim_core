@@ -137,6 +137,10 @@ pub struct Vehicle {
     pub synchronization: SynchronizationParameters,
     /// Consecutive ticks the vehicle has stood, 0 while it moves (t_st of Gao 2007); updated when
     /// an intention is applied.
+    ///
+    /// This counter alone does not classify synchronized flow or a wide moving jam.
+    /// Keep stopped vehicles in phase measurements; see the phase-observation discussion
+    /// in [`SynchronizationParameters`].
     pub stop_ticks: i32,
     /// Final cell for the vehicle's trip
     pub destination: CellID,

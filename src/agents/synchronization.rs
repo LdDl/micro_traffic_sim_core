@@ -6,6 +6,15 @@
 /// The coarse cell size, standing threshold and network rules differ from that paper.
 /// This configuration describes a KKW-inspired extension, not a literal reproduction.
 ///
+/// These parameters configure vehicle dynamics; they do not classify traffic phases.
+/// A brief stop alone does not identify a wide moving jam. Distinguishing synchronized
+/// flow from wide moving jams requires separate observations of flow interruption
+/// relative to jam-release delays and of the surrounding spatiotemporal structure.
+/// Phase measurements must retain stopped vehicles in residence time, density and
+/// average speed. See Kerner, Klenov and Hiller, "Criterion for traffic phases in
+/// single vehicle data and empirical test of a microscopic three-phase traffic theory",
+/// section II B, doi:/10.1088/0305-4470/39/9/002.
+///
 /// A nonpositive time_gap disables the extension and preserves relative randomization.
 /// All current behaviour presets and Vehicle::new keep it disabled. When enabled,
 /// the extension replaces the moving slowdown and RelativeRandomization rule; the
