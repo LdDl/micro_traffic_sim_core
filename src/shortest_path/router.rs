@@ -122,14 +122,9 @@ impl<'a> PartialOrd for AStarNode<'a> {
 
 impl<'a> Ord for AStarNode<'a> {
     fn cmp(&self, other: &AStarNode) -> Ordering {
-        let f_cmp = other
-            .f_cost
-            .partial_cmp(&self.f_cost)
-            .unwrap_or(Ordering::Equal);
+        let f_cmp = other.f_cost.total_cmp(&self.f_cost);
         if f_cmp == Ordering::Equal {
-            if f_cmp == Ordering::Equal {
-                return other.cell.get_id().cmp(&self.cell.get_id()); // Break tie by ID (or another field)
-            }
+            return other.cell.get_id().cmp(&self.cell.get_id()); // Break tie by ID
         }
         f_cmp
     }

@@ -10,7 +10,7 @@
 //! 
 //! ## Components
 //! 
-//! - [`VerboseLevel`] - Hierarchical debug levels (None → Main → Additional → Detailed → All)
+//! - [`VerboseLevel`] - Hierarchical debug levels (None => Main => Additional => Detailed => All)
 //! - [`verbose_log`] - Global logging functions
 //! - Event constants - Predefined event types for simulation phases
 //! - Macros - `log_main!`, `log_additional!`, `log_detailed!`, `log_all!`

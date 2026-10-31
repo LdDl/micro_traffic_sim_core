@@ -37,7 +37,9 @@ pub struct VehicleState {
     pub occupied_points: Vec<[f64; 2]>,
     /// Last known cell ID of the vehicle
     pub last_cell: CellID,
-    /// Cells occupied by tail. Order: [furthest from head, ..., closest to head]
+    /// Cells occupied by tail. Order: [furthest from head, ..., closest to head].
+    /// Only materialized cells are listed: a vehicle that is still entering the network reports
+    /// fewer cells than its tail size.
     pub tail_cells: Vec<CellID>,
     /// List of last known intermediate cells traversed by the vehicle with speed > 1
     pub last_intermediate_cells: Vec<CellID>,

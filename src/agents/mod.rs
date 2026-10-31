@@ -28,8 +28,11 @@
 //! - **Lane changing**: Complex maneuver intentions and tail behavior
 //! - **Behavioral parameters**: Configurable aggressiveness, cooperation, timing
 //! - **Builder pattern**: API for vehicle construction
+mod synchronization;
 mod vehicle_intention;
 mod vehicle;
 mod vehicles_storage;
 
 pub use self::{vehicle_intention::*, vehicle::*, vehicles_storage::VehiclesStorage};
+
+pub use synchronization::SynchronizationParameters;

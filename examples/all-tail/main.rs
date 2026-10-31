@@ -757,7 +757,7 @@ fn write_vehicle_step(session: &Session, positions: &HashMap<i64, (f64, f64)>, s
 
         // Write tail positions
         for tail_cell in &vehicle.tail_cells {
-            if *tail_cell > 0 {
+            if *tail_cell >= 0 {
                 if let Some(&(x, y)) = positions.get(tail_cell) {
                     writeln!(file, "{:.1} {:.1} {} tail", x, y, vehicle.id).unwrap();
                 }

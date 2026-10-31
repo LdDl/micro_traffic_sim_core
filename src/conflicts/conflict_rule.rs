@@ -1,10 +1,7 @@
-use crate::behaviour::BehaviourType;
 use crate::agents::{Vehicle, VehicleID};
 use crate::conflicts::ConflictType;
 use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType};
-use rand::Rng;
-use crate::utils::rand::rng;
 use indexmap::IndexMap;
 
 const EPS_COOP_LEVEL: f64 = 0.0001;
@@ -40,23 +37,37 @@ static CONFLICT_RULES: &[ConflictRule] = conflict_rules![
     // Both vehicles are changing lane on a single road
     // Two source lanes on one road is going to merge into single lane on another road
     [ |v1, v2| changing_lane(v1) && changing_lane(v2), resolve_merge_lane_change ],
-    
+
     // Both vehicles are moving forward on different lanes of different roads
     // Differet roads are going to merge into single road
     [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && v2.intention.intention_maneuver == LaneChangeType::NoChange, resolve_merge_forward ],
 
-    // First vehicle is moving forward, second is changing lane
-    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2), |cin1, _cin2, _| {
-        // First vehicle is not doing maneuver, when the second one is doing lane change.
-        // Therefore the second vehicle should give way to the first one
-        (cin1, ConflictType::ForwardLaneChange)
+    // First vehicle is moving forward, second is changing lane.
+    // The forward vehicle normally has priority (the changer gives way), UNLESS the changer is a
+    // CUT-IN aggressor that out-aggresses it (`aggressor_advantage`): then the aggressor squeezes
+    // in and the forward vehicle is the one forced to brake. Equal aggression keeps priority with
+    // the forward vehicle (the comparison is strict) - "higher aggression wins, ties go straight".
+    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2), |cin1, cin2, vehicles| {
+        let v_forward = vehicles.get(&cin1.get_vehicle_id()).expect("Vehicle not found");
+        let v_changer = vehicles.get(&cin2.get_vehicle_id()).expect("Vehicle not found");
+        if aggressor_advantage(v_changer, v_forward) {
+            (cin2, ConflictType::ForwardLaneChange)
+        } else {
+            (cin1, ConflictType::ForwardLaneChange)
+        }
     } ],
 
-    // First vehicle is changing lane, second is moving forward
-    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange, |_cin1, cin2, _| {
-        // Second vehicle is not doing maneuver, when the first one is doing lane change.
-        // Therefore the first vehicle should give way to the second one
-        (cin2, ConflictType::ForwardLaneChange)
+    // First vehicle is changing lane, second is moving forward.
+    // Symmetric to the rule above: the forward vehicle keeps priority unless the changer is a
+    // cut-in aggressor that out-aggresses it.
+    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange, |cin1, cin2, vehicles| {
+        let v_changer = vehicles.get(&cin1.get_vehicle_id()).expect("Vehicle not found");
+        let v_forward = vehicles.get(&cin2.get_vehicle_id()).expect("Vehicle not found");
+        if aggressor_advantage(v_changer, v_forward) {
+            (cin1, ConflictType::ForwardLaneChange)
+        } else {
+            (cin2, ConflictType::ForwardLaneChange)
+        }
     } ],
 
     // First vehicle is changing lane, second is blocking its lane
@@ -166,11 +177,17 @@ pub fn changing_lane(agent: &Vehicle) -> bool {
         || agent.intention.intention_maneuver == LaneChangeType::ChangeRight
 }
 
-/// Returns true if the first vehicle is aggressive and the second is cooperative.
-/// Future works: aggressive vehicles may win conflicts even against traffic rules.
-pub fn has_agressive_level_advantage(vehicle_one: &Vehicle, vehicle_two: &Vehicle) -> bool {
-    vehicle_one.strategy_type == BehaviourType::Aggressive
-        && vehicle_two.strategy_type == BehaviourType::Cooperative
+/// True when `vehicle_one` is a CUT-IN aggressor that out-aggresses `vehicle_two`: its
+/// aggressive_level exceeds `AGGRESSOR_CUT_IN_THRESHOLD` (i.e. cooperativity < (1 - AGGRESSOR_CUT_IN_THRESHOLD))
+/// AND is STRICTLY greater than the other's. Such a vehicle wins a contested cell even against the
+/// normal right-of-way rules (it "cuts in"; the other must brake).
+/// The comparison is a gradient over `aggressive_level` (= 1 - cooperativity),
+/// replacing the old coarse "is Aggressive enum vs Cooperative enum" check,
+/// so e.g. an aggressor still loses to an even more aggressive driver.
+/// Strictness matters: equal aggression yields NO advantage to either side, so the conflict falls
+/// through to the normal rule (faster / less-cooperative / left-beats-right / forward-has-priority).
+pub fn aggressor_advantage(vehicle_one: &Vehicle, vehicle_two: &Vehicle) -> bool {
+    vehicle_one.is_aggressor() && vehicle_one.aggressive_level() > vehicle_two.aggressive_level()
 }
 
 /// Resolves a merge conflict where both vehicles are changing lanes into the same cell.
@@ -197,10 +214,10 @@ pub fn resolve_merge_lane_change<'a>(
 
     // Check aggressive behaviour advantage, so aggressive vehicle could even violate the traffic rules
     // and have advantage over the cooperative vehicle
-    if has_agressive_level_advantage(&vehicle_one, &vehicle_two) {
+    if aggressor_advantage(&vehicle_one, &vehicle_two) {
         return (intention_one, ConflictType::MergeLaneChange);
     }
-    if has_agressive_level_advantage(&vehicle_two, &vehicle_one) {
+    if aggressor_advantage(&vehicle_two, &vehicle_one) {
         return (intention_two, ConflictType::MergeLaneChange);
     }
 
@@ -231,7 +248,7 @@ pub fn resolve_merge_lane_change<'a>(
 /// Road A: →→→ (speed 5, coop 0.3) ↘
 ///                                 [Cell]
 /// Road B: →→→ (speed 3, coop 0.8) ↗
-/// Priority: Faster > Less cooperative > Random
+/// Priority: Faster > Less cooperative > Lowest id (deterministic, order-invariant tie-break)
 /// ```
 pub fn resolve_by_speed_and_cooperativity<'a>(
     intention_one: &'a CellIntention,
@@ -253,10 +270,13 @@ pub fn resolve_by_speed_and_cooperativity<'a>(
     // Speeds are equal, check cooperativity
     let coop_diff = vehicle_one.cooperativity - vehicle_two.cooperativity;
     if coop_diff.abs() < EPS_COOP_LEVEL {
-        // Random choice for equal cooperativity
-        // let mut rng = rand::rng(); // This is not working in the test because of the rng() function
-        let mut rng = rng();
-        if rng.random_bool(0.5) {
+        // Full tie (equal speed AND equal cooperativity): break it DETERMINISTICALLY by the
+        // LOWEST vehicle id, NOT by a coin flip. A coin flip is reproducible under a fixed seed
+        // but is tied to participant POSITION, so the winner of a 3+ vehicle conflict would depend
+        // on the order participants happen to sit in the left-fold (`new_conflict_multiple`).
+        // Lowest-id makes "beats" a TOTAL order -> the fold's winner is order-invariant, and it
+        // mirrors the desperate-override tie-break (see `solve_conflicts`).
+        if vehicle_one.id <= vehicle_two.id {
             return (intention_one, ConflictType::MergeForward);
         }
         return (intention_two, ConflictType::MergeForward);
@@ -293,10 +313,10 @@ pub fn resolve_merge_forward<'a>(
     let vehicle_two = vehicles.get(&intention_two.get_vehicle_id()).expect("Vehicle not found");
 
     // Check aggressive behaviour advantage
-    if has_agressive_level_advantage(&vehicle_one, &vehicle_two) {
+    if aggressor_advantage(&vehicle_one, &vehicle_two) {
         return (intention_one, ConflictType::MergeForward);
     }
-    if has_agressive_level_advantage(&vehicle_two, &vehicle_one) {
+    if aggressor_advantage(&vehicle_two, &vehicle_one) {
         return (intention_two, ConflictType::MergeForward);
     }
 
@@ -326,15 +346,18 @@ pub fn resolve_merge_forward<'a>(
 mod tests {
     use super::*;
     use crate::agents::VehicleIntention;
+    use crate::behaviour::BehaviourType;
     #[test]
     fn test_resolve_merge_lane_change() {
         // Case 1: Aggressive vehicle should win
         let vehicle_one = Vehicle::new(1)
             .with_behaviour(BehaviourType::Aggressive)
+            .with_aggressive_level(0.9) // aggressive_level > 0.8 -> cut-in aggressor
             .with_speed(1)
             .build();
         let vehicle_two = Vehicle::new(2)
             .with_behaviour(BehaviourType::Cooperative)
+            .with_aggressive_level(0.0) // fully cooperative -> out-aggressed
             .with_speed(3)
             .build();
         let mut vehicles: IndexMap<VehicleID, Vehicle> = IndexMap::new();
@@ -442,7 +465,8 @@ mod tests {
             "Conflict type is not correct"
         );
 
-        // Case 3: Equal speed, equal cooperativity
+        // Case 3: Full tie (equal speed, equal cooperativity) -> LOWEST id wins, and the result
+        // is invariant to argument order (no coin flip).
         let vehicle_five = Vehicle::new(5)
             .with_speed(3)
             .with_cooperative_level(0.5)
@@ -456,27 +480,26 @@ mod tests {
         vehicles.insert(6, vehicle_six);
         let intention_five = CellIntention::new(5, IntentionType::Target);
         let intention_six = CellIntention::new(6, IntentionType::Target);
-        let correct_winner = (intention_six.clone(), ConflictType::MergeForward);
-        let actual_winner = resolve_by_speed_and_cooperativity(&intention_five, &intention_six, &vehicles);
-        assert_eq!(
-            correct_winner.0.get_vehicle_id(),
-            actual_winner.0.get_vehicle_id(),
-            "Vehicle ID for the winner is not correct"
-        );
-        assert_eq!(
-            correct_winner.1, actual_winner.1,
-            "Conflict type is not correct"
-        );
+        // Lower id (5) wins regardless of which intention is passed first.
+        let (w1, t1) = resolve_by_speed_and_cooperativity(&intention_five, &intention_six, &vehicles);
+        assert_eq!(w1.get_vehicle_id(), 5, "full tie -> lowest id (5) wins");
+        assert_eq!(t1, ConflictType::MergeForward, "Conflict type is not correct");
+        let (w2, _) = resolve_by_speed_and_cooperativity(&intention_six, &intention_five, &vehicles);
+        assert_eq!(w2.get_vehicle_id(), 5, "full-tie tie-break is order-invariant (same winner when args are swapped)");
     }
     #[test]
     fn test_resolve_merge_forward() {
         // Case 1: Aggressive vehicle should win over cooperative
         let vehicle_one = Vehicle::new(1)
             .with_behaviour(BehaviourType::Aggressive)
+            // aggressive_level > 0.8 -> cut-in aggressor
+            .with_aggressive_level(0.9)
             .with_speed(3)
             .build();
         let vehicle_two = Vehicle::new(2)
             .with_behaviour(BehaviourType::Cooperative)
+            // fully cooperative -> out-aggressed
+            .with_aggressive_level(0.0)
             .with_speed(3)
             .build();
         let mut vehicles: IndexMap<VehicleID, Vehicle> = IndexMap::new();
@@ -764,5 +787,66 @@ mod tests {
             correct_winner.1, actual_winner.1,
             "Conflict type is not correct"
         );
+    }
+
+    /// Builds a forward-moving (NoChange) or lane-changing vehicle with an explicit
+    /// aggressive_level, for the cut-in tests below.
+    fn fwd_or_changer(id: u64, aggressive_level: f64, maneuver: LaneChangeType) -> Vehicle {
+        let mut v = Vehicle::new(id)
+            .with_behaviour(BehaviourType::Undefined)
+            .with_aggressive_level(aggressive_level)
+            .with_speed(3)
+            .build();
+        v.set_intention(VehicleIntention {
+            intention_maneuver: maneuver,
+            ..Default::default()
+        });
+        v
+    }
+
+    /// A CUT-IN aggressor (aggressive_level > 0.8) changing lane WINS over a less aggressive
+    /// vehicle moving straight - overturning the normal "forward traffic has priority" rule. With
+    /// EQUAL aggression the forward vehicle keeps priority ("higher aggression wins, ties go
+    /// straight"). Verified through the public `resolve_simple_rules` entry point.
+    #[test]
+    fn test_aggressor_cuts_in_forward_lane_change() {
+        // changer (id 2, aggressive_level 0.9) cuts in front of the forward follower (id 1, 0.0).
+        let mut vehicles: IndexMap<VehicleID, Vehicle> = IndexMap::new();
+        vehicles.insert(1, fwd_or_changer(1, 0.0, LaneChangeType::NoChange));   // forward, meek
+        vehicles.insert(2, fwd_or_changer(2, 0.9, LaneChangeType::ChangeRight)); // aggressor cutting in
+        let i_fwd = CellIntention::new(1, IntentionType::Target);
+        let i_chg = CellIntention::new(2, IntentionType::Target);
+        let (winner, kind) = resolve_simple_rules(&i_fwd, &i_chg, &vehicles);
+        assert_eq!(winner.get_vehicle_id(), 2, "aggressor cutting in wins over the meek forward vehicle");
+        assert_eq!(kind, ConflictType::ForwardLaneChange);
+
+        // Equal aggression (both 0.9): the forward vehicle keeps priority (strict comparison).
+        let mut vehicles: IndexMap<VehicleID, Vehicle> = IndexMap::new();
+        vehicles.insert(1, fwd_or_changer(1, 0.9, LaneChangeType::NoChange));
+        vehicles.insert(2, fwd_or_changer(2, 0.9, LaneChangeType::ChangeRight));
+        let i_fwd = CellIntention::new(1, IntentionType::Target);
+        let i_chg = CellIntention::new(2, IntentionType::Target);
+        let (winner, _) = resolve_simple_rules(&i_fwd, &i_chg, &vehicles);
+        assert_eq!(winner.get_vehicle_id(), 1, "equal aggression -> the vehicle going straight wins");
+
+        // A merely-assertive changer (0.8, NOT strictly above the 0.8 threshold) yields to a
+        // meek forward vehicle: it is not a cut-in aggressor.
+        let mut vehicles: IndexMap<VehicleID, Vehicle> = IndexMap::new();
+        vehicles.insert(1, fwd_or_changer(1, 0.0, LaneChangeType::NoChange));
+        vehicles.insert(2, fwd_or_changer(2, 0.8, LaneChangeType::ChangeLeft));
+        let i_fwd = CellIntention::new(1, IntentionType::Target);
+        let i_chg = CellIntention::new(2, IntentionType::Target);
+        let (winner, _) = resolve_simple_rules(&i_fwd, &i_chg, &vehicles);
+        assert_eq!(winner.get_vehicle_id(), 1, "aggressive_level == 0.8 is not above the threshold -> forward keeps priority");
+
+        // Symmetric arrangement: the aggressor is the FIRST participant (changing left).
+        let mut vehicles: IndexMap<VehicleID, Vehicle> = IndexMap::new();
+        vehicles.insert(1, fwd_or_changer(1, 0.9, LaneChangeType::ChangeLeft)); // aggressor cutting in
+        vehicles.insert(2, fwd_or_changer(2, 0.0, LaneChangeType::NoChange));   // forward, meek
+        let i_chg = CellIntention::new(1, IntentionType::Target);
+        let i_fwd = CellIntention::new(2, IntentionType::Target);
+        let (winner, kind) = resolve_simple_rules(&i_chg, &i_fwd, &vehicles);
+        assert_eq!(winner.get_vehicle_id(), 1, "aggressor wins regardless of participant order");
+        assert_eq!(kind, ConflictType::ForwardLaneChange);
     }
 }

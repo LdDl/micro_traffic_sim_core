@@ -61,6 +61,9 @@ fn test_gnuplot_tail() {
             .with_speed(1)
             .with_speed_limit(1)
             .with_behaviour(BehaviourType::Aggressive)
+            // The expected positions assume deterministic motion: no random slowdown.
+            .with_slowdown(0.0)
+            .with_slow_to_start(0.0)
             .build(),
     ];
     session.add_vehicles(vehicles);
@@ -189,6 +192,9 @@ fn test_pingpong_tail() {
             .with_speed(1)
             .with_speed_limit(1)
             .with_behaviour(BehaviourType::Aggressive)
+            // The expected positions assume deterministic motion: no random slowdown.
+            .with_slowdown(0.0)
+            .with_slow_to_start(0.0)
             .build(),
     ];
     session.add_vehicles(vehicles);
@@ -329,6 +335,9 @@ fn test_extended_zigzag_tail_size_1() {
             .with_speed(1)
             .with_speed_limit(1)
             .with_behaviour(BehaviourType::Aggressive)
+            // The expected positions assume deterministic motion: no random slowdown.
+            .with_slowdown(0.0)
+            .with_slow_to_start(0.0)
             .build(),
     ];
     session.add_vehicles(vehicles);
@@ -464,6 +473,9 @@ fn test_extended_zigzag_tail_size_2() {
             .with_speed(1)
             .with_speed_limit(1)
             .with_behaviour(BehaviourType::Aggressive)
+            // The expected positions assume deterministic motion: no random slowdown.
+            .with_slowdown(0.0)
+            .with_slow_to_start(0.0)
             .build(),
     ];
     session.add_vehicles(vehicles);
