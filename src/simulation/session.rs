@@ -9,7 +9,7 @@ use crate::trips::trip::{Trip, TripID, TripType};
 use crate::simulation::grids_storage::{GridsStorage, GridsStorageError};
 use crate::geom::{Point, SRID};
 use crate::intentions::{IntentionError, prepare_intentions};
-use crate::conflicts::{ConflictError, ConflictSolverError, collect_conflicts, solve_conflicts};
+use crate::conflicts::{ConflictError, ConflictSolverError, CrossingZoneIndex, collect_conflicts_indexed, solve_conflicts};
 use crate::movement::{MovementError, movement};
 use crate::shortest_path::router::shortest_path;
 use crate::simulation::states::{AutomataState, VehicleState};
@@ -135,6 +135,7 @@ pub struct Session {
 
     /// Information about conflicts zones and corresponding cells
     conflict_zones: HashMap<ConflictZoneID, ConflictZone>,
+    crossing_zone_index: CrossingZoneIndex,
     cells_conflicts_zones: HashMap<CellID, ConflictZoneID>,
 
     /// Unique session identifier
@@ -253,6 +254,7 @@ impl Session {
             verbose,
             _coordination_cells: HashMap::new(),
             conflict_zones: HashMap::new(),
+            crossing_zone_index: CrossingZoneIndex::default(),
             cells_conflicts_zones: HashMap::new(),
             current_position: HashMap::new(),
             speed_snapshot: HashMap::new(),
@@ -287,6 +289,7 @@ impl Session {
             verbose,
             _coordination_cells: HashMap::new(),
             conflict_zones: HashMap::new(),
+            crossing_zone_index: CrossingZoneIndex::default(),
             cells_conflicts_zones: HashMap::new(),
             current_position: HashMap::new(),
             speed_snapshot: HashMap::new(),
@@ -504,6 +507,7 @@ impl Session {
     /// Adds conflict zone to the session storage and maps cells to the conflict zone
     pub fn add_conflict_zone(&mut self, conflict_zone: ConflictZone) {
         let conflict_zone_id = conflict_zone.get_id();
+        self.crossing_zone_index.replace(&conflict_zone);
         // Map cells to conflict zone
         let first_edge = conflict_zone.get_first_edge();
         let second_edge = conflict_zone.get_second_edge();
@@ -1101,13 +1105,14 @@ impl Session {
         let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &self.speed_snapshot, &mut self.vehicles, &self.verbose, self.steps, self.routing.reroute_period, self.routing.reconnect_max_depth)?;
 
         // 5. Collect conflicts
-        let conflicts_data = collect_conflicts(
+        let conflicts_data = collect_conflicts_indexed(
             &collected_intentions,
             self.grids_storage.get_vehicles_net_ref(),
             &self.conflict_zones,
             &self.cells_conflicts_zones,
             &self.verbose,
             &mut self.vehicles,
+            &self.crossing_zone_index,
         )?;
 
         // 6. Solve conflicts

@@ -68,14 +68,17 @@
 //! let result = session.step();
 //! ```
 mod conflicts;
+mod conflict_zone_index;
 mod conflict_rule;
 mod conflicts_solver;
 
 #[cfg(test)]
 mod conflicts_test;
 #[cfg(test)]
+mod conflicts_indexed_test;
+#[cfg(test)]
 mod conflicts_zones_test;
 #[cfg(test)]
 mod conflicts_desperate_test;
 
-pub use self::{conflicts::*, conflict_rule::*, conflicts_solver::*};
+pub use self::{conflicts::*, conflict_rule::*, conflicts_solver::*, conflict_zone_index::CrossingZoneIndex};

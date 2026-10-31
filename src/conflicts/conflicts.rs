@@ -1,6 +1,6 @@
 use crate::agents::{VehicleID, Vehicle};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
-use crate::conflicts::{resolve_simple_rules, aggressor_advantage};
+use crate::conflicts::{resolve_simple_rules, aggressor_advantage, CrossingZoneIndex};
 use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
 use crate::maneuver::LaneChangeType;
@@ -727,11 +727,10 @@ fn collect_cross_zone_constraints(
     intentions: &Intentions,
     zones: &HashMap<ConflictZoneID, ConflictZone>,
     vehicles: &IndexMap<VehicleID, Vehicle>,
+    zone_ids: impl IntoIterator<Item = ConflictZoneID>,
 ) -> Result<(Vec<CellConflict>, HashSet<ConflictZoneID>), ConflictError> {
     let mut conflicts = Vec::new();
     let mut explored = HashSet::new();
-    let mut zone_ids: Vec<_> = zones.keys().copied().collect();
-    zone_ids.sort_unstable();
     for zone_id in zone_ids {
         let zone = &zones[&zone_id];
         let first = zone.get_first_edge();
@@ -807,6 +806,51 @@ pub fn collect_conflicts(
     verbose: &LocalLogger,
     vehicles: &mut indexmap::IndexMap<VehicleID, Vehicle>,
 ) -> Result<Vec<CellConflict>, ConflictError> {
+    let mut zone_ids: Vec<_> = conflict_zones.keys().copied().collect();
+    zone_ids.sort_unstable();
+    collect_conflicts_for_zones(
+        collected_intentions, net, conflict_zones, cells_conflicts_zones,
+        verbose, vehicles, zone_ids,
+    )
+}
+
+/// Collects conflicts using a maintained crossing-zone incidence index.
+///
+/// # Arguments
+/// * `collected_intentions` - Initial path grants for this tick.
+/// * `net` - Road grid used by ordinary cell and trajectory conflicts.
+/// * `conflict_zones` - Current zone definitions.
+/// * `cells_conflicts_zones` - Existing single-zone lookup used by merge handling.
+/// * `verbose` - Session logger.
+/// * `vehicles` - Vehicles whose conflict-participant flags are updated.
+/// * `index` - Incidence updated for every zone added or replaced in conflict_zones.
+///
+/// Candidate IDs are sorted before any priority draw, preserving the full-scan
+/// order. Zones without an intended target cannot supply participants or errors.
+pub fn collect_conflicts_indexed(
+    collected_intentions: &Intentions,
+    net: &GridRoads,
+    conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
+    cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
+    verbose: &LocalLogger,
+    vehicles: &mut indexmap::IndexMap<VehicleID, Vehicle>,
+    index: &CrossingZoneIndex,
+) -> Result<Vec<CellConflict>, ConflictError> {
+    collect_conflicts_for_zones(
+        collected_intentions, net, conflict_zones, cells_conflicts_zones,
+        verbose, vehicles, index.candidates(collected_intentions),
+    )
+}
+
+fn collect_conflicts_for_zones(
+    collected_intentions: &Intentions,
+    net: &GridRoads,
+    conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
+    cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
+    verbose: &LocalLogger,
+    vehicles: &mut indexmap::IndexMap<VehicleID, Vehicle>,
+    zone_ids: impl IntoIterator<Item = ConflictZoneID>,
+) -> Result<Vec<CellConflict>, ConflictError> {
     if verbose.is_at_least(crate::verbose::VerboseLevel::Main) {
         verbose.log_with_fields(
             crate::verbose::EVENT_CONFLICTS_COLLECT,
@@ -820,7 +864,7 @@ pub fn collect_conflicts(
     }
 
     let (zone_constraints, mut explored_conflict_zones) =
-        collect_cross_zone_constraints(collected_intentions, conflict_zones, vehicles)?;
+        collect_cross_zone_constraints(collected_intentions, conflict_zones, vehicles, zone_ids)?;
     let mut conflicts_data = Vec::with_capacity(collected_intentions.len() / 2);
 
     for (intention_cell_id, cell_intentions) in collected_intentions.iter() {
