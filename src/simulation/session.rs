@@ -1,3 +1,4 @@
+use crate::simulation::clearance::LongitudinalClearance;
 use crate::maneuver::LaneChangeType;
 use crate::behaviour::BehaviourParameters;
 use crate::agents_types::AgentType;
@@ -14,7 +15,7 @@ use crate::shortest_path::router::shortest_path;
 use crate::simulation::states::{AutomataState, VehicleState};
 use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
 use crate::verbose::*;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{HashMap, HashSet, BTreeMap};
 use uuid::Uuid;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -108,14 +109,15 @@ impl From<MovementError> for SessionError {
 
 /// Session - representation of session for Cellular Automata with Traffic lights control management
 pub struct Session {
+    /// Local longitudinal reserve policy for all vehicles in this session.
+    longitudinal_clearance: LongitudinalClearance,
+
     /// Current position mapping from cell ID to vehicle ID
     current_position: HashMap<CellID, VehicleID>,
 
-    /// Start-of-step speed snapshot: cell ID -> speed of the vehicle occupying it (head AND tail cells),
-    /// rebuilt alongside `current_position` each step.
-    /// Read by the lane-change REAR safety gap (`rear_safe`): a merge is allowed only when the target-lane
-    /// follower has room to brake (`d >= rear_speed + min_safe`).
-    /// Synchronous start-of-step values, deterministic I believe.
+    /// Initial speed at each occupied head or tail cell, rebuilt with current_position.
+    /// The lane-change rear check uses D >= rear_speed + the merging vehicle's
+    /// min_safe_distance. D counts steps from the rear body to the proposed merge cell.
     speed_snapshot: HashMap<CellID, i32>,
 
     /// Cellular automata grid storage
@@ -264,6 +266,7 @@ impl Session {
             vehicles_completed: 0,
             vehicles_lost: 0,
             routing: RoutingOptions::default(),
+            longitudinal_clearance: LongitudinalClearance::default(),
             cell_speed: HashMap::new(),
             spawn_rng: StdRng::seed_from_u64(SPAWN_SEED),
         }
@@ -297,9 +300,29 @@ impl Session {
             vehicles_completed: 0,
             vehicles_lost: 0,
             routing: RoutingOptions::default(),
+            longitudinal_clearance: LongitudinalClearance::default(),
             cell_speed: HashMap::new(),
             spawn_rng: StdRng::seed_from_u64(SPAWN_SEED),
         }
+    }
+
+    /// Selects the longitudinal reserve projection for this session.
+    ///
+    /// Conservative keeps standstill_gap behind the leader's initial body.
+    /// MovingLeader can reduce that extra clipping using a guaranteed motion bound
+    /// of an already moving one-cell leader. Both only shorten an initially clear
+    /// granted path: neither enters another vehicle's initially occupied cell.
+    /// This selects a spacing rule, not a new distance or synchronization range.
+    ///
+    /// # Arguments
+    /// * `policy` - Dimensionless model choice; gaps and displacements use cells.
+    pub fn set_longitudinal_clearance(&mut self, policy: LongitudinalClearance) {
+        self.longitudinal_clearance = policy;
+    }
+
+    /// Returns the active longitudinal reserve policy.
+    pub fn get_longitudinal_clearance(&self) -> LongitudinalClearance {
+        self.longitudinal_clearance
     }
 
     /// Gets the unique session identifier
@@ -575,7 +598,43 @@ impl Session {
             .build()
     }
 
+    // Only reserve the verified forward continuation of a cached route.
+    // The cursor may still precede the last movement; inspect that bounded prefix.
+    fn generation_reserve_cells(&self, vehicle: &Vehicle) -> Vec<CellID> {
+        let net = self.grids_storage.get_vehicles_net_ref();
+        let mut route_index = if vehicle.confusion {
+            None
+        } else {
+            vehicle.cached_route.iter().enumerate().skip(vehicle.route_idx)
+                .take(vehicle.speed.max(0) as usize + 1)
+                .find_map(|(index, id)| (*id == vehicle.cell_id).then_some(index))
+        };
+        let mut cell = vehicle.cell_id;
+        let mut seen = HashSet::from([cell]);
+        let mut reserved = Vec::new();
+        for _ in 0..vehicle.standstill_gap.max(0) {
+            if vehicle.destination >= 0 && cell == vehicle.destination {
+                break;
+            }
+            let Some(current) = net.get_cell(&cell) else { break; };
+            let next = current.get_forward_id();
+            if next < 0 || net.get_cell(&next).is_none() || !seen.insert(next) {
+                break;
+            }
+            if let Some(index) = route_index {
+                if vehicle.cached_route.get(index + 1) != Some(&next) {
+                    break;
+                }
+                route_index = Some(index + 1);
+            }
+            reserved.push(next);
+            cell = next;
+        }
+        reserved
+    }
+
     /// Generates vehicles based on the trips data
+    /// Admission uses current bodies and preserves configured forward reserves.
     pub fn generate_vehicles(&mut self) {
         if self.verbose.is_at_least(VerboseLevel::Main) {
             self.verbose.log_with_fields(
@@ -588,6 +647,24 @@ impl Session {
                 ]
             );
         }
+        if self.trips_data.is_empty() {
+            return;
+        }
+        // The intention snapshot can precede movement or a direct add_vehicles call.
+        // Build current occupancy once and update it after each accepted source.
+        let mut occupied: HashSet<CellID> = self.vehicles.values().flat_map(|vehicle|
+            std::iter::once(vehicle.cell_id).chain(vehicle.tail_cells.iter().copied().filter(|id| *id >= 0))
+        ).collect();
+        let mut protected = HashSet::new();
+        for vehicle in self.vehicles.values() {
+            for cell in self.generation_reserve_cells(vehicle) {
+                if occupied.contains(&cell) {
+                    break;
+                }
+                protected.insert(cell);
+            }
+        }
+
         // Group trips by their source cell, in deterministic (sorted) order. A source cell
         // holds at most one vehicle, so at most ONE trip may spawn there per tick. Each trip
         // rolls its own probability; among the trips that want to spawn we pick ONE weighted
@@ -607,10 +684,8 @@ impl Session {
             .collect();
 
         for (from_node, trip_ids) in by_source {
-            // Source occupied (by any vehicle's head or tail from a previous tick)? skip.
-            // current_position is the start-of-tick occupancy (rebuilt after this phase last
-            // tick), so this is an O(1) check that also replaces the old O(trips*vehicles) scan.
-            if self.current_position.contains_key(&from_node) {
+            // Existing bodies and forward reserves are unavailable to another source.
+            if occupied.contains(&from_node) || protected.contains(&from_node) {
                 continue;
             }
 
@@ -690,6 +765,13 @@ impl Session {
                     }
                 }
             }
+
+            let reserve = self.generation_reserve_cells(&generated_vehicle);
+            if reserve.iter().any(|cell| occupied.contains(cell)) {
+                continue;
+            }
+            occupied.insert(from_node);
+            protected.extend(reserve);
 
             if self.verbose.is_at_least(VerboseLevel::Additional) {
                 self.verbose.log_with_fields(
@@ -799,17 +881,20 @@ impl Session {
         }
     }
 
-    /// Reserves the configured clearance behind each physical leader before movement.
-    /// The reserve also applies while moving, so a later stop cannot require a
-    /// chain-wide correction. With initial gap d and reserve g, forward motion is
-    /// bounded by max(d - g, 0); nonnegative leader motion preserves d >= g.
-    /// Initially smaller gaps cannot shrink further under this longitudinal rule.
-    /// Conflict resolution has already granted paths. Shortening releases cells but
-    /// does not grant them to another vehicle during this tick.
-    fn apply_standstill_gaps(&mut self) {
+    /// Applies the configured local longitudinal reserve projection.
+    /// Conservative motion is bounded by max(d - g, 0) for initial gap d and
+    /// reserve g. MovingLeader additionally credits a frozen conservative lower
+    /// displacement of an initially moving one-cell leader on a verified forward
+    /// path. A stopped leader supplies zero, including a same-tick restart.
+    /// Reserve lookahead ends at a planned exit only when the cached route matches
+    /// the complete granted path. A queue on the abandoned continuation is excluded.
+    /// Both modes preserve a valid reserve or an initial smaller gap along the
+    /// continued forward route. They only shorten paths granted by conflict
+    /// resolution and never depend on another final trimmed intention.
+    fn apply_longitudinal_clearance(&mut self) {
         let net = self.grids_storage.get_vehicles_net_ref();
-        // Read physical bodies from one immutable start-of-tick snapshot.
         let mut body: HashMap<CellID, VehicleID> = HashMap::with_capacity(self.vehicles.len());
+        let mut conservative_motion_bounds: HashMap<VehicleID, usize> = HashMap::new();
         for v in self.vehicles.values() {
             body.insert(v.cell_id, v.id);
             for &t in &v.tail_cells {
@@ -817,34 +902,92 @@ impl Session {
                     body.insert(t, v.id);
                 }
             }
+            if self.longitudinal_clearance != LongitudinalClearance::MovingLeader {
+                continue;
+            }
+            // Only a verified forward one-cell path supplies a release guarantee.
+            if !v.tail_cells.is_empty() || v.intention.intention_maneuver != LaneChangeType::NoChange {
+                continue;
+            }
+            if v.intention.intention_cell_id == v.cell_id {
+                conservative_motion_bounds.insert(v.id, 0);
+                continue;
+            }
+            let mut previous = v.cell_id;
+            let mut forward = true;
+            for cell in v.intention.intermediate_cells.iter().copied()
+                .chain(std::iter::once(v.intention.intention_cell_id))
+            {
+                if net.get_cell(&previous).map(|c| c.get_forward_id()) != Some(cell) {
+                    forward = false;
+                    break;
+                }
+                previous = cell;
+            }
+            if forward {
+                conservative_motion_bounds.insert(v.id, v.intention.intermediate_cells.len() + 1);
+            }
         }
-        let mut trims: Vec<(VehicleID, usize)> = Vec::new();
+        let mut limits: Vec<(VehicleID, usize, usize, VehicleID)> = Vec::new();
         for v in self.vehicles.values() {
-            let g0 = v.standstill_gap;
-            if g0 <= 0
+            let reserve = v.standstill_gap;
+            if reserve <= 0
                 || v.intention.intention_maneuver != LaneChangeType::NoChange
                 || v.intention.intention_cell_id == v.cell_id
             {
                 continue;
             }
-            let path_len = v.intention.intermediate_cells.len() + 1;
-            let mut id = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
-            for k in 0..g0 {
-                if id < 0 {
+            let granted = v.intention.intermediate_cells.len() + 1;
+            let mut route_cursor = if v.destination >= 0 && !v.confusion
+                && v.cached_route.iter().skip(v.route_idx).take(granted + 1).copied()
+                    .eq(std::iter::once(v.cell_id)
+                        .chain(v.intention.intermediate_cells.iter().copied())
+                        .chain(std::iter::once(v.intention.intention_cell_id)))
+            {
+                Some(v.route_idx + granted)
+            } else {
+                None
+            };
+            let mut cell = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+            for offset in 0..reserve {
+                if cell < 0 {
                     break;
                 }
-                if let Some(&owner) = body.get(&id) {
+                // Longitudinal spacing must not reserve a queue beyond a planned exit.
+                // Only a cache matching the complete granted path can shorten this lookahead.
+                if let Some(cursor) = route_cursor {
+                    if v.cached_route.get(cursor + 1).copied() != Some(cell) {
+                        break;
+                    }
+                    route_cursor = Some(cursor + 1);
+                }
+                if let Some(&owner) = body.get(&cell) {
                     if owner != v.id {
-                        trims.push((v.id, path_len.saturating_sub((g0 - k) as usize)));
+                        let reserve_shortfall = (reserve - offset) as usize;
+                        limits.push((v.id, granted, reserve_shortfall, owner));
+                        if let Some(lower) = conservative_motion_bounds.get_mut(&v.id) {
+                            *lower = granted.saturating_sub(reserve_shortfall);
+                        }
                     }
                     break;
                 }
-                id = net.get_cell(&id).map(|c| c.get_forward_id()).unwrap_or(-1);
+                cell = net.get_cell(&cell).map(|c| c.get_forward_id()).unwrap_or(-1);
             }
         }
-        for (id, new_len) in trims {
+        // Frozen lower bounds prevent dependence on another final trimmed intention.
+        for (id, granted, reserve_shortfall, owner) in limits {
+            // An initially stopped leader supplies no bound, even if its granted move starts now.
+            let leader_was_moving = self.vehicles.get(&owner).map(|v| v.speed > 0).unwrap_or(false);
+            let leader_motion_bound = if self.longitudinal_clearance == LongitudinalClearance::MovingLeader
+                && leader_was_moving
+            {
+                conservative_motion_bounds.get(&owner).copied().unwrap_or(0)
+            } else {
+                0
+            };
+            let permitted = granted.min(granted.saturating_add(leader_motion_bound).saturating_sub(reserve_shortfall));
             if let Some(v) = self.vehicles.get_mut(&id) {
-                v.trim_forward_intention(new_len);
+                v.trim_forward_intention(permitted);
             }
         }
     }
@@ -971,7 +1114,7 @@ impl Session {
         solve_conflicts(conflicts_data, &mut self.vehicles, &self.verbose)?;
 
         // 6b. Reserve longitudinal clearance from initial body positions in one pass.
-        self.apply_standstill_gaps();
+        self.apply_longitudinal_clearance();
 
         // 7. Move vehicles
         let vehicles_grid = self.grids_storage.get_vehicles_net_ref();

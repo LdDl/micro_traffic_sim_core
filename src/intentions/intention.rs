@@ -21,7 +21,7 @@ use std::fmt;
 
 /// Lane-change SAFETY (model physics): enforce a front gap (>= v_n) and a rear gap before a change,
 /// so a merger never cuts in front of a car that would have to brake hard (real-world collision
-/// risk). Always on (model physics), with a speed-aware rear gap (see `rear_safe`).
+/// risk). Always on (model physics), with a speed-aware rear gap (see `lane_change_rear_safe`).
 const LC_SAFETY_ENABLED: bool = true;
 
 /// INCENTIVE depth (cells): a DISCRETIONARY change is taken only if the target lane is genuinely
@@ -507,9 +507,6 @@ pub fn find_intention<'a>(
     // which would defeat slow to start on routed networks and turn dawdles into weaving.
     let dawdled_to_zero = !synchronization_blocked && speed_possible == 0 && (acceleration_allowed || intention_speed > 0);
 
-    // Considering that vehicle always wants to accelerate:
-    let _observe_distance = speed_possible + vehicle.min_safe_distance;
-
     // Check if maneuvers are allowed (they could be prohibeted due the vehicle's tail is not done previous maneuver yet)
     let maneuvers_allowed = vehicle.timer_non_maneuvers <= 0
         && tail_maneuver.intention_maneuver != LaneChangeType::ChangeRight
@@ -517,18 +514,6 @@ pub fn find_intention<'a>(
 
     let destination: Option<CellID> = None;
     let mut confusion: Option<bool> = None;
-
-    // println!(
-    //     "Vehicle {} at cell {} with speed {} (possible {}) towards {} with observe distance {} and slow factor {}: {}",
-    //     vehicle.id,
-    //     source_cell.get_id(),
-    //     intention_speed,
-    //     speed_possible,
-    //     vehicle.destination,
-    //     observe_distance,
-    //     slow_down_factor_p,
-    //     if _is_slowdown { " (slowdown)" } else { "" }
-    // );
 
     // Try to follow the cached route (O(speed) read) instead of a per-tick full A*.
     // None when the vehicle has no cache or fell off it (then we fall back to A*).
@@ -586,7 +571,6 @@ pub fn find_intention<'a>(
                 net,
                 maneuvers_allowed,
                 None,
-                // Some(observe_distance + 1),  // depth-limited
             ) {
                 Ok(path) => path,
                 Err(e)
@@ -661,7 +645,7 @@ pub fn find_intention<'a>(
     // bumper blocked vehicle (should_stop), so lane change alternatives are tried as before.
     // A longer move keeps the full claim up to the leader here, so neighbours still see a
     // contested cell; the executed move is shortened after conflict resolution
-    // (Session::apply_standstill_gaps).
+    // (Session::apply_longitudinal_clearance).
     if vehicle.standstill_gap > 0 && observable_path.has_vehicle_on_path {
         let blocking = observable_path.blocking_cell_id;
         let leader_stopped = current_state.get(&blocking).map(|&v| v != vehicle.id).unwrap_or(false)
@@ -792,18 +776,17 @@ fn clear_forward(start: CellID, net: &GridRoads, occ: &HashMap<CellID, VehicleID
 
 /// Speed-aware REAR safety gap for a lane change. Walks back from `start` (the target lane's
 /// predecessor of the merge cell) up to `max_look` cells via the forward-predecessor index.
-/// If a vehicle is found at distance `d` (1-indexed), the change is safe
-/// only if `d >= rear_speed + min_safe` - the rear car has room to decelerate and follow without an emergency stop.
-/// No vehicle within `max_look` => safe. Reads start-of-step occupancy + speed snapshots
-/// it is synchronous and deterministic.
-/// This replaces the old fixed `Vmax + A` look-back, which blocked nearly
-/// every dense-traffic merge because it ignored that the rear car is usually slow.
-fn rear_safe(
+/// If a rear body is found, D counts steps from that body cell to the target merge
+/// cell, not empty cells: an adjacent rear body has D = 1. The rear check passes
+/// when D >= rear_speed + rear_margin, using the merging vehicle's margin.
+/// No body within max_look passes this rear check. Reads initial occupancy and
+/// speed snapshots; forward clearance and conflict resolution remain separate.
+fn lane_change_rear_safe(
     start: CellID,
     net: &GridRoads,
     occ: &HashMap<CellID, VehicleID>,
     speed_snapshot: &HashMap<CellID, i32>,
-    min_safe: i32,
+    rear_margin: i32,
     max_look: i32,
 ) -> bool {
     let mut id = start;
@@ -814,7 +797,7 @@ fn rear_safe(
         }
         if occ.get(&id).map(|&v| v > 0).unwrap_or(false) {
             let rear_speed = *speed_snapshot.get(&id).unwrap_or(&0);
-            return d >= rear_speed + min_safe;
+            return d >= rear_speed + rear_margin;
         }
         id = net.get_back_id(id);
     }
@@ -832,7 +815,7 @@ fn check_alternate_direction(
     speed_snapshot: &HashMap<CellID, i32>,
     direction: &str,
     v_n: i32,
-    min_safe: i32,
+    rear_margin: i32,
     aggressor_cut_in: bool,
     global_vmax: i32,
     max_depth: Option<i32>,
@@ -875,9 +858,9 @@ fn check_alternate_direction(
     // physically free, so this never causes a same-cell collision, only an unsafe cut-in.
     if LC_SAFETY_ENABLED {
         let front_ok = clear_forward(cell.get_forward_id(), net, current_state, v_n);
-        let max_look = (global_vmax + min_safe).max(1);
+        let max_look = (global_vmax + rear_margin).max(1);
         let rear_ok = aggressor_cut_in
-            || rear_safe(net.get_back_id(cell_id), net, current_state, speed_snapshot, min_safe, max_look);
+            || lane_change_rear_safe(net.get_back_id(cell_id), net, current_state, speed_snapshot, rear_margin, max_look);
         if !front_ok || !rear_ok {
             return Ok((-1, INFINITY));
         }
@@ -945,7 +928,7 @@ pub fn find_alternate_intention<'a>(
         .get_cell(&target_cell_id)
         .ok_or(IntentionError::NoTargetCell(target_cell_id))?;
 
-    // Global system Vmax for the rear safety gap `D >= Vmax + A` (worst-case follower speed).
+    // The global speed bound limits the rear search; the check uses the actual rear speed.
     let global_vmax = net.get_max_speed() as i32;
 
     // Check left and right alternate paths (no depth limit to see full route).
@@ -1154,6 +1137,25 @@ mod tests {
     use crate::geom::new_point;
     use crate::grid::cell::Cell;
     use crate::utils::test_grids::create_pretty_simple_grid;
+    #[test]
+    fn lane_change_rear_margin_counts_distance_to_merge_cell() {
+        let mut net = GridRoads::new();
+        for id in 1..=12 {
+            net.add_cell(Cell::new(id)
+                .with_forward_node(if id < 12 { id + 1 } else { -1 })
+                .with_left_node(-1).with_right_node(-1).with_speed_limit(5).build());
+        }
+        // A merge into cell 10 has one empty cell before the rear body in cell 8.
+        // The check uses D = 2, not the count of one empty cell.
+        let occupancy = HashMap::from([(8, 1)]);
+        let moving_rear = HashMap::from([(8, 1)]);
+        assert!(lane_change_rear_safe(9, &net, &occupancy, &moving_rear, 1, 6));
+        assert!(!lane_change_rear_safe(9, &net, &occupancy, &moving_rear, 2, 7));
+        let stopped_rear = HashMap::from([(8, 0)]);
+        assert!(lane_change_rear_safe(9, &net, &occupancy, &stopped_rear, 2, 7));
+        assert!(!lane_change_rear_safe(9, &net, &occupancy, &stopped_rear, 3, 8));
+    }
+
     #[test]
     fn test_intention() {
         let net = create_pretty_simple_grid();

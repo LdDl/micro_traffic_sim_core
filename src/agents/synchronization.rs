@@ -39,6 +39,8 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SynchronizationParameters {
     /// Synchronization distance coefficient in ticks; speed is in cells per tick.
+    /// A moving vehicle adapts to a leader within floor(time_gap * min(speed, limit))
+    /// empty cells. This interaction range is not a required safety gap or reserve.
     pub time_gap: f64,
     /// Negative-correction probability below the positive effective speed limit.
     pub noise: f64,

@@ -89,11 +89,11 @@ pub struct BehaviourParameters {
     speed_limit: i32,
     /// Aggressiveness level of the agent.
     aggressive_level: f64,
-    /// Minimum safe distance required by the agent.
+    /// Additional rear safety margin for lane changes, in cells.
     min_safe_distance: i32,
     /// Reactive-lane-change cooldown duration in steps (anti-weaving).
     lc_cooldown: i64,
-    /// Standstill gap in cells: empty cells kept in front of a stopped leader.
+    /// Longitudinal reserve in cells, applied during forward motion and at rest.
     standstill_gap: i32,
     /// Randomization relative to the leader and the stop time threshold (three phase layer).
     relative_randomization: RelativeRandomization,
@@ -119,7 +119,7 @@ impl BehaviourParameters {
     /// Constructs `BehaviourParameters` for a behaviour type.
     ///
     /// Each type maps to a tuple
-    /// `(p, p0, speed_limit, aggressive_level, min_safe_distance, lc_cooldown)` where:
+    /// `(p, p0, speed_limit, aggressive_level, min_safe_distance, lc_cooldown, standstill_gap)` where:
     /// - `p`  - NaSch moving-dawdle probability, the style part of the randomization: 0.1 for
     ///   the aggressive preset up to 0.4 for the speed limiting one, always at most `p0` so that
     ///   the VDR asymmetry holds for every preset;
@@ -133,9 +133,10 @@ impl BehaviourParameters {
     ///   which with a 7.5 m jam spacing gives a front velocity of 15.5 km/h; a long vehicle
     ///   derives its own value from it (`Vehicle::slow_to_start_for_length`). Driver style lives
     ///   in `p`, the aggression gradient, the cooldown and the standstill gap;
-    /// - `speed_limit`, `aggressive_level`, `min_safe_distance` - per-type movement defaults;
+    /// - `speed_limit`, `aggressive_level` - per-type movement defaults;
+    /// - `min_safe_distance` - additional rear safety margin for lane changes, in cells;
     /// - `lc_cooldown` - reactive-lane-change cooldown in steps (anti-weaving; 0 = changes freely);
-    /// - `standstill_gap` - empty cells kept in front of a stopped leader (see
+    /// - `standstill_gap` - longitudinal reserve during forward motion and at rest (see
     ///   `Vehicle::standstill_gap`). Careful and undefined types keep one cell, aggressive ones
     ///   stop bumper to bumper, so a mixed flow with about two thirds of careful drivers gets the
     ///   7.5 m jam spacing of the line J calibration (133 veh/km).
@@ -193,7 +194,7 @@ impl BehaviourParameters {
     /// - `slowdown_factor_p`: the NaSch random-slowdown probability `p` (while moving).
     /// - `speed_limit`: Speed limit for the agent.
     /// - `aggressive_level`: Aggressiveness level of the agent.
-    /// - `min_safe_distance`: Minimum safe distance required by the agent.
+    /// - `min_safe_distance`: Additional rear safety margin for lane changes, in cells.
     /// - `lc_cooldown`: reactive-lane-change cooldown in steps (anti-weaving; `0` = changes freely).
     ///
     /// # Returns
@@ -227,11 +228,11 @@ impl BehaviourParameters {
         }
     }
 
-    /// Returns a copy with the given standstill gap.
+    /// Returns a copy with the given longitudinal reserve, during motion and at rest.
     ///
     /// # Arguments
     ///
-    /// - `standstill_gap`: empty cells kept in front of a stopped leader, `0` keeps bumper to bumper.
+    /// - `standstill_gap`: reserved empty cells ahead; `0` adds no longitudinal reserve.
     ///
     /// # Examples
     ///
@@ -246,7 +247,7 @@ impl BehaviourParameters {
         self
     }
 
-    /// Returns the standstill gap in cells.
+    /// Returns the longitudinal reserve in cells, during forward motion and at rest.
     pub fn standstill_gap(&self) -> i32 {
         self.standstill_gap
     }
@@ -297,7 +298,7 @@ impl BehaviourParameters {
         self.slow_to_start_factor_p0
     }
 
-    /// Returns the minimum safe distance.
+    /// Returns the additional rear safety margin used for lane changes, in cells.
     pub fn min_safe_distance(&self) -> i32 {
         self.min_safe_distance
     }

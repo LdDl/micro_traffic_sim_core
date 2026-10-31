@@ -444,7 +444,8 @@ pub fn solve_conflicts<'b>(
         }
         for (i, participant_id) in conflict.participants.iter().enumerate() {
             if i != priority_index {
-                if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(1); }
+                // Yielding holds the current cell, so speed and standing time must record a stop.
+                if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(0); }
             }
         }
     }
@@ -682,8 +683,11 @@ mod tests {
         let result = solve_conflicts(conflicts, &mut vehicles, &LocalLogger::none());
         assert!(result.is_ok(), "solve_conflicts should handle conflict zone conflicts");
         
-        // In conflict zones, blocked vehicles get speed 1 (not 0)
-        assert_eq!(vehicles.get(&2).unwrap().intention.intention_speed, 1, "Blocked vehicle in conflict zone should have speed 1");
+        // A yielding vehicle remains in its current cell with zero displacement.
+        let blocked = vehicles.get(&2).unwrap();
+        assert_eq!(blocked.intention.intention_cell_id, blocked.cell_id);
+        assert_eq!(blocked.intention.intention_speed, 0);
+        assert!(blocked.intention.intermediate_cells.is_empty());
     }
 
     #[test]

@@ -156,9 +156,9 @@ pub struct Trip {
     /// Overrides the behaviour's synchronization configuration when present.
     /// Some(DISABLED) explicitly disables it; None inherits the behaviour setting.
     pub synchronization: Option<SynchronizationParameters>,
-    /// Optional share of generated vehicles assigned one empty standstill cell; others get zero.
+    /// Optional share of generated vehicles assigned one longitudinal reserve cell; others get zero.
     /// Uses a deterministic vehicle-ID assignment without consuming random draws. When present,
-    /// this population setting overrides the fixed standstill gap and behaviour preset.
+    /// this population setting overrides the fixed longitudinal reserve and behaviour preset.
     pub standstill_gap_share: Option<f64>,
 }
 

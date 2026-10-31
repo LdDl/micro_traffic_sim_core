@@ -268,6 +268,35 @@ fn main() {
 }
 ```
 
+### Spacing and interaction distances
+
+The following parameters serve different decisions. Distances use cells, speeds use cells per tick, and all movement decisions read the initial occupancy of the tick. Public field and builder names remain compatible with existing callers.
+
+| Setting | Meaning | Where it applies |
+|---|---|---|
+| `Vehicle::min_safe_distance` | Additional rear margin chosen by the merging vehicle | Lane-change safety in the target lane |
+| `Vehicle::standstill_gap` | Reserved empty cells ahead during forward motion and at rest | Longitudinal path clipping and source admission |
+| `SynchronizationParameters::time_gap` | Speed-dependent interaction-range coefficient | Adaptation toward a leader's speed when synchronization is enabled |
+| `LongitudinalClearance` | How the longitudinal reserve is enforced | Session policy, not a distance value |
+
+For lane changes, let `D` count steps from the target-lane rear body cell to the proposed merge cell. The rear check is `D >= rear_speed + min_safe_distance`; the margin belongs to the merging vehicle. `D` is not the number of empty cells: a rear vehicle in cell 8 and merge cell 10 give `D = 2`, with cell 9 empty. At rear speed 1, margin 1 passes and margin 2 fails. Cut-in aggressors bypass this rear check; forward safety and conflict handling are separate. `min_safe_distance` does not enforce a forward reserve.
+
+For straight following, let `d` be the initially empty cells before the leader, `g = standstill_gap`, and `u` the granted path length. Initial occupancy already limits `u <= d`. `Conservative`, the default, limits the move to `min(u, max(d - g, 0))`. `MovingLeader` limits it to `min(u, max(d + b - g, 0))`, where `b` is a frozen conservative displacement bound of an already moving one-cell leader on a verified forward path. A stopped or unsupported leader supplies `b = 0`. Neither policy extends `u` or enters another vehicle's initially occupied cell. An initially deficient reserve is not compressed further along the supported forward path.
+
+For example, put a follower in cell 10 and an already moving leader in cell 12, with a one-cell reserve and maximum one-cell movement. If the leader is guaranteed to reach cell 13, Conservative keeps the follower in 10 and MovingLeader permits cell 11, which was already empty. Neither permits cell 12. If the leader starts from rest in this tick, MovingLeader also keeps the follower in 10. If the leader instead begins in cell 11, both policies keep the follower in 10 even when the leader moves away.
+
+Synchronization uses `floor(time_gap * min(current_speed, effective_limit))` empty cells as its adaptation range. This does not require that many cells to remain empty. Safe path clipping and the longitudinal reserve still apply. Synchronization is disabled by default; selecting MovingLeader does not enable it.
+
+| Behaviour | Lane-change rear margin | Longitudinal reserve |
+|---|---|---|
+| Block | 0 | 0 |
+| Aggressive | 0 | 0 |
+| Cooperative | 1 | 1 |
+| LimitSpeedByTrip | 1 | 1 |
+| Undefined | 0 | 1 |
+
+Use `with_min_safe_distance` and `with_standstill_gap` on a vehicle for these separate settings. Trips can override the longitudinal reserve with `with_standstill_gap`, or assign an approximate gap-one population share with `with_standstill_gap_share`; the share takes precedence over the fixed reserve. The current Trip API derives the lane-change rear margin from the selected behaviour. Choose the session policy with `set_longitudinal_clearance`.
+
 ### Creating vehicles statically
 
 Create individual vehicles with specific starting positions and routes.

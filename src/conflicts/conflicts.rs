@@ -389,6 +389,18 @@ pub fn find_zone_conflict_for_two_intentions(
 }
 
 
+/// Checks the ordered path, including approach cells before the conflict edge.
+fn intention_traverses_edge(vehicle: &Vehicle, source: CellID, target: CellID) -> bool {
+    let mut previous = vehicle.cell_id;
+    vehicle.intention.intermediate_cells.iter().copied()
+        .chain(std::iter::once(vehicle.intention.intention_cell_id))
+        .any(|cell| {
+            let traverses = previous == source && cell == target;
+            previous = cell;
+            traverses
+        })
+}
+
 /// Finds trajectory conflicts within predefined conflict zones.
 ///
 /// Looks for special intersection scenarios defined by conflict zones, and returns a CellConflict and zone ID if found.
@@ -448,19 +460,32 @@ pub fn find_conflicts_in_conflict_zones(
         return Ok(None); // No valid conflict zone configuration
     };
 
+    let first_vehicle = vehicles.get(&vehicle_id).ok_or(
+        ConflictError::InvalidVehicle(format!("Vehicle {} not found", vehicle_id))
+    )?;
+    let first_source = if first_edge.target == cell_b { first_edge.source } else { second_edge.source };
+    // A shared target does not imply traversal of the configured conflict edge.
+    if cell_intention.int_type != IntentionType::Tail
+        && !intention_traverses_edge(first_vehicle, first_source, cell_b)
+    {
+        return Ok(None);
+    }
+
     // Get intentions for cell A
     let cell_a_intentions = match collected_intentions.get(&cell_a) {
         Some(intentions) => intentions,
         None => return Ok(None), // No other intentions in conflict zone
     };
 
-    // Find vehicle which has source cell X and is not already in conflict
+    // Find a vehicle traversing the other edge during this tick.
     let mut second_cell_intention: Option<&CellIntention> = None;
     for neighbor_intention in cell_a_intentions {
         let neighbor_vehicle = vehicles.get(&neighbor_intention.get_vehicle_id()).ok_or(
             ConflictError::InvalidVehicle(format!("Vehicle {} not found", neighbor_intention.get_vehicle_id()))
         )?;
-        if neighbor_vehicle.cell_id == cell_x && !neighbor_vehicle.is_conflict_participant {
+        let traverses_edge = intention_traverses_edge(neighbor_vehicle, cell_x, cell_a);
+        // The conflicting edge may occur after approach cells in this same tick.
+        if traverses_edge && !neighbor_vehicle.is_conflict_participant {
             second_cell_intention = Some(neighbor_intention);
             break;
         }
@@ -696,6 +721,81 @@ pub fn new_conflict_multiple(
     Ok(conflict)
 }
 
+/// Collects every crossing-zone constraint before per-vehicle conflict bookkeeping.
+/// A vehicle may traverse several zones or share an approach with other intentions.
+fn collect_cross_zone_constraints(
+    intentions: &Intentions,
+    zones: &HashMap<ConflictZoneID, ConflictZone>,
+    vehicles: &IndexMap<VehicleID, Vehicle>,
+) -> Result<(Vec<CellConflict>, HashSet<ConflictZoneID>), ConflictError> {
+    let mut conflicts = Vec::new();
+    let mut explored = HashSet::new();
+    let mut zone_ids: Vec<_> = zones.keys().copied().collect();
+    zone_ids.sort_unstable();
+    for zone_id in zone_ids {
+        let zone = &zones[&zone_id];
+        let first = zone.get_first_edge();
+        let second = zone.get_second_edge();
+        if first.target == second.target {
+            continue;
+        }
+        explored.insert(zone_id);
+        let participants = |source, target| -> Result<Vec<(VehicleID, bool)>, ConflictError> {
+            let mut found = std::collections::BTreeMap::new();
+            if let Some(cells) = intentions.get(&target) {
+                for intention in cells {
+                    let id = intention.get_vehicle_id();
+                    let vehicle = vehicles.get(&id).ok_or(
+                        ConflictError::InvalidVehicle(format!("Vehicle {} not found", id))
+                    )?;
+                    let tail = intention.int_type == IntentionType::Tail;
+                    let traverses = if tail {
+                        vehicle.intention.tail_maneuver.source_cell_maneuver == source
+                            && vehicle.intention.tail_maneuver.target_cell_maneuver == target
+                    } else {
+                        intention_traverses_edge(vehicle, source, target)
+                    };
+                    if traverses {
+                        let prior = found.entry(id).or_insert(false);
+                        *prior |= tail;
+                    }
+                }
+            }
+            Ok(found.into_iter().collect())
+        };
+        let left = participants(first.source, first.target)?;
+        let right = participants(second.source, second.target)?;
+        if left.is_empty() || right.is_empty() {
+            continue;
+        }
+        let first_wins = match zone.get_winner_type() {
+            ConflictWinnerType::First => true,
+            ConflictWinnerType::Second => false,
+            _ => random_bool(0.5),
+        };
+        for &(a, a_tail) in &left {
+            for &(b, b_tail) in &right {
+                if a == b {
+                    continue;
+                }
+                if a_tail && b_tail {
+                    return Err(ConflictError::InvalidVehicle(
+                        format!("Conflicting tails in zone {}: vehicles {} and {}", zone_id, a, b)
+                    ));
+                }
+                let priority = if a_tail { 0 } else if b_tail { 1 } else if first_wins { 0 } else { 1 };
+                conflicts.push(CellConflict {
+                    cell_id: -1,
+                    participants: vec![a, b],
+                    priority_participant_index: priority,
+                    conflict_type: ConflictType::CrossConflictZone,
+                });
+            }
+        }
+    }
+    Ok((conflicts, explored))
+}
+
 /// Collects all conflicts from the current set of vehicle intentions for this simulation step.
 ///
 /// Iterates over all intentions, detects conflicts (including merges, crossings, and tails), and returns a list of CellConflict records for resolution.
@@ -719,8 +819,9 @@ pub fn collect_conflicts(
         );
     }
 
-    let mut conflicts_data = Vec::with_capacity(collected_intentions.len() / 2); // Just allocate some memory
-    let mut explored_conflict_zones: HashSet<ConflictZoneID> = HashSet::new();
+    let (zone_constraints, mut explored_conflict_zones) =
+        collect_cross_zone_constraints(collected_intentions, conflict_zones, vehicles)?;
+    let mut conflicts_data = Vec::with_capacity(collected_intentions.len() / 2);
 
     for (intention_cell_id, cell_intentions) in collected_intentions.iter() {
         if cell_intentions.is_empty() {
@@ -887,5 +988,18 @@ pub fn collect_conflicts(
         }
     }
 
+    for constraint in zone_constraints {
+        // A physical tail conflict already blocks this same pair without a patience override.
+        let covered_by_tail = conflicts_data.iter().any(|existing| {
+            matches!(existing.conflict_type, ConflictType::Tail | ConflictType::TailCrossLaneChange)
+                && existing.participants.len() == 2
+                && constraint.participants.iter().all(|id| existing.participants.contains(id))
+                && existing.participants[existing.priority_participant_index]
+                    == constraint.participants[constraint.priority_participant_index]
+        });
+        if !covered_by_tail {
+            conflicts_data.push(constraint);
+        }
+    }
     Ok(conflicts_data)
 }

@@ -111,14 +111,22 @@ pub struct Vehicle {
     pub speed_limit: i32,
     /// Current bearing (direction angle)
     pub bearing: f64,
-    /// Minimal safe distance (in cells) to the vehicle in front
+    /// Additional rear safety margin for this vehicle's lane-change decision, in cells.
+    /// The target-lane rear vehicle must satisfy D >= rear_speed + min_safe_distance,
+    /// where D counts steps from its occupied cell to the proposed merge cell.
+    /// Cut-in aggressors bypass this rear check. Forward spacing uses standstill_gap.
     pub min_safe_distance: i32,
     /// Reserved longitudinal clearance (in cells), also enforced during forward motion.
-    /// A granted move leaves this reserve behind the leader's initial physical body.
-    /// With nonnegative leader motion, a valid initial gap remains at least this large.
+    /// The session's LongitudinalClearance policy enforces this reserve after path grants.
+    /// Conservative uses the leader's initial position; MovingLeader can credit a frozen
+    /// motion bound for an already moving one-cell leader. Neither extends the granted
+    /// path into a cell initially occupied by another vehicle.
+    /// A valid initial gap remains at least this large after the parallel move.
     /// An initially smaller gap is not compressed further; this does not move cars backward.
     /// Close stopped queues also claim the gap as a front occupancy buffer.
     /// Zero keeps the classic bumper to bumper rule. Lateral moves use conflict handling.
+    /// Forward reserve lookahead ends at a planned route exit when the route cache
+    /// matches the granted path; a queue beyond that exit does not block the turn.
     ///
     /// With one vehicle per cell and no gap the jam density is one vehicle per cell length,
     /// 222 veh/km at 4.5 m. Calibrated CA models use 7.5 m per vehicle in a jam (133 veh/km): the
@@ -705,7 +713,7 @@ impl Vehicle {
     /// # Arguments
     /// * `p0` - Slow to start probability of a one cell vehicle, clamped to [0, 1].
     /// * `length_cells` - Cells the vehicle occupies (head plus tail); 1 or less returns `p0`.
-    /// * `standstill_gap` - Empty cells the vehicle keeps in front of a stopped leader (negative counts as 0).
+    /// * `standstill_gap` - Longitudinal reserve in cells; its queue value enters this scaling (negative counts as 0).
     ///
     /// # Example
     /// ```rust
@@ -947,10 +955,11 @@ impl VehicleBuilder {
         self
     }
 
-    /// Sets the minimum safe distance (in cells) to the vehicle in front
+    /// Sets this vehicle's rear safety margin for lane changes, in cells.
+    /// This does not set the longitudinal reserve; use with_standstill_gap for that.
     ///
     /// # Arguments
-    /// * `min_safe_distance` - The minimum safe distance (in cells)
+    /// * `min_safe_distance` - Additional nonnegative rear margin in D >= rear_speed + margin.
     ///
     /// # Returns
     /// A `VehicleBuilder` instance for further method chaining.
