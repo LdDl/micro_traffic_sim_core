@@ -126,6 +126,7 @@ pub fn prepare_intentions<'a, 'b>(
         // Keep the cached route fresh: advance the cursor, periodically reroute,
         // and reconnect (or full-A* rebuild) when the vehicle fell off its route.
         refresh_route(net, vehicle, steps, reroute_period, reconnect_max_depth);
+        align_route_for_tail(net, vehicle, reconnect_max_depth)?;
         let routing_start = std::time::Instant::now();
         let possible_intention = find_intention(net, current_state, speed_snapshot, &vehicle, verbose)?;
         if possible_intention.should_stop {
@@ -242,6 +243,87 @@ fn refresh_route(
             vehicle.last_reroute = steps;
         }
     }
+}
+
+// A cached shortest route can request another lane change before the tail has
+// cleared the previous one. Keep the required forward prefix and reconnect only
+// after that prefix, so stopping cannot freeze a movement-dependent timer.
+fn align_route_for_tail(
+    net: &GridRoads,
+    vehicle: &mut Vehicle,
+    reconnect_max_depth: usize,
+) -> Result<(), IntentionError> {
+    if vehicle.tail_cells.is_empty() || vehicle.destination < 0 || vehicle.confusion {
+        return Ok(());
+    }
+    let tail = vehicle
+        .scan_tail_maneuver(net)
+        .map_err(IntentionError::VehicleError)?;
+    let tail_steps = if matches!(
+        tail.intention_maneuver,
+        LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight
+    ) {
+        vehicle
+            .tail_cells
+            .iter()
+            .position(|&id| id == tail.source_cell_maneuver)
+            .map_or(1, |index| index + 1)
+    } else {
+        0
+    };
+    let steps = (vehicle.timer_non_maneuvers.max(0) as usize).max(tail_steps);
+    if steps == 0 {
+        return Ok(());
+    }
+    let mut prefix = vec![vehicle.cell_id];
+    for _ in 0..steps {
+        let current = *prefix.last().unwrap();
+        if current == vehicle.destination {
+            break;
+        }
+        let Some(cell) = net.get_cell(&current) else {
+            return Ok(());
+        };
+        let forward = cell.get_forward_id();
+        if forward < 0 || prefix.contains(&forward) {
+            return Ok(());
+        }
+        prefix.push(forward);
+    }
+    if vehicle
+        .cached_route
+        .get(vehicle.route_idx..)
+        .is_some_and(|route| route.starts_with(&prefix))
+    {
+        return Ok(());
+    }
+    let end = *prefix.last().unwrap();
+    let suffix = if end == vehicle.destination {
+        Some(vec![end])
+    } else {
+        reconnect_to_cache(
+            end,
+            &vehicle.cached_route,
+            vehicle.route_idx,
+            net,
+            reconnect_max_depth,
+        )
+        .or_else(|| {
+            let source = net.get_cell(&end)?;
+            let target = net.get_cell(&vehicle.destination)?;
+            shortest_path(source, target, net, true, None)
+                .ok()
+                .map(|path| path.vertices().iter().map(|cell| cell.get_id()).collect())
+        })
+    };
+    // Do not replace a route with a forward escape into an unreachable pocket.
+    if let Some(suffix) = suffix {
+        prefix.pop();
+        prefix.extend(suffix);
+        vehicle.cached_route = prefix;
+        vehicle.route_idx = 0;
+    }
+    Ok(())
 }
 
 /// Classifies the edge from `a` to `b` as a forward/left/right maneuver by matching
@@ -821,7 +903,7 @@ fn check_alternate_direction(
     global_vmax: i32,
     max_depth: Option<i32>,
 ) -> Result<(CellID, f64), IntentionError> {
-    if cell_id <= 0 {
+    if cell_id < 0 {
         return Ok((-1, INFINITY));
     }
 
@@ -1038,7 +1120,7 @@ pub fn find_alternate_intention<'a>(
     };
 
     // Apply the chosen maneuver if valid
-    if min_cell > 0 {
+    if min_cell >= 0 {
         // ROUTE-NECESSITY: is the chosen side the cell the cached route requires next?
         // A mandatory route change must NOT be suppressed by the discretionary gates below (else the vehicle
         // misses its turn -> would have to reroute -> the historical cause of `lost`).

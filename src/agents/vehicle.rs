@@ -545,7 +545,7 @@ impl Vehicle {
 
         // Check final cell
         let last_id = self.tail_cells[self.tail_cells.len() - 1];
-        if last_id > 0 {
+        if last_id >= 0 {
             let last_cell = net
                 .get_cell(&last_id)
                 .ok_or(VehicleError::TailCellNotFound {
