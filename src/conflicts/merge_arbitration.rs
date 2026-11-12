@@ -6,12 +6,13 @@ use crate::grid::cell::CellID;
 use crate::intentions::{CellIntention, IntentionType};
 use crate::utils::rand::random_bool;
 use indexmap::IndexMap;
+use std::cmp::Reverse;
 use std::collections::HashSet;
 
 pub enum MergeDecision<'a> {
     Unregulated,
     Grant(&'a CellIntention),
-    Yield,
+    Yield(&'a CellIntention),
 }
 
 // Only the constructor associates actual participants with a zone's two edges.
@@ -119,7 +120,11 @@ fn arbitrate_pair<'a>(
         (false, false) => MergeDecision::Unregulated,
         (false, true) => MergeDecision::Grant(a),
         (true, false) => MergeDecision::Grant(b),
-        (true, true) => MergeDecision::Yield,
+        (true, true) => MergeDecision::Yield(if cycle_rank(va) >= cycle_rank(vb) {
+            a
+        } else {
+            b
+        }),
     })
 }
 
@@ -139,6 +144,7 @@ fn arbitrate_group<'a>(
         })
         .collect::<Result<_, _>>()?;
     let mut yielding = HashSet::new();
+    let mut obligations = Vec::new();
     for zone in zones {
         let mut first_wins = None;
         for a in 0..intentions.len() {
@@ -158,8 +164,9 @@ fn arbitrate_group<'a>(
                             ConflictWinnerType::Second => false,
                             _ => random_bool(0.5),
                         });
-                    let (_, loser) = matched.priority(priority);
+                    let (winner, loser) = matched.priority(priority);
                     yielding.insert(loser.get_vehicle_id());
+                    obligations.push((winner.get_vehicle_id(), loser.get_vehicle_id()));
                 }
             }
         }
@@ -172,7 +179,11 @@ fn arbitrate_group<'a>(
         .copied()
         .filter(|i| !yielding.contains(&i.get_vehicle_id()));
     let Some(mut winner) = eligible.next() else {
-        return Ok(MergeDecision::Yield);
+        return Ok(MergeDecision::Yield(cycle_candidate(
+            intentions,
+            &obligations,
+            vehicles,
+        )));
     };
     for other in eligible {
         if winner.get_vehicle_id() != other.get_vehicle_id() {
@@ -180,6 +191,55 @@ fn arbitrate_group<'a>(
         }
     }
     Ok(MergeDecision::Grant(winner))
+}
+
+fn cycle_rank(vehicle: &Vehicle) -> (bool, i32, Reverse<VehicleID>) {
+    (
+        vehicle.yield_cycle_ready(),
+        vehicle.yield_cycle_wait_steps,
+        Reverse(vehicle.id),
+    )
+}
+
+// A source strongly connected component has no incoming priority from outside.
+// Since every contender yields, a source component necessarily contains a cycle.
+// Only these components may supply a candidate; ordinary external priorities remain.
+fn cycle_candidate<'a>(
+    intentions: &[&'a CellIntention],
+    obligations: &[(VehicleID, VehicleID)],
+    vehicles: &IndexMap<VehicleID, Vehicle>,
+) -> &'a CellIntention {
+    let mut vertices = IndexMap::new();
+    for intention in intentions {
+        let next = vertices.len();
+        vertices.entry(intention.get_vehicle_id()).or_insert(next);
+    }
+    let n = vertices.len();
+    let mut adjacency = vec![Vec::new(); n];
+    for (winner, loser) in obligations {
+        adjacency[vertices[winner]].push(vertices[loser]);
+    }
+    let mut reachable = vec![false; n * n];
+    let mut stack = Vec::new();
+    for source in 0..n {
+        stack.push(source);
+        while let Some(vertex) = stack.pop() {
+            if reachable[source * n + vertex] {
+                continue;
+            }
+            reachable[source * n + vertex] = true;
+            stack.extend(adjacency[vertex].iter().copied());
+        }
+    }
+    intentions
+        .iter()
+        .copied()
+        .filter(|intention| {
+            let i = vertices[&intention.get_vehicle_id()];
+            (0..n).all(|j| !reachable[j * n + i] || reachable[i * n + j])
+        })
+        .max_by_key(|intention| cycle_rank(&vehicles[&intention.get_vehicle_id()]))
+        .expect("A finite nonempty priority graph has a source component")
 }
 
 /// Checks the ordered path, including approach cells before the conflict edge.
@@ -241,7 +301,7 @@ mod tests {
             _ => match arbitrate(900, &refs, &[&zone], &vehicles).unwrap() {
                 MergeDecision::Grant(winner) => Some(winner.get_vehicle_id()),
                 MergeDecision::Unregulated => None,
-                MergeDecision::Yield => panic!("One two-approach zone cannot form a cycle"),
+                MergeDecision::Yield(_) => panic!("One two-approach zone cannot form a cycle"),
             },
         };
         (winner, (0..32).map(|_| random_f64().to_bits()).collect())
@@ -266,7 +326,7 @@ mod tests {
             match d {
                 MergeDecision::Unregulated => (0, 0),
                 MergeDecision::Grant(winner) => (1, winner.get_vehicle_id()),
-                MergeDecision::Yield => (2, 0),
+                MergeDecision::Yield(candidate) => (2, candidate.get_vehicle_id()),
             }
         }
         fn run(pair: bool) -> Vec<((u8, VehicleID), u64)> {

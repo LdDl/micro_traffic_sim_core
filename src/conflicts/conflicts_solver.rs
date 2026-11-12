@@ -35,17 +35,24 @@ impl fmt::Display for ConflictSolverError {
     }
 }
 
-/// True if the conflict has at least one desperate (patience-exhausted) participant and is
-/// not a physical Tail conflict - i.e. it will be resolved by the patience override.
-fn conflict_has_desperate(c: &CellConflict, vehicles: &IndexMap<VehicleID, Vehicle>) -> bool {
+/// Whether ordinary patience can nominate a participant in this conflict.
+/// Physical bodies and agents participating in merge cycles are excluded.
+fn conflict_has_desperate(
+    c: &CellConflict,
+    vehicles: &IndexMap<VehicleID, Vehicle>,
+    cycle_participants: &HashSet<VehicleID>,
+) -> bool {
     let is_physical = matches!(
         c.conflict_type,
         ConflictType::Tail | ConflictType::SelfTail | ConflictType::TailCrossLaneChange
     );
     !is_physical
+        && c.conflict_type != ConflictType::MutualYield
         && c.participants
             .iter()
-            .any(|id| vehicles.get(id).map(|v| v.is_desperate()).unwrap_or(false))
+            .any(|id| vehicles.get(id).is_some_and(|v| {
+                v.is_desperate() && !cycle_participants.contains(id)
+            }))
 }
 
 /// Solves conflicts between vehicles based on their intentions and priority for the current simulation step.
@@ -90,6 +97,14 @@ pub fn solve_conflicts<'b>(
             &[("conflicts_num", &conflicts_data.len())]
         );
     }
+    // Cycle participants use their cycle delay throughout this tick. Another zone
+    // must not reapply ordinary patience and bypass or duplicate their cycle grant.
+    let mut cycle_participants = HashSet::new();
+    for conflict in &conflicts_data {
+        if conflict.conflict_type == ConflictType::MutualYield {
+            cycle_participants.extend(conflict.participants.iter().copied());
+        }
+    }
     let mut trajectories_conflicts: Vec<CellConflict> = Vec::new();
     let mut conflict_zones_conflicts: Vec<CellConflict> = Vec::new();
     // Cells already granted to a desperate (patience-override) winner this tick, so no later
@@ -113,12 +128,14 @@ pub fn solve_conflicts<'b>(
         }
         occ
     };
-    // Resolve desperate conflicts FIRST so claimed_cells is complete before any normal grant;
+    // Resolve cycle and desperate grants FIRST so reservations precede normal grants;
     // otherwise a normal winner processed earlier could take a cell a later desperate winner
     // also claims. Partition preserves relative order within each group (determinism).
     let conflicts_data: Vec<CellConflict> = {
         let (mut desperate_first, rest): (Vec<CellConflict>, Vec<CellConflict>) =
-            conflicts_data.into_iter().partition(|c| conflict_has_desperate(c, vehicles));
+            conflicts_data.into_iter().partition(|c| {
+                c.conflict_type == ConflictType::MutualYield || conflict_has_desperate(c, vehicles, &cycle_participants)
+            });
         desperate_first.extend(rest);
         desperate_first
     };
@@ -139,7 +156,33 @@ pub fn solve_conflicts<'b>(
             ));
         }
 
-        // Patience override (authoritative, for EVERY conflict type)
+        if conflict.conflict_type == ConflictType::MutualYield {
+            let candidate_id = conflict.participants[conflict.priority_participant_index];
+            let candidate = vehicles.get(&candidate_id).ok_or_else(|| {
+                ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", candidate_id))
+            })?;
+            let entered = candidate.intention.intermediate_cells.first().copied()
+                .unwrap_or(candidate.intention.intention_cell_id);
+            let granted = candidate.yield_cycle_ready()
+                && candidate.intention.intention_speed > 0
+                && entered >= 0 && entered != candidate.cell_id
+                && occupancy.get(&entered).is_none_or(|&owner| owner == candidate_id)
+                && claimed_cells.insert(entered);
+            for id in &conflict.participants {
+                let vehicle = vehicles.get_mut(id).ok_or_else(|| {
+                    ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", id))
+                })?;
+                if granted && *id == candidate_id {
+                    vehicle.set_single_step_intention(entered);
+                } else {
+                    vehicle.hold_for_yield_cycle();
+                    vehicle.block_with_speed(0);
+                }
+            }
+            continue;
+        }
+
+        // Ordinary patience override, excluding physical bodies and merge cycles.
         // A vehicle stuck past its patience threshold (Vehicle::is_desperate) wins the
         // contested cell, overriding normal right-of-way, the fixed conflict-zone winner
         // AND the left/right rule. Among several desperate participants the most-starved
@@ -161,7 +204,9 @@ pub fn solve_conflicts<'b>(
                 .iter()
                 .enumerate()
                 .filter_map(|(i, id)| {
-                    vehicles.get(id).filter(|v| v.is_desperate()).map(|v| (i, v.wait_steps, *id))
+                    vehicles.get(id).filter(|v| {
+                        v.is_desperate() && !cycle_participants.contains(id)
+                    }).map(|v| (i, v.wait_steps, *id))
                 })
                 .max_by_key(|&(_, wait, id)| (wait, Reverse(id)));
             if let Some((win_idx, _, _)) = desperate_winner {
@@ -224,14 +269,6 @@ pub fn solve_conflicts<'b>(
         }
 
         match conflict.conflict_type {
-            ConflictType::MutualYield => {
-                for id in &conflict.participants {
-                    if let Some(vehicle) = vehicles.get_mut(id) {
-                        vehicle.block_with_speed(0);
-                    }
-                }
-                continue;
-            }
             ConflictType::SelfTail => {
                 if verbose.is_at_least(VerboseLevel::Additional) {
                     verbose.log_with_fields(

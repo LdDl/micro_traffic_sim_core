@@ -65,6 +65,10 @@ pub const PATIENCE_MIN: i32 = 300;
 /// stall). Vehicles in between scale linearly with cooperativity.
 pub const PATIENCE_MAX: i32 = 700;
 
+/// Default completed waiting ticks before resolving a merge-priority cycle.
+/// This is an explicit initial setting, separate from the long patience override.
+pub const DEFAULT_YIELD_CYCLE_DELAY: i32 = 4;
+
 /// Aggression threshold above which a driver becomes a CUT-IN aggressor: it bypasses the
 /// rear-safety gap when changing lane (squeezing in front of a follower, forcing it to
 /// brake - see `check_alternate_direction`) AND wins a contested cell against any less
@@ -162,6 +166,13 @@ pub struct Vehicle {
     /// patience threshold, the vehicle wins contested cells in conflict resolution
     /// ("desperate" - see `Vehicle::is_desperate`). Reset to 0 on any actual move.
     pub wait_steps: i32,
+    /// Completed cycle-related waiting ticks required before this driver may break a cycle.
+    pub yield_cycle_delay: i32,
+    /// Cycle-related waiting accumulated since the last actual movement.
+    /// Unrelated stops pause this counter, and merely losing arbitration does not reset it.
+    pub yield_cycle_wait_steps: i32,
+    /// Whether a cycle decision held this vehicle during the current tick.
+    yield_cycle_held: bool,
     /// Corresponding trip identifier
     pub trip: TripID,
     /// Number of transits have been made by the vehicle
@@ -280,6 +291,9 @@ impl Vehicle {
                 trip_destination: -1,
                 is_conflict_participant: false,
                 wait_steps: 0,
+                yield_cycle_delay: DEFAULT_YIELD_CYCLE_DELAY,
+                yield_cycle_wait_steps: 0,
+                yield_cycle_held: false,
                 trip: -1,
                 transits_made: 0,
                 transit_cells: Vec::new(),
@@ -754,7 +768,33 @@ impl Vehicle {
         1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
     }
 
-    /// The vehicle's patience threshold in steps: how long it tolerates losing
+    /// Whether this driver has completed its merge-cycle waiting delay.
+    pub fn yield_cycle_ready(&self) -> bool {
+        self.yield_cycle_wait_steps >= self.yield_cycle_delay.max(0)
+    }
+
+    /// Records that a merge-cycle decision held this vehicle in the current tick.
+    /// Repeated marks still count as at most one waiting tick when movement is applied.
+    pub fn hold_for_yield_cycle(&mut self) {
+        self.yield_cycle_held = true;
+    }
+
+    /// Applies the cycle clock once, using actual movement and stop eligibility.
+    ///
+    /// # Arguments
+    /// * `moved` - Actual movement, which clears accumulated cycle waiting.
+    /// * `eligible_wait` - The vehicle stayed put without red-light or dwell restrictions.
+    pub fn update_yield_cycle_wait(&mut self, moved: bool, eligible_wait: bool) {
+        if moved {
+            self.yield_cycle_wait_steps = 0;
+        } else if self.yield_cycle_held && eligible_wait {
+            self.yield_cycle_wait_steps = self.yield_cycle_wait_steps.saturating_add(1);
+        }
+        self.yield_cycle_held = false;
+    }
+
+    /// The ordinary patience threshold; merge cycles use `yield_cycle_delay`.
+    /// It specifies how long the vehicle tolerates losing
     /// contested cells before overriding right-of-way. Scaled by cooperativity so
     /// every vehicle eventually forces (the threshold is always finite), but more
     /// cooperative drivers wait longer: aggressive (cooperativity 0) -> `PATIENCE_MIN`,
@@ -1195,6 +1235,15 @@ impl VehicleBuilder {
     /// larger = more hesitant after a change.
     pub fn with_lc_cooldown(mut self, steps: i64) -> Self {
         self.vehicle.lc_cooldown = steps;
+        self
+    }
+
+    /// Sets the merge-cycle delay independently of ordinary right-of-way patience.
+    ///
+    /// # Arguments
+    /// * `steps` - Completed waiting ticks; negative values are clamped to zero.
+    pub fn with_yield_cycle_delay(mut self, steps: i32) -> Self {
+        self.vehicle.yield_cycle_delay = steps.max(0);
         self
     }
 

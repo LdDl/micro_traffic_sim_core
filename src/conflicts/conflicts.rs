@@ -33,7 +33,7 @@ pub enum ConflictType {
     /// Both vehicles are going to change lane to the same cell in conflict zone.
     MergeForwardConflictZone,
     /// Every contender must yield under the applicable merge-zone priorities.
-    /// No participant is granted motion unless the existing patience override applies.
+    /// Its nominated source-cycle candidate may proceed after its own cycle delay.
     MutualYield,
     /// Both vehicles are going to change lane but theirs trajectories are going to intersect.
     CrossLaneChange,
@@ -102,7 +102,8 @@ pub struct CellConflict {
     pub cell_id: CellID,
     /// Agents that are involved in the conflict
     pub participants: Vec<VehicleID>,
-    /// Agent that has priority; ignored for MutualYield, which grants no participant.
+    /// Priority participant, or the nominated cycle-break candidate for MutualYield.
+    /// A cycle candidate must complete its own delay before receiving a grant.
     pub priority_participant_index: usize,
     /// Type of the conflict
     pub conflict_type: ConflictType,
@@ -112,17 +113,18 @@ impl fmt::Display for CellConflict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let participants: Vec<String> =
             self.participants.iter().map(|p| p.to_string()).collect();
-        let priority_participant_id = if self.conflict_type == ConflictType::MutualYield {
-            "None".to_string()
+        let priority_participant_id = self.participants.get(self.priority_participant_index)
+            .map_or("None".to_string(), |p| p.to_string());
+        let priority_label = if self.conflict_type == ConflictType::MutualYield {
+            "Cycle candidate"
         } else {
-            self.participants.get(self.priority_participant_index)
-                .map_or("None".to_string(), |p| p.to_string())
+            "Priority participant"
         };
         let cell_id = self.cell_id.to_string();
         write!(
             f,
-            "CellConflict{{CellID: {}, Type: {}, Participants: ({:?}), Priority participant: {}}}",
-            cell_id, self.conflict_type, participants, priority_participant_id
+            "CellConflict{{CellID: {}, Type: {}, Participants: ({:?}), {}: {}}}",
+            cell_id, self.conflict_type, participants, priority_label, priority_participant_id
         )
     }
 }
@@ -590,7 +592,7 @@ pub fn find_conflict_type<'a>(
     match merge_arbitration::arbitrate(intention_cell_id, &[intention_one, intention_two], &zones, vehicles)
         .expect("Conflict intentions must refer to the current vehicle snapshot") {
         MergeDecision::Grant(winner) => (winner, ConflictType::MergeForwardConflictZone),
-        MergeDecision::Yield => (intention_one, ConflictType::MutualYield),
+        MergeDecision::Yield(candidate) => (candidate, ConflictType::MutualYield),
         MergeDecision::Unregulated => resolve_simple_rules(intention_one, intention_two, vehicles),
     }
 }
@@ -681,7 +683,7 @@ fn new_conflict_multiple_with_zones(
     };
     let (priority_intention, conflict_type) = match decision {
         MergeDecision::Grant(winner) => (winner, ConflictType::MergeForwardConflictZone),
-        MergeDecision::Yield => (&cell_intentions[0], ConflictType::MutualYield),
+        MergeDecision::Yield(candidate) => (candidate, ConflictType::MutualYield),
         MergeDecision::Unregulated => {
             let mut result = (&cell_intentions[0], ConflictType::Undefined);
             for other in &cell_intentions[1..] {
