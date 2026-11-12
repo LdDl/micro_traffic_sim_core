@@ -224,6 +224,14 @@ pub fn solve_conflicts<'b>(
         }
 
         match conflict.conflict_type {
+            ConflictType::MutualYield => {
+                for id in &conflict.participants {
+                    if let Some(vehicle) = vehicles.get_mut(id) {
+                        vehicle.block_with_speed(0);
+                    }
+                }
+                continue;
+            }
             ConflictType::SelfTail => {
                 if verbose.is_at_least(VerboseLevel::Additional) {
                     verbose.log_with_fields(

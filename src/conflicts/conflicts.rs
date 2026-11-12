@@ -1,3 +1,4 @@
+use super::merge_arbitration::{self, MergeDecision, intention_traverses_edge};
 use crate::agents::{VehicleID, Vehicle};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
 use crate::conflicts::{resolve_simple_rules, aggressor_advantage, CrossingZoneIndex};
@@ -31,6 +32,9 @@ pub enum ConflictType {
     MergeLaneChange,
     /// Both vehicles are going to change lane to the same cell in conflict zone.
     MergeForwardConflictZone,
+    /// Every contender must yield under the applicable merge-zone priorities.
+    /// No participant is granted motion unless the existing patience override applies.
+    MutualYield,
     /// Both vehicles are going to change lane but theirs trajectories are going to intersect.
     CrossLaneChange,
     /// Both vehicles are going to change lane but theirs trajectories are going to intersect in conflict zone.
@@ -77,6 +81,7 @@ impl fmt::Display for ConflictType {
             ConflictType::MergeForward => "merge+forward",
             ConflictType::MergeLaneChange => "merge+lane_change",
             ConflictType::MergeForwardConflictZone => "merge+forward+conflict_zone",
+            ConflictType::MutualYield => "mutual_yield",
             ConflictType::CrossLaneChange => "cross+lane_change",
             ConflictType::CrossConflictZone => "cross+conflict_zone",
             ConflictType::Tail => "tail",
@@ -97,7 +102,7 @@ pub struct CellConflict {
     pub cell_id: CellID,
     /// Agents that are involved in the conflict
     pub participants: Vec<VehicleID>,
-    /// Agent that has priority in the conflict
+    /// Agent that has priority; ignored for MutualYield, which grants no participant.
     pub priority_participant_index: usize,
     /// Type of the conflict
     pub conflict_type: ConflictType,
@@ -107,9 +112,12 @@ impl fmt::Display for CellConflict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let participants: Vec<String> =
             self.participants.iter().map(|p| p.to_string()).collect();
-        let priority_participant_id = self.participants
-            .get(self.priority_participant_index)
-            .map_or("None".to_string(), |p| p.to_string());
+        let priority_participant_id = if self.conflict_type == ConflictType::MutualYield {
+            "None".to_string()
+        } else {
+            self.participants.get(self.priority_participant_index)
+                .map_or("None".to_string(), |p| p.to_string())
+        };
         let cell_id = self.cell_id.to_string();
         write!(
             f,
@@ -349,7 +357,8 @@ impl CellConflict {
 /// Checks if two intentions for the same cell are in a conflict zone and determines the winner.
 ///
 /// Uses the conflict zone's priority rules to decide which vehicle gets to move.
-/// Returns the cell ID of the vehicle with priority, or None if no conflict zone applies.
+/// Returns a configured source cell, not a verified vehicle or applicable pair.
+/// Runtime arbitration matches actual participants and ordered edges separately.
 pub fn find_zone_conflict_for_two_intentions(
     intention_cell_id: CellID,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
@@ -388,18 +397,6 @@ pub fn find_zone_conflict_for_two_intentions(
     None // No conflict detected
 }
 
-
-/// Checks the ordered path, including approach cells before the conflict edge.
-fn intention_traverses_edge(vehicle: &Vehicle, source: CellID, target: CellID) -> bool {
-    let mut previous = vehicle.cell_id;
-    vehicle.intention.intermediate_cells.iter().copied()
-        .chain(std::iter::once(vehicle.intention.intention_cell_id))
-        .any(|cell| {
-            let traverses = previous == source && cell == target;
-            previous = cell;
-            traverses
-        })
-}
 
 /// Finds trajectory conflicts within predefined conflict zones.
 ///
@@ -568,7 +565,7 @@ pub fn find_conflicts_in_conflict_zones(
 pub fn find_conflict_type<'a>(
     intention_cell_id: CellID,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
-    cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
+    _cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
     intention_one: &'a CellIntention,
     intention_two: &'a CellIntention,
     vehicles: &indexmap::IndexMap<VehicleID, Vehicle>,
@@ -589,60 +586,31 @@ pub fn find_conflict_type<'a>(
     if intention_type_two == IntentionType::Tail {
         return (intention_two, ConflictType::Tail);
     }
-    let vehicle_one = vehicles.get(&intention_one.get_vehicle_id()).unwrap();
-    let vehicle_two = vehicles.get(&intention_two.get_vehicle_id()).unwrap();
-
-    // Check if there's a conflict zone for this cell
-    let conflict_zone_winner_source_cell = find_zone_conflict_for_two_intentions(
-        intention_cell_id, 
-        conflict_zones, 
-        cells_conflicts_zones
-    );
-    // The conflict zone is found - early return
-    if let Some(winner_cell) = conflict_zone_winner_source_cell {
-        if vehicle_one.cell_id == winner_cell {
-            return (intention_one, ConflictType::MergeForwardConflictZone);
-        }
-        if vehicle_two.cell_id == winner_cell {
-            return (intention_two, ConflictType::MergeForwardConflictZone);
-        }
-        // Check intermediate cells for vehicle one
-        if !vehicle_one.intention.intermediate_cells.is_empty() {
-            if let Some(elem_idx) = find_elem_in_slice(winner_cell, &vehicle_one.intention.intermediate_cells) {
-                let trim_inter = &vehicle_one.intention.intermediate_cells[..=elem_idx];
-                if let Some(&last_cell_id) = trim_inter.last() {
-                    if last_cell_id == winner_cell {
-                        return (intention_one, ConflictType::MergeForwardConflictZone);
-                    }
-                }
-            }
-        }
-        // Check intermediate cells for vehicle two
-        if !vehicle_two.intention.intermediate_cells.is_empty() {
-            if let Some(elem_idx) = find_elem_in_slice(winner_cell, &vehicle_two.intention.intermediate_cells) {
-                let trim_inter = &vehicle_two.intention.intermediate_cells[..=elem_idx];
-                if let Some(&last_cell_id) = trim_inter.last() {
-                    if last_cell_id == winner_cell {
-                        return (intention_two, ConflictType::MergeForwardConflictZone);
-                    }
-                }
-            }
-        }
-        // Log error and panic for unexpected cases
-        eprintln!(
-            "Can't happen in CONFLICT_TYPE_MERGE_CONFLICT_ZONE: winner_cell={}, vehicle_one={}, vehicle_two={}, pos_one={}, pos_two={}",
-            winner_cell, vehicle_one.id, vehicle_two.id, vehicle_one.cell_id, vehicle_two.cell_id
-        );
-        panic!("Can't happen in CONFLICT_TYPE_MERGE_CONFLICT_ZONE");
+    let zones = merge_zones_for_target(intention_cell_id, conflict_zones);
+    match merge_arbitration::arbitrate(intention_cell_id, &[intention_one, intention_two], &zones, vehicles)
+        .expect("Conflict intentions must refer to the current vehicle snapshot") {
+        MergeDecision::Grant(winner) => (winner, ConflictType::MergeForwardConflictZone),
+        MergeDecision::Yield => (intention_one, ConflictType::MutualYield),
+        MergeDecision::Unregulated => resolve_simple_rules(intention_one, intention_two, vehicles),
     }
-
-    // No conflict zone found, use simple rules
-    resolve_simple_rules(intention_one, intention_two, vehicles)
 }
 
-/// Helper function to find element index in slice
-fn find_elem_in_slice(target: CellID, slice: &[CellID]) -> Option<usize> {
-    slice.iter().position(|&x| x == target)
+fn merge_zones_for_target(target: CellID, zones: &HashMap<ConflictZoneID, ConflictZone>) -> Vec<&ConflictZone> {
+    let mut result: Vec<_> = zones.values().filter(|zone| {
+        zone.get_first_edge().target == target && zone.get_second_edge().target == target
+    }).collect();
+    result.sort_unstable_by_key(|zone| zone.get_id());
+    result
+}
+
+fn ordinary_cell_priority<'a>(
+    a: &'a CellIntention,
+    b: &'a CellIntention,
+    vehicles: &IndexMap<VehicleID, Vehicle>,
+) -> (&'a CellIntention, ConflictType) {
+    if a.int_type == IntentionType::Tail { (a, ConflictType::Tail) }
+    else if b.int_type == IntentionType::Tail { (b, ConflictType::Tail) }
+    else { resolve_simple_rules(a, b, vehicles) }
 }
 
 /// Creates a CellConflict for multiple vehicles targeting the same cell.
@@ -651,9 +619,19 @@ fn find_elem_in_slice(target: CellID, slice: &[CellID]) -> Option<usize> {
 pub fn new_conflict_multiple(
     cell: &Cell,
     conflict_zones: &HashMap<ConflictZoneID, ConflictZone>,
-    cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
+    _cells_conflicts_zones: &HashMap<CellID, ConflictZoneID>,
     cell_intentions: &[CellIntention],
     vehicles: &indexmap::IndexMap<VehicleID, Vehicle>,
+) -> Result<CellConflict, ConflictError> {
+    let zones = merge_zones_for_target(cell.get_id(), conflict_zones);
+    new_conflict_multiple_with_zones(cell, &zones, cell_intentions, vehicles)
+}
+
+fn new_conflict_multiple_with_zones(
+    cell: &Cell,
+    zones: &[&ConflictZone],
+    cell_intentions: &[CellIntention],
+    vehicles: &IndexMap<VehicleID, Vehicle>,
 ) -> Result<CellConflict, ConflictError> {
     if cell_intentions.len() < 2 {
         return Err(ConflictError::InvalidVehicle(
@@ -661,7 +639,7 @@ pub fn new_conflict_multiple(
         ));
     }
 
-    // Step 1: Deduplicate vehicles using IndexMap to maintain insertion order
+    // Deduplicate vehicle IDs while retaining the claim order.
     let mut participants_map: IndexMap<VehicleID, VehicleID> = IndexMap::new();
     for intention in cell_intentions {
         let vehicle_id = intention.get_vehicle_id();
@@ -677,35 +655,43 @@ pub fn new_conflict_multiple(
         });
     }
 
-    // Step 2: Convert map to vector for indexed access
     let participants: Vec<VehicleID> = participants_map.values().cloned().collect();
 
-    // Step 3: Create conflict with temporary priority index
     let mut conflict = CellConflict {
         cell_id: cell.get_id(),
         participants,
-        priority_participant_index: 0, // Will be determined below
+        priority_participant_index: 0,
         conflict_type: ConflictType::Undefined,
     };
 
-    // Step 4: Determine priority participant and conflict type
-    let mut priority_intention = &cell_intentions[0];
-    let mut conflict_type = ConflictType::Undefined;
-    
-    for i in 1..cell_intentions.len() {
-        let (winner, c_type) = find_conflict_type(
-            cell.get_id(),
-            conflict_zones,
-            cells_conflicts_zones,
-            priority_intention,
-            &cell_intentions[i],
-            vehicles,
-        );
-        priority_intention = winner;
-        conflict_type = c_type;
+    for id in &conflict.participants {
+        if !vehicles.get(id).is_some_and(|vehicle| vehicle.id == *id) {
+            return Err(ConflictError::InvalidVehicle(format!("Vehicle {} not found or mismatched", id)));
+        }
     }
+    let decision = if zones.is_empty() {
+        MergeDecision::Unregulated
+    } else {
+        if let [a, b] = cell_intentions {
+            merge_arbitration::arbitrate(cell.get_id(), &[a, b], zones, vehicles)?
+        } else {
+            let claims: Vec<_> = cell_intentions.iter().collect();
+            merge_arbitration::arbitrate(cell.get_id(), &claims, zones, vehicles)?
+        }
+    };
+    let (priority_intention, conflict_type) = match decision {
+        MergeDecision::Grant(winner) => (winner, ConflictType::MergeForwardConflictZone),
+        MergeDecision::Yield => (&cell_intentions[0], ConflictType::MutualYield),
+        MergeDecision::Unregulated => {
+            let mut result = (&cell_intentions[0], ConflictType::Undefined);
+            for other in &cell_intentions[1..] {
+                result = ordinary_cell_priority(result.0, other, vehicles);
+            }
+            result
+        }
+    };
 
-    // Step 5: Find the index of the priority participant in the participants vector
+    // The selected intention is one of the original claims, so its ID is present.
     let priority_vehicle_id = priority_intention.get_vehicle_id();
     let mut priority_index = 0;
     for (i, participant) in conflict.participants.iter().enumerate() {
@@ -810,7 +796,7 @@ pub fn collect_conflicts(
     zone_ids.sort_unstable();
     collect_conflicts_for_zones(
         collected_intentions, net, conflict_zones, cells_conflicts_zones,
-        verbose, vehicles, zone_ids,
+        verbose, vehicles, zone_ids, None,
     )
 }
 
@@ -820,7 +806,7 @@ pub fn collect_conflicts(
 /// * `collected_intentions` - Initial path grants for this tick.
 /// * `net` - Road grid used by ordinary cell and trajectory conflicts.
 /// * `conflict_zones` - Current zone definitions.
-/// * `cells_conflicts_zones` - Existing single-zone lookup used by merge handling.
+/// * `cells_conflicts_zones` - Legacy lookup retained for compatibility; merges use all indexed zones.
 /// * `verbose` - Session logger.
 /// * `vehicles` - Vehicles whose conflict-participant flags are updated.
 /// * `index` - Incidence updated for every zone added or replaced in conflict_zones.
@@ -838,7 +824,7 @@ pub fn collect_conflicts_indexed(
 ) -> Result<Vec<CellConflict>, ConflictError> {
     collect_conflicts_for_zones(
         collected_intentions, net, conflict_zones, cells_conflicts_zones,
-        verbose, vehicles, index.candidates(collected_intentions),
+        verbose, vehicles, index.candidates(collected_intentions), Some(index),
     )
 }
 
@@ -850,6 +836,7 @@ fn collect_conflicts_for_zones(
     verbose: &LocalLogger,
     vehicles: &mut indexmap::IndexMap<VehicleID, Vehicle>,
     zone_ids: impl IntoIterator<Item = ConflictZoneID>,
+    merge_index: Option<&CrossingZoneIndex>,
 ) -> Result<Vec<CellConflict>, ConflictError> {
     if verbose.is_at_least(crate::verbose::VerboseLevel::Main) {
         verbose.log_with_fields(
@@ -863,6 +850,17 @@ fn collect_conflicts_for_zones(
         );
     }
 
+    let zone_ids: Vec<_> = zone_ids.into_iter().collect();
+    let mut merge_zones: HashMap<CellID, Vec<&ConflictZone>> = HashMap::new();
+    if merge_index.is_none() {
+        for id in &zone_ids {
+            let zone = &conflict_zones[id];
+            let target = zone.get_first_edge().target;
+            if target == zone.get_second_edge().target {
+                merge_zones.entry(target).or_default().push(zone);
+            }
+        }
+    }
     let (zone_constraints, mut explored_conflict_zones) =
         collect_cross_zone_constraints(collected_intentions, conflict_zones, vehicles, zone_ids)?;
     let mut conflicts_data = Vec::with_capacity(collected_intentions.len() / 2);
@@ -1018,9 +1016,26 @@ fn collect_conflicts_for_zones(
                 );
             }
 
-            // Check if there is a conflict between more than two vehicles
-            let conflict = new_conflict_multiple(
-                intention_cell, conflict_zones, cells_conflicts_zones, cell_intentions, vehicles
+            // The maintained incidence avoids rebuilding a per-target map each tick.
+            let single_zone;
+            let multiple_zones;
+            let zones = if let Some(index) = merge_index {
+                match index.merge_candidates(*intention_cell_id) {
+                    [] => &[][..],
+                    [id] => {
+                        single_zone = [&conflict_zones[id]];
+                        &single_zone
+                    }
+                    ids => {
+                        multiple_zones = ids.iter().map(|id| &conflict_zones[id]).collect::<Vec<_>>();
+                        multiple_zones.as_slice()
+                    }
+                }
+            } else {
+                merge_zones.get(intention_cell_id).map(Vec::as_slice).unwrap_or(&[])
+            };
+            let conflict = new_conflict_multiple_with_zones(
+                intention_cell, zones, cell_intentions, vehicles,
             )?;
 
             if conflict.conflict_type == ConflictType::SelfTail {

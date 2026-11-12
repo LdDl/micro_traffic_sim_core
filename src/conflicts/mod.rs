@@ -68,6 +68,7 @@
 //! let result = session.step();
 //! ```
 mod conflicts;
+mod merge_arbitration;
 mod conflict_zone_index;
 mod conflict_rule;
 mod conflicts_solver;

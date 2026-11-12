@@ -771,8 +771,8 @@ mod tests {
             .build();
         vehicle1.set_intention(VehicleIntention {
             intention_maneuver: LaneChangeType::NoChange,
-            intention_cell_id: 2,
-            intermediate_cells: vec![3],
+            intention_cell_id: 3,
+            intermediate_cells: vec![2],
             ..Default::default()
         });
 
