@@ -421,8 +421,9 @@ pub fn find_intention<'a>(
     // Adapt to a leader within the configured synchronization distance, otherwise accelerate.
     // A stopped vehicle may start even while its acceleration timer is active.
     let sync = vehicle.synchronization;
-    let sync_gap = (sync.time_gap * intention_speed as f64).floor() as i32;
     let sync_leader = if sync.time_gap > 0.0 && intention_speed > 0 {
+        let sync_gap = ((sync.time_gap * intention_speed as f64).floor() as i32)
+            .max(sync.minimum_moving_range);
         synchronization_leader(source_cell, net, current_state, speed_snapshot, vehicle, sync_gap.saturating_add(1))
     } else {
         None

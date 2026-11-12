@@ -1,7 +1,8 @@
 /// Longitudinal speed adaptation with a configurable synchronization distance.
 ///
-/// Within floor(time_gap * speed) empty cells, a vehicle adapts by one speed unit
-/// toward its leader. Safety clipping precedes the stochastic correction, following
+/// Within max(floor(time_gap * speed), minimum_moving_range) empty cells, a moving
+/// vehicle adapts by one speed unit toward its leader. Safety clipping precedes
+/// the stochastic correction, following
 /// Kerner, Klenov and Wolf (2002), equations (11)-(15), doi:10.1088/0305-4470/35/47/303.
 /// The coarse cell size, standing threshold and network rules differ from that paper.
 /// This configuration describes a KKW-inspired extension, not a literal reproduction.
@@ -39,9 +40,15 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SynchronizationParameters {
     /// Synchronization distance coefficient in ticks; speed is in cells per tick.
-    /// A moving vehicle adapts to a leader within floor(time_gap * min(speed, limit))
-    /// empty cells. This interaction range is not a required safety gap or reserve.
+    /// A moving vehicle adapts within max(floor(time_gap * min(speed, limit)),
+    /// minimum_moving_range) empty cells. This is not a safety gap or reserve.
     pub time_gap: f64,
+    /// Minimum synchronization interaction range in cells for a moving vehicle.
+    /// Zero preserves the range determined by time_gap. A positive value extends
+    /// low-speed adaptation without increasing the proportional range at higher
+    /// speeds. It does not enable synchronization when time_gap is nonpositive,
+    /// and it does not change adaptation eligibility or restart rules at rest.
+    pub minimum_moving_range: i32,
     /// Negative-correction probability below the positive effective speed limit.
     pub noise: f64,
     /// Optional negative-correction probability at the positive effective speed limit.
@@ -66,6 +73,7 @@ impl SynchronizationParameters {
     /// Preserves the existing acceleration and relative-randomization rules.
     pub const DISABLED: Self = Self {
         time_gap: 0.0,
+        minimum_moving_range: 0,
         noise: 0.0,
         free_speed_noise: None,
         free_speed_over_acceleration: None,
@@ -83,6 +91,7 @@ impl SynchronizationParameters {
     /// constants. At the positive effective limit, negative noise is disabled.
     pub const COARSE_GRID: Self = Self {
         time_gap: 2.55,
+        minimum_moving_range: 0,
         noise: 0.2 / 9.0,
         free_speed_noise: Some(0.0),
         free_speed_over_acceleration: None,
@@ -108,6 +117,7 @@ impl SynchronizationParameters {
             } else {
                 0.0
             },
+            minimum_moving_range: self.minimum_moving_range.max(0),
             noise: probability(self.noise),
             free_speed_noise: self.free_speed_noise.map(probability),
             free_speed_over_acceleration: self.free_speed_over_acceleration.map(probability),
