@@ -161,8 +161,7 @@ pub fn solve_conflicts<'b>(
             let candidate = vehicles.get(&candidate_id).ok_or_else(|| {
                 ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", candidate_id))
             })?;
-            let entered = candidate.intention.intermediate_cells.first().copied()
-                .unwrap_or(candidate.intention.intention_cell_id);
+            let entered = candidate.first_motion_cell().unwrap_or(-1);
             let granted = candidate.yield_cycle_ready()
                 && candidate.intention.intention_speed > 0
                 && entered >= 0 && entered != candidate.cell_id
@@ -173,7 +172,7 @@ pub fn solve_conflicts<'b>(
                     ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", id))
                 })?;
                 if granted && *id == candidate_id {
-                    vehicle.set_single_step_intention(entered);
+                    vehicle.restrict_intention_to_first_step();
                 } else {
                     vehicle.hold_for_yield_cycle();
                     vehicle.block_with_speed(0);
@@ -217,13 +216,7 @@ pub fn solve_conflicts<'b>(
                 // single known cell instead of sweeping unreserved intermediate cells.
                 let entered = vehicles
                     .get(&win_id)
-                    .map(|v| {
-                        v.intention
-                            .intermediate_cells
-                            .first()
-                            .copied()
-                            .unwrap_or(v.intention.intention_cell_id)
-                    })
+                    .and_then(Vehicle::first_motion_cell)
                     .unwrap_or(-1);
                 if entered >= 0 {
                     // Granted unless the cell is unavailable, in which case block all
@@ -257,7 +250,7 @@ pub fn solve_conflicts<'b>(
                                 // occupies exactly the reserved cell and never sweeps unreserved
                                 // intermediate cells. This also rebuilds the tail so a stale
                                 // multi-cell tail does not land ahead of the clamped head.
-                                v.set_single_step_intention(entered);
+                                v.restrict_intention_to_first_step();
                             } else {
                                 v.block_with_speed(0);
                             }
@@ -358,15 +351,10 @@ pub fn solve_conflicts<'b>(
         for (i, participant_id) in conflict.participants.iter().enumerate() {
             let participant = vehicles.get_mut(participant_id).ok_or_else(|| ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", participant_id)))?;
             if i == priority_index {
-                // Movement to cell is allowed
-                // intention_cell remains the same (especially for vehicles for which conflict Cell ID is just intermediate cell)
-                // intention_cell could be changed only if maneuver has been met.
-                // Only a lane change moves into the contested cell; a Block winner stays where it is
-                // (otherwise a standing vehicle that wins a Tail conflict is sent into that cell,
-                // possibly backward into its own tail).
+                // Priority retains only an existing first step for a lane change.
+                // Conflict metadata cannot supply a replacement destination.
                 if matches!(participant.intention.intention_maneuver, LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight) {
-                    participant.intention.intention_cell_id = conflict.cell_id;
-                    participant.intention.intention_speed = 1;
+                    participant.restrict_intention_to_first_step();
                 }
                 // Sweep-through guard (one-occupant-per-cell): a multi-cell winner must not
                 // drive THROUGH a cell already reserved by a desperate winner this tick. Scan
@@ -380,9 +368,7 @@ pub fn solve_conflicts<'b>(
                     if j == 0 {
                         participant.block_with_speed(0);
                     } else {
-                        let first_cell = *participant.intention.intermediate_cells.first()
-                            .unwrap_or(&participant.intention.intention_cell_id);
-                        participant.set_single_step_intention(first_cell);
+                        participant.restrict_intention_to_first_step();
                     }
                 }
             } else {
@@ -451,8 +437,8 @@ pub fn solve_conflicts<'b>(
                 for (i, participant_id) in conflict.participants.iter().enumerate() {
                     if let Some(v) = vehicles.get_mut(participant_id) {
                         if i == winner_index {
-                            // Winner keeps its maneuver and target cell; speed forced to 1.
-                            v.intention.intention_speed = 1;
+                            // Priority only retains a currently permitted first step.
+                            v.restrict_intention_to_first_step();
                         } else {
                             v.block_with_speed(0);
                         }

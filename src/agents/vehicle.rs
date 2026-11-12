@@ -635,26 +635,43 @@ impl Vehicle {
         // No need to update tails cells. It is done in movement.rs
     }
 
-    /// Rewrites this vehicle's intention to a single forward step into `target` (an
-    /// adjacent cell). Used by the patience override to clamp a desperate winner to one
-    /// cell. Crucially it also rebuilds `tail_intention_cells` consistently with the
-    /// one-cell step - the tail shifts forward and the vacated current cell becomes the
-    /// new nearest tail cell (same convention as `extract_tail_intention`'s 1-cell case).
-    /// Without this, a stale multi-cell `tail_intention_cells` from the original (longer)
-    /// intention would be applied in movement and land the body ahead of / on top of the
-    /// clamped head.
+    /// Returns the first cell of a currently permitted move, excluding a held intention.
+    pub fn first_motion_cell(&self) -> Option<CellID> {
+        if self.intention.intention_cell_id == self.cell_id
+            || self.intention.intention_maneuver == LaneChangeType::Block
+            || self.intention.intention_speed <= 0
+        {
+            return None;
+        }
+        self.intention.intermediate_cells.first().copied()
+            .or(Some(self.intention.intention_cell_id))
+            .filter(|&cell| cell >= 0 && cell != self.cell_id)
+    }
+
+    /// Retains at most the first cell of the current move and rebuilds its tail.
+    /// A held intention stays blocked; priority cannot restore an earlier denied move.
+    pub fn restrict_intention_to_first_step(&mut self) {
+        if let Some(first) = self.first_motion_cell() {
+            self.set_single_step_intention(first);
+        } else {
+            self.block_with_speed(0);
+        }
+    }
+
+    /// Rewrites the intention to an explicitly supplied adjacent cell and rebuilds the tail.
+    /// Conflict resolution uses `restrict_intention_to_first_step` to preserve the existing path.
+    ///
+    /// # Arguments
+    /// * `target` - Adjacent destination cell for the replacement intention
     pub fn set_single_step_intention(&mut self, target: CellID) {
         self.intention.intention_cell_id = target;
         self.intention.intermediate_cells.clear();
         self.intention.intention_speed = 1;
-        if self.tail_cells.is_empty() {
-            self.intention.tail_intention_cells = Vec::new();
-        } else {
-            // Drop the furthest tail cell, shift the rest forward, append the cell the
-            // head is vacating (current cell_id) as the new nearest-to-head tail cell.
-            let mut tail = self.tail_cells[1..].to_vec();
-            tail.push(self.cell_id);
-            self.intention.tail_intention_cells = tail;
+        self.intention.tail_intention_cells.clear();
+        if !self.tail_cells.is_empty() {
+            // Reuse the intention buffer while dropping the furthest tail cell.
+            self.intention.tail_intention_cells.extend_from_slice(&self.tail_cells[1..]);
+            self.intention.tail_intention_cells.push(self.cell_id);
         }
     }
 
@@ -666,6 +683,9 @@ impl Vehicle {
     /// # Arguments
     /// * `new_len` - Number of cells the vehicle actually moves this tick
     pub fn trim_forward_intention(&mut self, new_len: usize) {
+        if self.intention.intention_cell_id == self.cell_id {
+            return;
+        }
         let mut path: Vec<CellID> = self.intention.intermediate_cells.clone();
         path.push(self.intention.intention_cell_id);
         if new_len >= path.len() {
