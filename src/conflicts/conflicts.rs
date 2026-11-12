@@ -7,7 +7,7 @@ use crate::grid::road_network::GridRoads;
 use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::utils::rand::random_bool;
-use crate::verbose::{LocalLogger, VerboseLevel};
+use crate::verbose::LocalLogger;
 
 use std::collections::{HashMap, HashSet};
 use indexmap::IndexMap;
@@ -45,8 +45,8 @@ pub enum ConflictType {
     /// This type of the conflict occurs when vehicle moving with speed > 1
     /// and both tail and transit intentions happen
     SelfTail,
-    /// Both vehicles are going to change lane but trajectories on one vehicle
-    /// and other's tail are going to intersect and some.
+    /// Physical crossing with a vehicle body, through lane changes or declared zone edges.
+    /// The body owner has precedence regardless of patience or behavioral priority.
     TailCrossLaneChange,
 }
 
@@ -175,20 +175,20 @@ pub fn find_cross_trajectories_conflict_naive(
     net: &GridRoads,
     vehicles: &indexmap::IndexMap<VehicleID, Vehicle>,
 ) -> Result<Option<TrajectoryConflictInfo>, ConflictError> {
-    /* No straight conflict, but could be crossing trajectories conflict */
-    // A        B
-    // |  L  R  |
-    // |   \/   |
-    // F   /\   F
-    // |  /  \  |
-    // X        Y
+    Ok(find_cross_trajectories_conflicts(
+        cell_intention, intention_cell, collected_intentions, net, vehicles,
+    )?.into_iter().next())
+}
 
-    // X, Y, A, B - positions
-    // F - forward
-    // L - left
-    // R - right
-    // Vehicle in position 'X'. Intention - position 'B'
-
+// Every matching opponent contributes a constraint, including opponents whose
+// target also has a same-cell conflict. Cell cardinality never removes an edge.
+fn find_cross_trajectories_conflicts(
+    cell_intention: &CellIntention,
+    intention_cell: &Cell,
+    collected_intentions: &Intentions,
+    net: &GridRoads,
+    vehicles: &IndexMap<VehicleID, Vehicle>,
+) -> Result<Vec<TrajectoryConflictInfo>, ConflictError> {
     let vehicle = vehicles.get(&cell_intention.get_vehicle_id()).ok_or(
         ConflictError::InvalidVehicle(format!("Vehicle {} not found", cell_intention.get_vehicle_id()))
     )?;
@@ -202,7 +202,7 @@ pub fn find_cross_trajectories_conflict_naive(
     if !vehicle.tail_cells.is_empty() && 
        vehicle.intention.intention_maneuver != LaneChangeType::ChangeRight && 
        vehicle.intention.tail_maneuver.intention_maneuver != LaneChangeType::ChangeRight {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     
     if !vehicle.tail_cells.is_empty() && vehicle.intention.tail_maneuver.intention_maneuver == LaneChangeType::ChangeRight {
@@ -212,7 +212,7 @@ pub fn find_cross_trajectories_conflict_naive(
     }
     
     if vehicle.tail_cells.is_empty() && vehicle.intention.intention_maneuver != LaneChangeType::ChangeRight {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     // Extract cell object by 'X' position
@@ -222,116 +222,72 @@ pub fn find_cross_trajectories_conflict_naive(
     // Check if position 'A' exists for 'X'
     if current_cell.get_forward_id() < 0 {
         // No forward cell at all for current vehicle's position
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     // Get all intentions for position 'A' 
     let forward_intentions = collected_intentions.get(&current_cell.get_forward_id());
     if forward_intentions.is_none() || forward_intentions.unwrap().is_empty() {
         // No intentions for position 'A'
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
-    // Scan any vehicle which is targeted for position 'A' and is doing LEFT maneuver or there is some tail
-    let mut side_vehicle_left_id: Option<VehicleID> = None;
-    let mut last_cell_intention = IntentionType::Target;
-    
+    let mut result = Vec::new();
     for forward_intention in forward_intentions.unwrap() {
-        let fwd_vehicle = vehicles.get(&forward_intention.get_vehicle_id()).ok_or(
-            ConflictError::InvalidVehicle(format!("Vehicle {} not found", forward_intention.get_vehicle_id()))
-        )?;
-        if fwd_vehicle.intention.intention_maneuver == LaneChangeType::ChangeLeft || forward_intention.int_type == IntentionType::Tail {
-            last_cell_intention = forward_intention.int_type;
-            side_vehicle_left_id = Some(forward_intention.get_vehicle_id());
-            break;
+        let side_vehicle_id = forward_intention.get_vehicle_id();
+        if side_vehicle_id == vehicle.id {
+            continue;
         }
-    }
-    
-    let side_vehicle_id = match side_vehicle_left_id {
-        Some(vehicle_id) => vehicle_id,
-        None => return Ok(None), // No conflict found
-    };
-    let side_vehicle = vehicles.get(&side_vehicle_id).ok_or(
-        ConflictError::InvalidVehicle(format!("Vehicle {} not found", side_vehicle_id))
-    )?;
-
-    // Handle tail case
-    if last_cell_intention == IntentionType::Tail {
-        if side_vehicle.tail_cells.is_empty() {
-            return Err(ConflictError::InvalidVehicle(
-                format!("Cell intention with 'INTENTION_TAIL' type has reference to vehicle which has no tail {}", side_vehicle.id)
-            ));
+        let side_vehicle = vehicles.get(&side_vehicle_id).ok_or_else(||
+            ConflictError::InvalidVehicle(format!("Vehicle {} not found", side_vehicle_id)))?;
+        let tail = forward_intention.int_type == IntentionType::Tail;
+        if !tail && side_vehicle.intention.intention_maneuver != LaneChangeType::ChangeLeft {
+            continue;
         }
-
-        // Check if any tail cell's forward node matches our target
-        for &occ_cell_id in &side_vehicle.tail_cells {
-            if occ_cell_id < 0 {
-                continue;
+        if tail {
+            if side_vehicle.tail_cells.is_empty() {
+                return Err(ConflictError::InvalidVehicle(format!(
+                    "Tail claim belongs to vehicle {} without a tail", side_vehicle.id)));
             }
-            
-            let side_vehicle_cell = net.get_cell(&occ_cell_id)
-                .ok_or(ConflictError::CellNotFound(occ_cell_id))?;
-            
-            if side_vehicle_cell.get_forward_id() < 0 {
-                continue;
+            for &occupied in &side_vehicle.tail_cells {
+                if occupied < 0 {
+                    continue;
+                }
+                let side_cell = net.get_cell(&occupied)
+                    .ok_or(ConflictError::CellNotFound(occupied))?;
+                if side_cell.get_forward_id() == cell_b {
+                    result.push(TrajectoryConflictInfo {
+                        vehicle_id: vehicle.id,
+                        side_vehicle_id,
+                        conflict_type: ConflictType::TailCrossLaneChange,
+                        priority_vehicle_id: side_vehicle_id,
+                    });
+                    break;
+                }
             }
-            
-            if side_vehicle_cell.get_forward_id() == cell_b {
-                // Found tail cross conflict - side vehicle has priority
-                return Ok(Some(TrajectoryConflictInfo {
-                    vehicle_id: vehicle.id,
-                    side_vehicle_id: side_vehicle.id,
-                    conflict_type: ConflictType::TailCrossLaneChange,
-                    priority_vehicle_id: side_vehicle.id, // Side vehicle has priority in tail conflicts
-                }));
-            }
+            continue;
         }
-        return Ok(None);
-    }
-
-    // Handle regular maneuver case
-    // Extract cell object for side vehicle. It should be position 'Y'
-    let side_vehicle_cell = net.get_cell(&side_vehicle.cell_id)
-        .ok_or(ConflictError::CellNotFound(side_vehicle.cell_id))?;
-
-    // Check if forward cell for side vehicle exists. It should be position 'B'
-    if side_vehicle_cell.get_forward_id() < 0 {
-        return Ok(None);
-    }
-
-    // Check if position is 'B' == intention cell
-    if side_vehicle_cell.get_forward_id() == cell_b {
-        // Determine priority based on behavior types and maneuver types
-        let priority_vehicle_id = if conflict_type == ConflictType::TailCrossLaneChange {
-            // Tail conflict: the TAIL OWNER wins - physical body, you cannot drive through it,
-            // so no aggressor / patience override applies. Here `vehicle`'s tail is the one doing
-            // the crossing maneuver, so it holds the cell.
-            vehicle.id
-        } else {
-            // Plain crossing: a CUT-IN aggressor wins (gradient `aggressor_advantage`,
-            // aggressive_level > 0.8 and strictly more aggressive); otherwise the LEFT maneuver
-            // wins (side_vehicle does LEFT - right-hand traffic). Equal aggression -> left wins
-            // (the comparison is strict). Same gradient as MergeForward / ForwardLaneChange.
-            if aggressor_advantage(vehicle, side_vehicle) {
+        let side_cell = net.get_cell(&side_vehicle.cell_id)
+            .ok_or(ConflictError::CellNotFound(side_vehicle.cell_id))?;
+        if side_cell.get_forward_id() >= 0 && side_cell.get_forward_id() == cell_b {
+            let priority_vehicle_id = if conflict_type == ConflictType::TailCrossLaneChange
+                || aggressor_advantage(vehicle, side_vehicle)
+            {
                 vehicle.id
             } else {
-                side_vehicle.id
-            }
-        };
-        return Ok(Some(TrajectoryConflictInfo {
-            vehicle_id: vehicle.id,
-            side_vehicle_id: side_vehicle.id,
-            conflict_type,
-            priority_vehicle_id,
-        }));
+                side_vehicle_id
+            };
+            result.push(TrajectoryConflictInfo {
+                vehicle_id: vehicle.id,
+                side_vehicle_id,
+                conflict_type,
+                priority_vehicle_id,
+            });
+        }
     }
-
-    Ok(None)
+    Ok(result)
 }
 
-/// Converts a trajectory conflict info into a CellConflict struct.
-///
-/// Used to create a conflict record for further resolution.
 impl CellConflict {
     pub fn from_trajectory_conflict_info(
         info: TrajectoryConflictInfo,
@@ -555,7 +511,13 @@ pub fn find_conflicts_in_conflict_zones(
         cell_id: -1, // Conflict zones don't have specific target cells
         participants,
         priority_participant_index: priority_index,
-        conflict_type,
+        conflict_type: if cell_intention.int_type == IntentionType::Tail
+            || second_cell_intention.int_type == IntentionType::Tail
+        {
+            ConflictType::TailCrossLaneChange
+        } else {
+            conflict_type
+        },
     };
 
     Ok(Some((conflict, cell_b_conflict_zone_id)))
@@ -719,6 +681,22 @@ fn collect_cross_zone_constraints(
 ) -> Result<(Vec<CellConflict>, HashSet<ConflictZoneID>), ConflictError> {
     let mut conflicts = Vec::new();
     let mut explored = HashSet::new();
+    let mut zone_ids = zone_ids.into_iter().peekable();
+    if zone_ids.peek().is_none() {
+        return Ok((conflicts, explored));
+    }
+    // A body spans its initial edges even when its head is blocked or its entire
+    // projected tail has moved beyond the zone. These are physical constraints.
+    let mut body_edges: HashMap<(CellID, CellID), Vec<VehicleID>> = HashMap::new();
+    for v in vehicles.values() {
+        for (&source, &target) in v.tail_cells.iter().zip(
+            v.tail_cells.iter().skip(1).chain(std::iter::once(&v.cell_id)),
+        ) {
+            if source >= 0 && target >= 0 {
+                body_edges.entry((source, target)).or_default().push(v.id);
+            }
+        }
+    }
     for zone_id in zone_ids {
         let zone = &zones[&zone_id];
         let first = zone.get_first_edge();
@@ -729,6 +707,11 @@ fn collect_cross_zone_constraints(
         explored.insert(zone_id);
         let participants = |source, target| -> Result<Vec<(VehicleID, bool)>, ConflictError> {
             let mut found = std::collections::BTreeMap::new();
+            if let Some(owners) = body_edges.get(&(source, target)) {
+                for &id in owners {
+                    found.insert(id, true);
+                }
+            }
             if let Some(cells) = intentions.get(&target) {
                 for intention in cells {
                     let id = intention.get_vehicle_id();
@@ -775,7 +758,11 @@ fn collect_cross_zone_constraints(
                     cell_id: -1,
                     participants: vec![a, b],
                     priority_participant_index: priority,
-                    conflict_type: ConflictType::CrossConflictZone,
+                    conflict_type: if a_tail || b_tail {
+                        ConflictType::TailCrossLaneChange
+                    } else {
+                        ConflictType::CrossConflictZone
+                    },
                 });
             }
         }
@@ -830,6 +817,61 @@ pub fn collect_conflicts_indexed(
     )
 }
 
+// Initial body diagonals remain occupied independently of projected tail claims.
+// Index both directions so protection does not depend on which head initiates a probe.
+fn collect_body_lane_constraints(
+    net: &GridRoads,
+    vehicles: &IndexMap<VehicleID, Vehicle>,
+) -> Result<Vec<CellConflict>, ConflictError> {
+    let mut left_bodies: HashMap<(CellID, CellID), Vec<VehicleID>> = HashMap::new();
+    let mut right_bodies: HashMap<(CellID, CellID), Vec<VehicleID>> = HashMap::new();
+    for v in vehicles.values() {
+        for (&source, &target) in v.tail_cells.iter().zip(
+            v.tail_cells.iter().skip(1).chain(std::iter::once(&v.cell_id)),
+        ) {
+            if source < 0 || target < 0 {
+                continue;
+            }
+            let cell = net.get_cell(&source).ok_or(ConflictError::CellNotFound(source))?;
+            if cell.get_forward_id() < 0 {
+                continue;
+            }
+            let key = (target, cell.get_forward_id());
+            if cell.get_left_id() == target {
+                left_bodies.entry(key).or_default().push(v.id);
+            }
+            if cell.get_right_id() == target {
+                right_bodies.entry(key).or_default().push(v.id);
+            }
+        }
+    }
+    let mut result = Vec::new();
+    if left_bodies.is_empty() && right_bodies.is_empty() {
+        return Ok(result);
+    }
+    for v in vehicles.values() {
+        let opposite = match v.intention.intention_maneuver {
+            LaneChangeType::ChangeRight => &left_bodies,
+            LaneChangeType::ChangeLeft => &right_bodies,
+            _ => continue,
+        };
+        let cell = net.get_cell(&v.cell_id).ok_or(ConflictError::CellNotFound(v.cell_id))?;
+        if let Some(owners) = opposite.get(&(cell.get_forward_id(), v.intention.intention_cell_id)) {
+            for &owner in owners {
+                if owner != v.id {
+                    result.push(CellConflict {
+                        cell_id: -1,
+                        participants: vec![owner, v.id],
+                        priority_participant_index: 0,
+                        conflict_type: ConflictType::TailCrossLaneChange,
+                    });
+                }
+            }
+        }
+    }
+    Ok(result)
+}
+
 fn collect_conflicts_for_zones(
     collected_intentions: &Intentions,
     net: &GridRoads,
@@ -866,6 +908,18 @@ fn collect_conflicts_for_zones(
     let (zone_constraints, mut explored_conflict_zones) =
         collect_cross_zone_constraints(collected_intentions, conflict_zones, vehicles, zone_ids)?;
     let mut conflicts_data = Vec::with_capacity(collected_intentions.len() / 2);
+    let mut trajectory_pairs = HashSet::new();
+    // Forward-only workloads have no geometric lane crossing to collect.
+    let (has_right_trajectory, has_bodies) = vehicles.values().fold((false, false), |(right, body), v| {
+        (right || v.intention.intention_maneuver == LaneChangeType::ChangeRight
+            || v.intention.tail_maneuver.intention_maneuver == LaneChangeType::ChangeRight,
+            body || !v.tail_cells.is_empty())
+    });
+    let body_constraints = if has_bodies {
+        collect_body_lane_constraints(net, vehicles)?
+    } else {
+        Vec::new()
+    };
 
     for (intention_cell_id, cell_intentions) in collected_intentions.iter() {
         if cell_intentions.is_empty() {
@@ -879,134 +933,41 @@ fn collect_conflicts_for_zones(
 
         let vehicles_num = cell_intentions.len();
 
+        if has_right_trajectory {
+            for claim in cell_intentions {
+                for info in find_cross_trajectories_conflicts(
+                    claim, intention_cell, collected_intentions, net, vehicles,
+                )? {
+                    let key = (info.vehicle_id, info.side_vehicle_id,
+                        info.conflict_type == ConflictType::TailCrossLaneChange);
+                    if trajectory_pairs.insert(key) {
+                        let first = info.vehicle_id;
+                        let second = info.side_vehicle_id;
+                        conflicts_data.push(CellConflict::from_trajectory_conflict_info(info, first, second));
+                        if let Some(v) = vehicles.get_mut(&first) {
+                            v.is_conflict_participant = true;
+                        }
+                    }
+                }
+            }
+        }
         if vehicles_num == 1 {
-            if verbose.is_at_least(crate::verbose::VerboseLevel::Additional) {
-                verbose.log_with_fields(
-                    crate::verbose::EVENT_CONFLICTS_COLLECT,
-                    "Inspect single-vehicle intention",
-                    &[
-                        ("cell_intention", &format!("{:?}", cell_intentions[0])),
-                        ("intention_cell", &intention_cell.get_id()),
-                    ]
-                );
-            }
-
-            // Skip blocks / already processing
-            let cell_intention = &cell_intentions[0];
-            let should_skip = {
-                let vehicle = vehicles.get(&cell_intention.get_vehicle_id()).ok_or(
-                    ConflictError::InvalidVehicle(format!("Vehicle {} not found", cell_intention.get_vehicle_id()))
-                )?;
-                vehicle.intention.intention_maneuver == LaneChangeType::Block || vehicle.is_conflict_participant
-            };
-
-            if should_skip {
-                if verbose.is_at_least(VerboseLevel::Additional) {
-                    let vehicle = vehicles.get(&cell_intention.get_vehicle_id()).unwrap();
-                    verbose.log_with_fields(
-                        crate::verbose::EVENT_CONFLICTS_COLLECT,
-                        "Vehicle is blocked or is in conflict already",
-                        &[
-                            ("vehicle_id", &vehicle.id),
-                            ("maneuver", &format!("{:?}", vehicle.intention.intention_maneuver)),
-                            ("is_conflict_participant", &vehicle.is_conflict_participant),
-                            ("intention_cell", &intention_cell.get_id()),
-                        ]
-                    );
-                }
-                continue;
-            }
-
-            let mut possible_cross_conflict: Option<CellConflict> = None;
-
-            if verbose.is_at_least(VerboseLevel::Additional) {
-                verbose.log_with_fields(
-                    crate::verbose::EVENT_CONFLICTS_COLLECT,
-                    "Try to find simple trajectories conflict",
-                    &[
-                        ("cell_intention", &format!("{:?}", cell_intention)),
-                        ("intention_cell", &intention_cell.get_id()),
-                    ]
-                );
-            }
-
-            // Check for crossing trajectories
-            let cross_conflict_info = find_cross_trajectories_conflict_naive(
-                cell_intention, intention_cell, collected_intentions, net, vehicles
-            )?;
-
-            if verbose.is_at_least(VerboseLevel::Additional) {
-                verbose.log_with_fields(
-                    crate::verbose::EVENT_CONFLICTS_COLLECT,
-                    "After simple trajectories scan",
-                    &[
-                        ("cell_intention", &format!("{:?}", cell_intention)),
-                        ("intention_cell", &intention_cell.get_id()),
-                        ("is_trajectory_conflict", &cross_conflict_info.is_some()),
-                    ]
-                );
-            }
-
-            if let Some(conflict_info) = cross_conflict_info {
-                // Convert TrajectoryConflictInfo to CellConflict
-                let side_id = conflict_info.side_vehicle_id;
-                let conflict = CellConflict::from_trajectory_conflict_info(
-                    conflict_info,
-                    cell_intention.get_vehicle_id(),
-                    side_id,
-                );
-                possible_cross_conflict = Some(conflict);
-            }
-
-            if possible_cross_conflict.is_none() {
-                if verbose.is_at_least(VerboseLevel::Additional) {
-                    verbose.log_with_fields(
-                        crate::verbose::EVENT_CONFLICTS_COLLECT,
-                        "Try to find conflict zones trajectories conflict",
-                        &[
-                            ("cell_intention", &format!("{:?}", cell_intention)),
-                            ("intention_cell", &intention_cell.get_id()),
-                        ]
-                    );
-                }
-
-                // Check for conflict zones
-                let zone_conflict_result = find_conflicts_in_conflict_zones(
-                    cell_intention,
-                    intention_cell,
-                    collected_intentions,
-                    conflict_zones,
-                    cells_conflicts_zones,
-                    &mut explored_conflict_zones,
-                    vehicles,
-                )?;
-
-                if verbose.is_at_least(VerboseLevel::Additional) {
-                    verbose.log_with_fields(
-                        crate::verbose::EVENT_CONFLICTS_COLLECT,
-                        "After conflict zones trajectories scan",
-                        &[
-                            ("cell_intention", &format!("{:?}", cell_intention)),
-                            ("intention_cell", &intention_cell.get_id()),
-                            ("is_trajectory_conflict", &zone_conflict_result.is_some()),
-                        ]
-                    );
-                }
-
-                if let Some((conflict, conflict_zone_id)) = zone_conflict_result {
-                    explored_conflict_zones.insert(conflict_zone_id);
-                    possible_cross_conflict = Some(conflict);
+            let claim = &cell_intentions[0];
+            let v = vehicles.get(&claim.get_vehicle_id()).ok_or_else(||
+                ConflictError::InvalidVehicle(format!("Vehicle {} not found", claim.get_vehicle_id())))?;
+            if v.intention.intention_maneuver != LaneChangeType::Block && !v.is_conflict_participant {
+                // Preserve validation of legacy incidence references. Complete indexed
+                // zone constraints have already been collected from the snapshot.
+                if let Some((conflict, id)) = find_conflicts_in_conflict_zones(
+                    claim, intention_cell, collected_intentions, conflict_zones,
+                    cells_conflicts_zones, &mut explored_conflict_zones, vehicles,
+                )? {
+                    explored_conflict_zones.insert(id);
+                    conflicts_data.push(conflict);
                 }
             }
-
-            // Add conflict if found and mark vehicle as conflict participant
-            if let Some(conflict) = possible_cross_conflict {
-                if let Some(v) = vehicles.get_mut(&cell_intention.get_vehicle_id()) {
-                    v.is_conflict_participant = true;
-                }
-                conflicts_data.push(conflict);
-            }
-        } else {
+        }
+        if vehicles_num > 1 {
             if verbose.is_at_least(crate::verbose::VerboseLevel::Additional) {
                 verbose.log_with_fields(
                     crate::verbose::EVENT_CONFLICTS_COLLECT,
@@ -1049,7 +1010,7 @@ fn collect_conflicts_for_zones(
         }
     }
 
-    for constraint in zone_constraints {
+    for constraint in body_constraints.into_iter().chain(zone_constraints) {
         // A physical tail conflict already blocks this same pair without a patience override.
         let covered_by_tail = conflicts_data.iter().any(|existing| {
             matches!(existing.conflict_type, ConflictType::Tail | ConflictType::TailCrossLaneChange)

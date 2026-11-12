@@ -233,6 +233,13 @@ pub fn resolve_merge_lane_change<'a>(
         (LaneChangeType::ChangeRight, LaneChangeType::ChangeLeft) => {
             (intention_two, ConflictType::MergeLaneChange)
         }
+        (LaneChangeType::ChangeLeft, LaneChangeType::ChangeLeft)
+        | (LaneChangeType::ChangeRight, LaneChangeType::ChangeRight) => {
+            // Distinct branches can converge through equally directed maneuvers.
+            // Without an opposing left/right priority, use the ordinary merge tie-break.
+            let (winner, _) = resolve_by_speed_and_cooperativity(intention_one, intention_two, vehicles);
+            (winner, ConflictType::MergeLaneChange)
+        }
         _ => {
             panic!("Unexpected lane change")
         }

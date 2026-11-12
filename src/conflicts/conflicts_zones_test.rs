@@ -330,7 +330,7 @@ mod tests {
 
         let (conflict, conflict_zone_id) = conflict_result.unwrap();
         assert_eq!(conflict_zone_id, 1);
-        assert_eq!(conflict.conflict_type, ConflictType::CrossConflictZone);
+        assert_eq!(conflict.conflict_type, ConflictType::TailCrossLaneChange);
         assert_eq!(conflict.participants.len(), 2);
 
         // Vehicle1 should have priority because it has INTENTION_TAIL (tail conflicts have higher priority)
@@ -541,7 +541,7 @@ mod tests {
 
         let (conflict, conflict_zone_id) = conflict_result.unwrap();
         assert_eq!(conflict_zone_id, 1);
-        assert_eq!(conflict.conflict_type, ConflictType::CrossConflictZone);
+        assert_eq!(conflict.conflict_type, ConflictType::TailCrossLaneChange);
         assert_eq!(conflict.participants.len(), 2);
 
         // Vehicle1 should have priority because it has INTENTION_TAIL
@@ -1143,7 +1143,7 @@ mod tests {
 
         let correct_conflicts = vec![
             CorrectConflict {
-                conflict_type: ConflictType::CrossConflictZone,
+                conflict_type: ConflictType::TailCrossLaneChange,
                 priority_participant_id: 1, // Vehicle 1 has priority (tail intention)
             }
         ];
