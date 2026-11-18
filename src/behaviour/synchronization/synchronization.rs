@@ -14,7 +14,7 @@
 /// Phase measurements must retain stopped vehicles in residence time, density and
 /// average speed. See Kerner, Klenov and Hiller, "Criterion for traffic phases in
 /// single vehicle data and empirical test of a microscopic three-phase traffic theory",
-/// section II B, doi:/10.1088/0305-4470/39/9/002.
+/// section II B, doi:10.1088/0305-4470/39/9/002.
 ///
 /// A nonpositive time_gap disables the extension and preserves relative randomization.
 /// All current behaviour presets and Vehicle::new keep it disabled. When enabled,
@@ -101,7 +101,7 @@ impl SynchronizationParameters {
         start_delay: 2,
     };
 
-    /// Clamps probabilities to [0,1] and integer thresholds to nonnegative values.
+    /// Clamps probabilities to `[0,1]` and integer thresholds to nonnegative values.
     /// Non-finite probabilities become zero; non-finite time_gap disables adaptation.
     pub fn clamped(self) -> Self {
         fn probability(value: f64) -> f64 {

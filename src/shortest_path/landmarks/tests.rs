@@ -224,3 +224,39 @@ fn test_routing_with_active_landmarks_matches_geometric() {
         }
     }
 }
+
+// Landmark queue entries obey the same equality/order contract at floating-point edges.
+// The queue retains its existing larger-ID preference at equal finite distance.
+#[test]
+fn test_dijkstra_queue_order_contract() {
+    let distances = [
+        f64::NEG_INFINITY,
+        -1.0,
+        -0.0,
+        0.0,
+        1.0,
+        f64::INFINITY,
+        f64::NAN,
+    ];
+    let entries: Vec<_> = [1, 2]
+        .into_iter()
+        .flat_map(|cell| distances.map(move |dist| DijkstraEntry { dist, cell }))
+        .collect();
+    for a in &entries {
+        assert!(a == a);
+        for b in &entries {
+            assert_eq!(a == b, a.cmp(b) == Ordering::Equal);
+            assert_eq!(a.partial_cmp(b), Some(a.cmp(b)));
+            assert_eq!(a.cmp(b), b.cmp(a).reverse());
+        }
+    }
+    let mut queue = BinaryHeap::from([
+        DijkstraEntry { dist: 2.0, cell: 1 },
+        DijkstraEntry { dist: 1.0, cell: 1 },
+        DijkstraEntry { dist: 1.0, cell: 2 },
+    ]);
+    let popped: Vec<_> = std::iter::from_fn(|| queue.pop())
+        .map(|entry| (entry.dist, entry.cell))
+        .collect();
+    assert_eq!(popped, vec![(1.0, 2), (1.0, 1), (2.0, 1)]);
+}

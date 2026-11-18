@@ -162,7 +162,6 @@ impl TrafficLightBuilder {
     }
 
     /// Sets the signal groups for the traffic light.
-    /// @todo: consider &Vec<TrafficLightGroup> and groups.clone() may be?
     pub fn with_groups(mut self, groups: Vec<TrafficLightGroup>) -> Self {
         self.traffic_light.groups = groups;
         self

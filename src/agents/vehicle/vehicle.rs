@@ -211,7 +211,7 @@ pub struct Vehicle {
     /// Lane-change probability: once the incentive + safety conditions hold, the
     /// change is taken only with this probability - the canonical stochastic anti-weaving gate.
     /// `1.0` (default) = always change when conditions hold (= current behaviour, no refusal).
-    /// Trucks use a smaller value (P2 <= P1) [@todo: not implemented and tested yet].
+    /// All vehicle lengths use this configured probability. There is no separate truck P2.
     /// In (0, 1].
     pub change_p1: f64,
     /// Lane-change hysteresis: steps remaining during which a REACTIVE (blocked-escape) lane
@@ -799,7 +799,7 @@ impl Vehicle {
     ///
     /// # Arguments
     ///
-    /// * `p0` - Reference one-cell probability, clamped to [0,1].
+    /// * `p0` - Reference one-cell probability, clamped to `[0,1]`.
     /// * `length_cells` - Materialized body length including the head; at most one keeps p0.
     /// * `mean_gap` - Common population mean empty cells; negative or non-finite values use zero.
     pub fn slow_to_start_for_mean_gap(p0: f64, length_cells: i32, mean_gap: f64) -> f64 {
@@ -1271,7 +1271,7 @@ impl VehicleBuilder {
 
     /// Sets the lane-change probability `p1` stochastic anti-weaving gate).
     /// `1.0` (default) = always change when incentive + safety hold.
-    /// Trucks: P2 <= P1 [@todo: implement trucks' P2]
+    /// All vehicle lengths use this configured probability.
     pub fn with_change_p1(mut self, p: f64) -> Self {
         self.vehicle.change_p1 = p;
         self

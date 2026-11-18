@@ -14,7 +14,7 @@
 //! - [`test_grids::create_simple_cross_shape_grid`] - Simple 4-way intersection
 //!
 //! ### Testing Support
-//! - [`rand::thread_rng`] - Deterministic RNG for reproducible tests
+//! - [`rand::random_f64`] and [`rand::random_bool`] - Seedable random draws
 //!
 //! ## Example
 //!

@@ -31,7 +31,7 @@ struct DijkstraEntry {
 }
 impl PartialEq for DijkstraEntry {
     fn eq(&self, other: &Self) -> bool {
-        self.dist == other.dist && self.cell == other.cell
+        self.cmp(other) == Ordering::Equal
     }
 }
 impl Eq for DijkstraEntry {}
@@ -39,8 +39,7 @@ impl Ord for DijkstraEntry {
     fn cmp(&self, other: &Self) -> Ordering {
         other
             .dist
-            .partial_cmp(&self.dist)
-            .unwrap_or(Ordering::Equal)
+            .total_cmp(&self.dist)
             .then_with(|| self.cell.cmp(&other.cell))
     }
 }

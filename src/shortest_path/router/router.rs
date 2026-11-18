@@ -107,8 +107,8 @@ impl<'a> AStarNode<'a> {
 
 // For implementing min-heap
 impl<'a> PartialEq for AStarNode<'a> {
-    fn eq(&self, other: &AStarNode) -> bool {
-        self.f_cost == other.f_cost
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
     }
 }
 
@@ -163,7 +163,7 @@ impl<'a> Ord for AStarNode<'a> {
 /// I did not measured actual performance yet, but in theory:
 /// - **Time complexity**: O(b^d) where b is branching factor, d is solution depth  
 /// - **Space complexity**: O(b^d) for storing explored nodes
-/// - See the ref.: https://en.wikipedia.org/wiki/A*_search_algorithm#Complexity
+/// - See [A* complexity](https://en.wikipedia.org/wiki/A*_search_algorithm#Complexity).
 ///
 /// # Examples
 ///

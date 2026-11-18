@@ -69,7 +69,7 @@ impl std::error::Error for MovementError {}
 ///
 /// # Returns
 ///
-/// * `Ok(())` - Movement completed successfully for all vehicles.
+/// * `Ok((completed, lost))` - Counts of vehicles removed after reaching their final destination or leaving elsewhere.
 /// * `Err(MovementError)` - Movement failed due to data inconsistency.
 ///
 /// # Movement process
@@ -90,20 +90,17 @@ impl std::error::Error for MovementError {}
 ///
 /// ### Lane Change Timers
 /// After lane changes, vehicles get temporary movement restrictions:
-/// ```rust
-/// // After left/right lane change
-/// // vehicle.timer_non_acceleration = tail_size;  // Can't accelerate
-/// // vehicle.timer_non_maneuvers = tail_size;     // Can't change lanes  
-/// // vehicle.timer_non_slowdown = tail_size;      // Can't slow down
-/// ```
+/// Acceleration, maneuver and slowdown timers are set to the vehicle's tail length in cells.
+/// These timers count down on movement so the tail can finish its maneuver.
+/// The reactive lane-change cooldown counts down on every tick.
 ///
-/// ### Transit Logic **FUTURE WORKS**
+/// ### Transit Logic
 /// Some vehicles e.g. busses follow multi-stop routes through transit cells:
 /// - When reaching a transit stop, increments `transits_made` counter.
 /// - Updates destination to next transit cell in sequence.
 /// - Uses relax countdown for dwell time at stops.
 ///
-/// ### Relax countdown **FUTURE WORKS**
+/// ### Relax countdown
 /// Some vehicles must wait before moving:
 /// - Buses at transit stops (dwell time).
 /// - Vehicles after certain maneuvers.
@@ -115,10 +112,8 @@ impl std::error::Error for MovementError {}
 /// - **Destination reached**: Vehicle arrives at intended destination.
 ///
 /// # Performance Characteristics
-/// I did not measured actual performance yet, but in theory:
-/// - **Time complexity**: O(n) where n = number of active vehicles.
-/// - **Space complexity**: O(1) additional space.
-/// - **Memory management**: Uses `swap_remove()` for efficient vehicle removal.
+/// Work depends on the number of active vehicles and their materialized tails.
+/// A temporary vector holds IDs of vehicles to remove. Removal uses `swap_remove()`.
 ///
 /// # Integration Notes
 ///

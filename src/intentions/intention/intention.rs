@@ -1063,7 +1063,7 @@ fn check_alternate_direction(
 /// * `maneuvers_allowed` - Whether lane changes are allowed (false if tail is still completing a maneuver)
 /// * `reconnect_max_depth` - Bound for the forward-roll reachability guard; MUST match the
 ///   per-tick reconnect bound so an authorized roll is guaranteed to reconnect next tick
-///   (see [`forward_keeps_reachable`]).
+///   (see `forward_keeps_reachable`).
 pub fn find_alternate_intention<'a>(
     net: &'a GridRoads,
     current_state: &HashMap<CellID, VehicleID>,

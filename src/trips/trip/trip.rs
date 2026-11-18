@@ -571,7 +571,7 @@ impl TripBuilder {
     ///
     /// # Arguments
     ///
-    /// * `share` - Fraction assigned one cell, clamped to [0,1]; non-finite values become zero.
+    /// * `share` - Fraction assigned one cell, clamped to `[0,1]`. Non-finite values become zero.
     pub fn with_standstill_gap_share(mut self, share: f64) -> Self {
         self.trip.standstill_gap_share = Some(if share.is_finite() {
             share.clamp(0.0, 1.0)

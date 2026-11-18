@@ -434,3 +434,42 @@ fn test_forward_path_wraps_around_ring() {
         "Incorrect circular path traversal"
     );
 }
+
+// Queue equality and ordering agree for cost ties, signed zero, infinities and NaN.
+// At equal finite cost, the smaller cell ID is popped first.
+#[test]
+fn test_astar_queue_order_contract() {
+    let cells = [Cell::new(1).build(), Cell::new(2).build()];
+    let costs = [
+        f64::NEG_INFINITY,
+        -1.0,
+        -0.0,
+        0.0,
+        1.0,
+        f64::INFINITY,
+        f64::NAN,
+    ];
+    let nodes: Vec<_> = cells
+        .iter()
+        .flat_map(|cell| {
+            costs.map(|cost| AStarNode::new(cell, 0.0, cost, None, LaneChangeType::NoChange))
+        })
+        .collect();
+    for a in &nodes {
+        assert_eq!(a, a);
+        for b in &nodes {
+            assert_eq!(a == b, a.cmp(b) == Ordering::Equal);
+            assert_eq!(a.partial_cmp(b), Some(a.cmp(b)));
+            assert_eq!(a.cmp(b), b.cmp(a).reverse());
+        }
+    }
+    let mut queue = BinaryHeap::from([
+        AStarNode::new(&cells[0], 0.0, 2.0, None, LaneChangeType::NoChange),
+        AStarNode::new(&cells[1], 0.0, 1.0, None, LaneChangeType::NoChange),
+        AStarNode::new(&cells[0], 0.0, 1.0, None, LaneChangeType::NoChange),
+    ]);
+    let popped: Vec<_> = std::iter::from_fn(|| queue.pop())
+        .map(|node| (node.f_cost, node.cell.get_id()))
+        .collect();
+    assert_eq!(popped, vec![(1.0, 1), (1.0, 2), (2.0, 1)]);
+}
