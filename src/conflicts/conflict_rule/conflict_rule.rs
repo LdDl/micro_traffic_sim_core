@@ -1,7 +1,7 @@
 use crate::agents::{Vehicle, VehicleID};
 use crate::conflicts::conflict_types::ConflictType;
-use crate::maneuver::LaneChangeType;
 use crate::intentions::{CellIntention, IntentionType};
+use crate::maneuver::LaneChangeType;
 use indexmap::IndexMap;
 
 const EPS_COOP_LEVEL: f64 = 0.0001;
@@ -36,51 +36,73 @@ macro_rules! conflict_rules {
 static CONFLICT_RULES: &[ConflictRule] = conflict_rules![
     // Both vehicles are changing lane on a single road
     // Two source lanes on one road is going to merge into single lane on another road
-    [ |v1, v2| changing_lane(v1) && changing_lane(v2), resolve_merge_lane_change ],
-
+    [
+        |v1, v2| changing_lane(v1) && changing_lane(v2),
+        resolve_merge_lane_change
+    ],
     // Both vehicles are moving forward on different lanes of different roads
     // Differet roads are going to merge into single road
-    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && v2.intention.intention_maneuver == LaneChangeType::NoChange, resolve_merge_forward ],
-
+    [
+        |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange
+            && v2.intention.intention_maneuver == LaneChangeType::NoChange,
+        resolve_merge_forward
+    ],
     // First vehicle is moving forward, second is changing lane.
     // The forward vehicle normally has priority (the changer gives way), UNLESS the changer is a
     // CUT-IN aggressor that out-aggresses it (`aggressor_advantage`): then the aggressor squeezes
     // in and the forward vehicle is the one forced to brake. Equal aggression keeps priority with
     // the forward vehicle (the comparison is strict) - "higher aggression wins, ties go straight".
-    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2), |cin1, cin2, vehicles| {
-        let v_forward = vehicles.get(&cin1.get_vehicle_id()).expect("Vehicle not found");
-        let v_changer = vehicles.get(&cin2.get_vehicle_id()).expect("Vehicle not found");
-        if aggressor_advantage(v_changer, v_forward) {
-            (cin2, ConflictType::ForwardLaneChange)
-        } else {
-            (cin1, ConflictType::ForwardLaneChange)
+    [
+        |v1, v2| v1.intention.intention_maneuver == LaneChangeType::NoChange && changing_lane(v2),
+        |cin1, cin2, vehicles| {
+            let v_forward = vehicles
+                .get(&cin1.get_vehicle_id())
+                .expect("Vehicle not found");
+            let v_changer = vehicles
+                .get(&cin2.get_vehicle_id())
+                .expect("Vehicle not found");
+            if aggressor_advantage(v_changer, v_forward) {
+                (cin2, ConflictType::ForwardLaneChange)
+            } else {
+                (cin1, ConflictType::ForwardLaneChange)
+            }
         }
-    } ],
-
+    ],
     // First vehicle is changing lane, second is moving forward.
     // Symmetric to the rule above: the forward vehicle keeps priority unless the changer is a
     // cut-in aggressor that out-aggresses it.
-    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange, |cin1, cin2, vehicles| {
-        let v_changer = vehicles.get(&cin1.get_vehicle_id()).expect("Vehicle not found");
-        let v_forward = vehicles.get(&cin2.get_vehicle_id()).expect("Vehicle not found");
-        if aggressor_advantage(v_changer, v_forward) {
-            (cin1, ConflictType::ForwardLaneChange)
-        } else {
-            (cin2, ConflictType::ForwardLaneChange)
+    [
+        |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::NoChange,
+        |cin1, cin2, vehicles| {
+            let v_changer = vehicles
+                .get(&cin1.get_vehicle_id())
+                .expect("Vehicle not found");
+            let v_forward = vehicles
+                .get(&cin2.get_vehicle_id())
+                .expect("Vehicle not found");
+            if aggressor_advantage(v_changer, v_forward) {
+                (cin1, ConflictType::ForwardLaneChange)
+            } else {
+                (cin2, ConflictType::ForwardLaneChange)
+            }
         }
-    } ],
-
+    ],
     // First vehicle is changing lane, second is blocking its lane
-    [ |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::Block, |_cin1, cin2, _| {
-        // Second vehicle is not moving therefore it holds the position
-        (cin2, ConflictType::BlockLaneChange)
-    } ],
-
+    [
+        |v1, v2| changing_lane(v1) && v2.intention.intention_maneuver == LaneChangeType::Block,
+        |_cin1, cin2, _| {
+            // Second vehicle is not moving therefore it holds the position
+            (cin2, ConflictType::BlockLaneChange)
+        }
+    ],
     // First vehicle is blocking its lane, second is changing lane
-    [ |v1, v2| v1.intention.intention_maneuver == LaneChangeType::Block && changing_lane(v2), |cin1, _cin2, _| {
-        // First vehicle is not moving therefore it holds the position
-        (cin1, ConflictType::BlockLaneChange)
-    } ]
+    [
+        |v1, v2| v1.intention.intention_maneuver == LaneChangeType::Block && changing_lane(v2),
+        |cin1, _cin2, _| {
+            // First vehicle is not moving therefore it holds the position
+            (cin1, ConflictType::BlockLaneChange)
+        }
+    ]
 ];
 
 // Dynamic approach: obsolete
@@ -153,8 +175,12 @@ pub fn resolve_simple_rules<'a>(
     intention_two: &'a CellIntention,
     vehicles: &IndexMap<VehicleID, Vehicle>,
 ) -> (&'a CellIntention, ConflictType) {
-    let v1 = vehicles.get(&intention_one.get_vehicle_id()).expect("Vehicle not found");
-    let v2 = vehicles.get(&intention_two.get_vehicle_id()).expect("Vehicle not found");
+    let v1 = vehicles
+        .get(&intention_one.get_vehicle_id())
+        .expect("Vehicle not found");
+    let v2 = vehicles
+        .get(&intention_two.get_vehicle_id())
+        .expect("Vehicle not found");
     for rule in CONFLICT_RULES {
         if (rule.condition)(v1, v2) {
             return (rule.resolver)(intention_one, intention_two, vehicles);
@@ -193,7 +219,7 @@ pub fn aggressor_advantage(vehicle_one: &Vehicle, vehicle_two: &Vehicle) -> bool
 /// Resolves a merge conflict where both vehicles are changing lanes into the same cell.
 ///
 /// Priority is given to aggressive vehicles, or to the vehicle performing a left maneuver (simulating right-hand traffic).
-/// 
+///
 /// # Visualization
 /// ```text
 /// Lane 1: →→→↘
@@ -209,8 +235,12 @@ pub fn resolve_merge_lane_change<'a>(
     vehicles: &IndexMap<VehicleID, Vehicle>,
 ) -> (&'a CellIntention, ConflictType) {
     // Extract vehicles once (with early panic if missing)
-    let vehicle_one = vehicles.get(&intention_one.get_vehicle_id()).expect("Vehicle not found");
-    let vehicle_two = vehicles.get(&intention_two.get_vehicle_id()).expect("Vehicle not found");
+    let vehicle_one = vehicles
+        .get(&intention_one.get_vehicle_id())
+        .expect("Vehicle not found");
+    let vehicle_two = vehicles
+        .get(&intention_two.get_vehicle_id())
+        .expect("Vehicle not found");
 
     // Check aggressive behaviour advantage, so aggressive vehicle could even violate the traffic rules
     // and have advantage over the cooperative vehicle
@@ -237,7 +267,8 @@ pub fn resolve_merge_lane_change<'a>(
         | (LaneChangeType::ChangeRight, LaneChangeType::ChangeRight) => {
             // Distinct branches can converge through equally directed maneuvers.
             // Without an opposing left/right priority, use the ordinary merge tie-break.
-            let (winner, _) = resolve_by_speed_and_cooperativity(intention_one, intention_two, vehicles);
+            let (winner, _) =
+                resolve_by_speed_and_cooperativity(intention_one, intention_two, vehicles);
             (winner, ConflictType::MergeLaneChange)
         }
         _ => {
@@ -262,8 +293,12 @@ pub fn resolve_by_speed_and_cooperativity<'a>(
     intention_two: &'a CellIntention,
     vehicles: &IndexMap<VehicleID, Vehicle>,
 ) -> (&'a CellIntention, ConflictType) {
-    let vehicle_one = vehicles.get(&intention_one.get_vehicle_id()).expect("Vehicle not found");
-    let vehicle_two = vehicles.get(&intention_two.get_vehicle_id()).expect("Vehicle not found");
+    let vehicle_one = vehicles
+        .get(&intention_one.get_vehicle_id())
+        .expect("Vehicle not found");
+    let vehicle_two = vehicles
+        .get(&intention_two.get_vehicle_id())
+        .expect("Vehicle not found");
 
     // Check speed advantage
     if vehicle_one.speed != vehicle_two.speed {
@@ -316,8 +351,12 @@ pub fn resolve_merge_forward<'a>(
     vehicles: &IndexMap<VehicleID, Vehicle>,
 ) -> (&'a CellIntention, ConflictType) {
     // Extract vehicles once (with early panic if missing)
-    let vehicle_one = vehicles.get(&intention_one.get_vehicle_id()).expect("Vehicle not found");
-    let vehicle_two = vehicles.get(&intention_two.get_vehicle_id()).expect("Vehicle not found");
+    let vehicle_one = vehicles
+        .get(&intention_one.get_vehicle_id())
+        .expect("Vehicle not found");
+    let vehicle_two = vehicles
+        .get(&intention_two.get_vehicle_id())
+        .expect("Vehicle not found");
 
     // Check aggressive behaviour advantage
     if aggressor_advantage(&vehicle_one, &vehicle_two) {

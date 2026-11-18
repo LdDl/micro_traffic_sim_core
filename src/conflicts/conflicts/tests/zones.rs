@@ -1,20 +1,19 @@
-
-use crate::conflicts::*;
+use crate::agents::{TailIntentionManeuver, Vehicle, VehicleID, VehicleIntention};
 use crate::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone};
-use crate::agents::{Vehicle, VehicleIntention, TailIntentionManeuver, VehicleID};
-use crate::intentions::{CellIntention, IntentionType, Intentions};
+use crate::conflicts::*;
 use crate::geom::new_point;
-use crate::grid::cell::{Cell};
-use crate::grid::zones::ZoneType;
+use crate::grid::cell::Cell;
 use crate::grid::road_network::GridRoads;
+use crate::grid::zones::ZoneType;
+use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::maneuver::LaneChangeType;
-use crate::verbose::{LocalLogger, VerboseLevel};
-use std::collections::{HashMap, HashSet};
-use indexmap::IndexMap;
+use crate::utils::generators::generate_one_lane_cells;
 use crate::utils::test_grids::{
     create_conflict_zones_grid, create_conflict_zones_multiple_grid, create_simple_cross_shape_grid,
 };
-use crate::utils::generators::generate_one_lane_cells;
+use crate::verbose::{LocalLogger, VerboseLevel};
+use indexmap::IndexMap;
+use std::collections::{HashMap, HashSet};
 #[test]
 fn test_find_conflicts_in_conflict_zones_trajectories() {
     let grid = create_conflict_zones_grid();
@@ -48,8 +47,14 @@ fn test_find_conflicts_in_conflict_zones_trajectories() {
     let mut conflict_zones = HashMap::new();
     let zone = ConflictZone::new(
         1,
-        ConflictEdge { source: 3, target: 4 },
-        ConflictEdge { source: 9, target: 10 },
+        ConflictEdge {
+            source: 3,
+            target: 4,
+        },
+        ConflictEdge {
+            source: 9,
+            target: 10,
+        },
     )
     .with_winner_type(ConflictWinnerType::First)
     .build();
@@ -132,8 +137,14 @@ fn test_find_conflicts_in_conflict_zones_trajectories_invalidated() {
     let mut conflict_zones = HashMap::new();
     let zone = ConflictZone::new(
         1,
-        ConflictEdge { source: 3, target: 4 },
-        ConflictEdge { source: 9, target: 10 },
+        ConflictEdge {
+            source: 3,
+            target: 4,
+        },
+        ConflictEdge {
+            source: 9,
+            target: 10,
+        },
     )
     .with_winner_type(ConflictWinnerType::First)
     .build();
@@ -143,14 +154,14 @@ fn test_find_conflicts_in_conflict_zones_trajectories_invalidated() {
     cells_conflicts_zones.insert(10, 1);
     cells_conflicts_zones.insert(4, 1);
 
-let mut collected_intentions = Intentions::new();
-collected_intentions.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
-collected_intentions.add_intention(vehicles.get_mut(&3).unwrap(), IntentionType::Target);
+    let mut collected_intentions = Intentions::new();
+    collected_intentions.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+    collected_intentions.add_intention(vehicles.get_mut(&3).unwrap(), IntentionType::Target);
 
     let mut explored_conflict_zones = HashSet::new();
 
     // Test vehicle1's intention to cell 10 (should detect cross conflict zone with vehicle2)
-let vehicle1_intention = CellIntention::new(1, IntentionType::Target);
+    let vehicle1_intention = CellIntention::new(1, IntentionType::Target);
     let intention_cell = grid.get_cell(&10).unwrap();
 
     let result = find_conflicts_in_conflict_zones(
@@ -212,8 +223,14 @@ fn test_find_conflicts_in_conflict_zones_cross_grid() {
     let mut conflict_zones = HashMap::new();
     let zone = ConflictZone::new(
         1,
-        ConflictEdge { source: 2, target: 3 },
-        ConflictEdge { source: 7, target: 3 },
+        ConflictEdge {
+            source: 2,
+            target: 3,
+        },
+        ConflictEdge {
+            source: 7,
+            target: 3,
+        },
     )
     .with_winner_type(ConflictWinnerType::Second)
     .build();
@@ -222,13 +239,13 @@ fn test_find_conflicts_in_conflict_zones_cross_grid() {
     let mut cells_conflicts_zones = HashMap::new();
     cells_conflicts_zones.insert(3, 1);
 
-let mut collected_intentions = Intentions::new();
-collected_intentions.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+    let mut collected_intentions = Intentions::new();
+    collected_intentions.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
 
     let mut explored_conflict_zones = HashSet::new();
 
     // Test vehicle1's intention to cell 2 (intermediate cell targeting same merge point)
-let vehicle1_intention = CellIntention::new(1, IntentionType::Target);
+    let vehicle1_intention = CellIntention::new(1, IntentionType::Target);
     let intention_cell = grid.get_cell(&2).unwrap();
 
     let result = find_conflicts_in_conflict_zones(
@@ -291,8 +308,14 @@ fn test_find_conflicts_in_conflict_zones_cross_tail() {
     let mut conflict_zones = HashMap::new();
     let zone = ConflictZone::new(
         1,
-        ConflictEdge { source: 4, target: 12 },
-        ConflictEdge { source: 11, target: 5 },
+        ConflictEdge {
+            source: 4,
+            target: 12,
+        },
+        ConflictEdge {
+            source: 11,
+            target: 5,
+        },
     )
     .with_winner_type(ConflictWinnerType::Second)
     .build();
@@ -302,13 +325,13 @@ fn test_find_conflicts_in_conflict_zones_cross_tail() {
     cells_conflicts_zones.insert(5, 1);
     cells_conflicts_zones.insert(12, 1);
 
-let mut collected_intentions = Intentions::new();
-collected_intentions.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+    let mut collected_intentions = Intentions::new();
+    collected_intentions.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
 
     let mut explored_conflict_zones = HashSet::new();
 
     // Test vehicle1's tail intention to cell 12
-let vehicle1_tail_intention = CellIntention::new(1, IntentionType::Tail);
+    let vehicle1_tail_intention = CellIntention::new(1, IntentionType::Tail);
     let intention_cell = grid.get_cell(&12).unwrap();
 
     let result = find_conflicts_in_conflict_zones(
@@ -502,8 +525,14 @@ fn test_find_conflicts_in_conflict_zones_cross_tail_forward() {
     let mut conflict_zones = HashMap::new();
     let zone = ConflictZone::new(
         1,
-        ConflictEdge { source: 4, target: 12 },
-        ConflictEdge { source: 11, target: 5 },
+        ConflictEdge {
+            source: 4,
+            target: 12,
+        },
+        ConflictEdge {
+            source: 11,
+            target: 5,
+        },
     )
     .with_winner_type(ConflictWinnerType::Second)
     .build();
@@ -513,13 +542,13 @@ fn test_find_conflicts_in_conflict_zones_cross_tail_forward() {
     cells_conflicts_zones.insert(5, 1);
     cells_conflicts_zones.insert(12, 1);
 
-let mut collected_intentions = Intentions::new();
-collected_intentions.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+    let mut collected_intentions = Intentions::new();
+    collected_intentions.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
 
     let mut explored_conflict_zones = HashSet::new();
 
     // Test vehicle1's tail intention to cell 12
-let vehicle1_tail_intention = CellIntention::new(1, IntentionType::Tail);
+    let vehicle1_tail_intention = CellIntention::new(1, IntentionType::Tail);
     let intention_cell = grid.get_cell(&12).unwrap();
 
     let result = find_conflicts_in_conflict_zones(
@@ -587,35 +616,42 @@ fn test_conflict_zones_trajectories() {
     vehicles.insert(2, vehicle2);
 
     let mut conflict_zones = HashMap::new();
-    conflict_zones.insert(1, ConflictZone::new(
+    conflict_zones.insert(
         1,
-        ConflictEdge { source: 3, target: 4 },
-        ConflictEdge { source: 9, target: 10 },
-    )
-    .with_winner_type(ConflictWinnerType::First)
-    .build());
+        ConflictZone::new(
+            1,
+            ConflictEdge {
+                source: 3,
+                target: 4,
+            },
+            ConflictEdge {
+                source: 9,
+                target: 10,
+            },
+        )
+        .with_winner_type(ConflictWinnerType::First)
+        .build(),
+    );
 
     let mut cells_conflicts_zones = HashMap::new();
     cells_conflicts_zones.insert(10, 1);
     cells_conflicts_zones.insert(4, 1);
 
-let mut intentions_data = Intentions::new();
-intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
-intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+    let mut intentions_data = Intentions::new();
+    intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
+    intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
 
-    let correct_conflicts = vec![
-        CorrectConflict {
-            conflict_type: ConflictType::CrossConflictZone,
-            // Vehicle 2 has priority (CONFLICT_WINNER_FIRST)
-            priority_participant_id: 2,
-        }
-    ];
+    let correct_conflicts = vec![CorrectConflict {
+        conflict_type: ConflictType::CrossConflictZone,
+        // Vehicle 2 has priority (CONFLICT_WINNER_FIRST)
+        priority_participant_id: 2,
+    }];
 
     let conflicts_data = collect_conflicts(
-        &intentions_data, 
-        &grid, 
-        &conflict_zones, 
-        &cells_conflicts_zones, 
+        &intentions_data,
+        &grid,
+        &conflict_zones,
+        &cells_conflicts_zones,
         &verbose,
         &mut vehicles,
     );
@@ -623,20 +659,28 @@ intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Targ
     assert!(conflicts_data.is_ok());
     let conflicts = conflicts_data.unwrap();
 
-    assert_eq!(correct_conflicts.len(), conflicts.len(), 
-        "Incorrect number of conflicts. Expected {}, got {}", 
-        correct_conflicts.len(), conflicts.len());
+    assert_eq!(
+        correct_conflicts.len(),
+        conflicts.len(),
+        "Incorrect number of conflicts. Expected {}, got {}",
+        correct_conflicts.len(),
+        conflicts.len()
+    );
 
     for (idx, conflict) in conflicts.iter().enumerate() {
         println!("{}", conflict);
-        assert_eq!(conflict.conflict_type, correct_conflicts[idx].conflict_type,
-            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}", 
-            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type);
+        assert_eq!(
+            conflict.conflict_type, correct_conflicts[idx].conflict_type,
+            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}",
+            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type
+        );
 
         let priority_participant_id = conflict.participants[conflict.priority_participant_index];
-        assert_eq!(priority_participant_id, correct_conflicts[idx].priority_participant_id,
-            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}", 
-            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id);
+        assert_eq!(
+            priority_participant_id, correct_conflicts[idx].priority_participant_id,
+            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}",
+            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id
+        );
     }
 }
 
@@ -689,13 +733,22 @@ fn test_conflict_zones_trajectories_invalidated() {
     vehicles.insert(3, vehicle3);
 
     let mut conflict_zones = HashMap::new();
-    conflict_zones.insert(1, ConflictZone::new(
+    conflict_zones.insert(
         1,
-        ConflictEdge { source: 3, target: 4 },
-        ConflictEdge { source: 9, target: 10 },
-    )
-    .with_winner_type(ConflictWinnerType::First)
-    .build());
+        ConflictZone::new(
+            1,
+            ConflictEdge {
+                source: 3,
+                target: 4,
+            },
+            ConflictEdge {
+                source: 9,
+                target: 10,
+            },
+        )
+        .with_winner_type(ConflictWinnerType::First)
+        .build(),
+    );
 
     let mut cells_conflicts_zones = HashMap::new();
     cells_conflicts_zones.insert(10, 1);
@@ -716,14 +769,14 @@ fn test_conflict_zones_trajectories_invalidated() {
             conflict_type: ConflictType::CrossConflictZone,
             // Vehicle 2 has priority (CONFLICT_WINNER_FIRST)
             priority_participant_id: 2,
-        }
+        },
     ];
 
     let conflicts_data = collect_conflicts(
-        &intentions_data, 
-        &grid, 
-        &conflict_zones, 
-        &cells_conflicts_zones, 
+        &intentions_data,
+        &grid,
+        &conflict_zones,
+        &cells_conflicts_zones,
         &verbose,
         &mut vehicles,
     );
@@ -737,20 +790,28 @@ fn test_conflict_zones_trajectories_invalidated() {
         }
     }
 
-    assert_eq!(correct_conflicts.len(), conflicts.len(), 
-        "Incorrect number of conflicts. Expected {}, got {}", 
-        correct_conflicts.len(), conflicts.len());
+    assert_eq!(
+        correct_conflicts.len(),
+        conflicts.len(),
+        "Incorrect number of conflicts. Expected {}, got {}",
+        correct_conflicts.len(),
+        conflicts.len()
+    );
 
     for (idx, conflict) in conflicts.iter().enumerate() {
         println!("{}", conflict);
-        assert_eq!(conflict.conflict_type, correct_conflicts[idx].conflict_type,
-            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}", 
-            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type);
+        assert_eq!(
+            conflict.conflict_type, correct_conflicts[idx].conflict_type,
+            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}",
+            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type
+        );
 
         let priority_participant_id = conflict.participants[conflict.priority_participant_index];
-        assert_eq!(priority_participant_id, correct_conflicts[idx].priority_participant_id,
-            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}", 
-            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id);
+        assert_eq!(
+            priority_participant_id, correct_conflicts[idx].priority_participant_id,
+            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}",
+            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id
+        );
     }
 
     let solve_result = solve_conflicts(conflicts, &mut vehicles, &verbose);
@@ -794,34 +855,41 @@ fn test_conflict_zones_cross_grid() {
     vehicles.insert(2, vehicle2);
 
     let mut conflict_zones = HashMap::new();
-    conflict_zones.insert(1, ConflictZone::new(
+    conflict_zones.insert(
         1,
-        ConflictEdge { source: 2, target: 3 },
-        ConflictEdge { source: 7, target: 3 },
-    )
-    .with_winner_type(ConflictWinnerType::Second)
-    .build());
+        ConflictZone::new(
+            1,
+            ConflictEdge {
+                source: 2,
+                target: 3,
+            },
+            ConflictEdge {
+                source: 7,
+                target: 3,
+            },
+        )
+        .with_winner_type(ConflictWinnerType::Second)
+        .build(),
+    );
 
     let mut cells_conflicts_zones = HashMap::new();
     cells_conflicts_zones.insert(3, 1);
 
-let mut intentions_data = Intentions::new();
-intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
-intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+    let mut intentions_data = Intentions::new();
+    intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
+    intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
 
-    let correct_conflicts = vec![
-        CorrectConflict {
-            conflict_type: ConflictType::MergeForwardConflictZone,
-            // Vehicle 2 has priority (CONFLICT_WINNER_SECOND)
-            priority_participant_id: 2,
-        }
-    ];
+    let correct_conflicts = vec![CorrectConflict {
+        conflict_type: ConflictType::MergeForwardConflictZone,
+        // Vehicle 2 has priority (CONFLICT_WINNER_SECOND)
+        priority_participant_id: 2,
+    }];
 
     let conflicts_data = collect_conflicts(
-        &intentions_data, 
-        &grid, 
-        &conflict_zones, 
-        &cells_conflicts_zones, 
+        &intentions_data,
+        &grid,
+        &conflict_zones,
+        &cells_conflicts_zones,
         &verbose,
         &mut vehicles,
     );
@@ -835,20 +903,28 @@ intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Targ
         }
     }
 
-    assert_eq!(correct_conflicts.len(), conflicts.len(), 
-        "Incorrect number of conflicts. Expected {}, got {}", 
-        correct_conflicts.len(), conflicts.len());
+    assert_eq!(
+        correct_conflicts.len(),
+        conflicts.len(),
+        "Incorrect number of conflicts. Expected {}, got {}",
+        correct_conflicts.len(),
+        conflicts.len()
+    );
 
     for (idx, conflict) in conflicts.iter().enumerate() {
         println!("{}", conflict);
-        assert_eq!(conflict.conflict_type, correct_conflicts[idx].conflict_type,
-            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}", 
-            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type);
+        assert_eq!(
+            conflict.conflict_type, correct_conflicts[idx].conflict_type,
+            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}",
+            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type
+        );
 
         let priority_participant_id = conflict.participants[conflict.priority_participant_index];
-        assert_eq!(priority_participant_id, correct_conflicts[idx].priority_participant_id,
-            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}", 
-            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id);
+        assert_eq!(
+            priority_participant_id, correct_conflicts[idx].priority_participant_id,
+            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}",
+            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id
+        );
     }
 
     let solve_result = solve_conflicts(conflicts, &mut vehicles, &verbose);
@@ -901,35 +977,42 @@ fn test_conflict_zones_cross_tail() {
     vehicles.insert(2, vehicle2);
 
     let mut conflict_zones = HashMap::new();
-    conflict_zones.insert(1, ConflictZone::new(
+    conflict_zones.insert(
         1,
-        ConflictEdge { source: 4, target: 12 },
-        ConflictEdge { source: 11, target: 5 },
-    )
-    .with_winner_type(ConflictWinnerType::Second)
-    .build());
+        ConflictZone::new(
+            1,
+            ConflictEdge {
+                source: 4,
+                target: 12,
+            },
+            ConflictEdge {
+                source: 11,
+                target: 5,
+            },
+        )
+        .with_winner_type(ConflictWinnerType::Second)
+        .build(),
+    );
 
     let mut cells_conflicts_zones = HashMap::new();
     cells_conflicts_zones.insert(5, 1);
     cells_conflicts_zones.insert(12, 1);
 
-let mut intentions_data = Intentions::new();
-intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
-intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+    let mut intentions_data = Intentions::new();
+    intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
+    intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
 
-    let correct_conflicts = vec![
-        CorrectConflict {
-            conflict_type: ConflictType::TailCrossLaneChange,
-            // Vehicle 1 has priority (tail conflict)
-            priority_participant_id: 1,
-        }
-    ];
+    let correct_conflicts = vec![CorrectConflict {
+        conflict_type: ConflictType::TailCrossLaneChange,
+        // Vehicle 1 has priority (tail conflict)
+        priority_participant_id: 1,
+    }];
 
     let conflicts_data = collect_conflicts(
-        &intentions_data, 
-        &grid, 
-        &conflict_zones, 
-        &cells_conflicts_zones, 
+        &intentions_data,
+        &grid,
+        &conflict_zones,
+        &cells_conflicts_zones,
         &verbose,
         &mut vehicles,
     );
@@ -937,20 +1020,28 @@ intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Targ
     assert!(conflicts_data.is_ok());
     let conflicts = conflicts_data.unwrap();
 
-    assert_eq!(correct_conflicts.len(), conflicts.len(), 
-        "Incorrect number of conflicts. Expected {}, got {}", 
-        correct_conflicts.len(), conflicts.len());
+    assert_eq!(
+        correct_conflicts.len(),
+        conflicts.len(),
+        "Incorrect number of conflicts. Expected {}, got {}",
+        correct_conflicts.len(),
+        conflicts.len()
+    );
 
     for (idx, conflict) in conflicts.iter().enumerate() {
         println!("{}", conflict);
-        assert_eq!(conflict.conflict_type, correct_conflicts[idx].conflict_type,
-            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}", 
-            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type);
+        assert_eq!(
+            conflict.conflict_type, correct_conflicts[idx].conflict_type,
+            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}",
+            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type
+        );
 
         let priority_participant_id = conflict.participants[conflict.priority_participant_index];
-        assert_eq!(priority_participant_id, correct_conflicts[idx].priority_participant_id,
-            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}", 
-            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id);
+        assert_eq!(
+            priority_participant_id, correct_conflicts[idx].priority_participant_id,
+            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}",
+            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id
+        );
     }
 }
 
@@ -1127,35 +1218,42 @@ fn test_conflict_zones_cross_tail_forward() {
     vehicles.insert(2, vehicle2);
 
     let mut conflict_zones = HashMap::new();
-    conflict_zones.insert(1, ConflictZone::new(
+    conflict_zones.insert(
         1,
-        ConflictEdge { source: 4, target: 12 },
-        ConflictEdge { source: 11, target: 5 },
-    )
-    .with_winner_type(ConflictWinnerType::Second)
-    .build());
+        ConflictZone::new(
+            1,
+            ConflictEdge {
+                source: 4,
+                target: 12,
+            },
+            ConflictEdge {
+                source: 11,
+                target: 5,
+            },
+        )
+        .with_winner_type(ConflictWinnerType::Second)
+        .build(),
+    );
 
     let mut cells_conflicts_zones = HashMap::new();
     cells_conflicts_zones.insert(5, 1);
     cells_conflicts_zones.insert(12, 1);
 
-let mut intentions_data = Intentions::new();
-intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
-intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
+    let mut intentions_data = Intentions::new();
+    intentions_data.add_intention(vehicles.get_mut(&1).unwrap(), IntentionType::Target);
+    intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Target);
 
-    let correct_conflicts = vec![
-        CorrectConflict {
-            conflict_type: ConflictType::TailCrossLaneChange,
-            // Vehicle 1 has priority (tail intention)
-            priority_participant_id: 1,
-        }
-    ];
+    let correct_conflicts = vec![CorrectConflict {
+        conflict_type: ConflictType::TailCrossLaneChange,
+        // Vehicle 1 has priority (tail intention)
+        priority_participant_id: 1,
+    }];
 
     let conflicts_data = collect_conflicts(
-        &intentions_data, 
-        &grid, 
-        &conflict_zones, 
-        &cells_conflicts_zones, 
+        &intentions_data,
+        &grid,
+        &conflict_zones,
+        &cells_conflicts_zones,
         &verbose,
         &mut vehicles,
     );
@@ -1163,19 +1261,27 @@ intentions_data.add_intention(vehicles.get_mut(&2).unwrap(), IntentionType::Targ
     assert!(conflicts_data.is_ok());
     let conflicts = conflicts_data.unwrap();
 
-    assert_eq!(correct_conflicts.len(), conflicts.len(), 
-        "Incorrect number of conflicts. Expected {}, got {}", 
-        correct_conflicts.len(), conflicts.len());
+    assert_eq!(
+        correct_conflicts.len(),
+        conflicts.len(),
+        "Incorrect number of conflicts. Expected {}, got {}",
+        correct_conflicts.len(),
+        conflicts.len()
+    );
 
     for (idx, conflict) in conflicts.iter().enumerate() {
         println!("{}", conflict);
-        assert_eq!(conflict.conflict_type, correct_conflicts[idx].conflict_type,
-            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}", 
-            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type);
+        assert_eq!(
+            conflict.conflict_type, correct_conflicts[idx].conflict_type,
+            "Incorrect conflict type at pos #{}. Expected {:?}, got {:?}",
+            idx, correct_conflicts[idx].conflict_type, conflict.conflict_type
+        );
 
         let priority_participant_id = conflict.participants[conflict.priority_participant_index];
-        assert_eq!(priority_participant_id, correct_conflicts[idx].priority_participant_id,
-            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}", 
-            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id);
+        assert_eq!(
+            priority_participant_id, correct_conflicts[idx].priority_participant_id,
+            "Incorrect conflict priority participant at pos #{}. Expected {}, got {}",
+            idx, correct_conflicts[idx].priority_participant_id, priority_participant_id
+        );
     }
 }

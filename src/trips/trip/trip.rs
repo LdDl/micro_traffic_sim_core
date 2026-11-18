@@ -1,20 +1,20 @@
-use crate::behaviour::{BehaviourType, RelativeRandomization, SynchronizationParameters};
 use crate::agents_types::AgentType;
+use crate::behaviour::{BehaviourType, RelativeRandomization, SynchronizationParameters};
 use crate::grid::cell::CellID;
 use std::fmt;
 
 /// Vehicle generation patterns for trip scheduling.
-/// 
+///
 /// Determines how frequently vehicles are spawned during simulation.
 ///
 /// # Examples
-/// 
+///
 /// ```rust
 /// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
-/// 
+///
 /// // Predictable traffic flow
 /// let steady_flow = Trip::new(1, 10, TripType::Constant).with_time(5);
-/// 
+///
 /// // Variable traffic flow  
 /// let variable_flow = Trip::new(1, 10, TripType::Random).with_probability(0.3);
 /// ```
@@ -30,15 +30,15 @@ pub enum TripType {
 
 impl fmt::Display for TripType {
     /// Formats the trip type for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::trips::trip::{TripType};
-    /// 
+    ///
     /// assert_eq!(format!("{}", TripType::Undefined), "undefined");
     /// assert_eq!(format!("{}", TripType::Constant), "constant");
     /// assert_eq!(format!("{}", TripType::Random), "random");
@@ -73,7 +73,7 @@ pub type TripID = i64;
 /// ```rust
 /// use micro_traffic_sim_core::trips::trip::{Trip, TripType};
 /// use micro_traffic_sim_core::agents_types::AgentType;
-/// 
+///
 /// // Rush hour traffic: frequent car generation
 /// let rush_hour = Trip::new(1, 50, TripType::Constant)
 ///     .with_time(5)  // Every 5 time units

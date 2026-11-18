@@ -1,11 +1,11 @@
-use crate::conflicts::conflict_types::{CellConflict, ConflictType};
 use crate::agents::{Vehicle, VehicleID};
-use indexmap::IndexMap;
-use crate::maneuver::LaneChangeType;
+use crate::conflicts::conflict_types::{CellConflict, ConflictType};
 use crate::grid::cell::CellID;
+use crate::maneuver::LaneChangeType;
 use crate::verbose::*;
-use std::collections::{HashSet, HashMap};
+use indexmap::IndexMap;
 use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::iter::once;
 
 use std::fmt;
@@ -26,10 +26,18 @@ impl fmt::Display for ConflictSolverError {
         match self {
             Self::InvalidConflict(msg) => write!(f, "Invalid conflict: {}", msg),
             Self::InsufficientParticipants(cell_id, conflict_type) => {
-                write!(f, "Insufficient participants in conflict for cell {}, type: {}", cell_id, conflict_type)
-            },
+                write!(
+                    f,
+                    "Insufficient participants in conflict for cell {}, type: {}",
+                    cell_id, conflict_type
+                )
+            }
             Self::InvalidPriorityIndex(cell_id, index, len) => {
-                write!(f, "Invalid priority index {} for conflict at cell {} (participants: {})", index, cell_id, len)
+                write!(
+                    f,
+                    "Invalid priority index {} for conflict at cell {} (participants: {})",
+                    index, cell_id, len
+                )
             }
         }
     }
@@ -48,11 +56,11 @@ fn conflict_has_desperate(
     );
     !is_physical
         && c.conflict_type != ConflictType::MutualYield
-        && c.participants
-            .iter()
-            .any(|id| vehicles.get(id).is_some_and(|v| {
-                v.is_desperate() && !cycle_participants.contains(id)
-            }))
+        && c.participants.iter().any(|id| {
+            vehicles
+                .get(id)
+                .is_some_and(|v| v.is_desperate() && !cycle_participants.contains(id))
+        })
 }
 
 /// Solves conflicts between vehicles based on their intentions and priority for the current simulation step.
@@ -60,21 +68,21 @@ fn conflict_has_desperate(
 /// # Arguments
 /// * `conflicts_data` - A vector of `CellConflict` containing conflicts to be resolved
 /// * `verbose` - If true, prints detailed information about the conflicts being resolved
-/// 
+///
 /// # Returns
 /// * `Result<(), ConflictSolverError>` - Returns Ok if conflicts are resolved successfully, or an error if there are issues
-/// 
+///
 /// # Example
 /// ```
 /// use micro_traffic_sim_core::conflicts::{CellConflict, ConflictType, solve_conflicts};
 /// use micro_traffic_sim_core::agents::{Vehicle, VehicleID, VehiclesStorage};
 /// use micro_traffic_sim_core::verbose::LocalLogger;
-/// 
+///
 /// // Prepare vehicles storage (owned Vehicles)
 /// let mut vehicles: VehiclesStorage = VehiclesStorage::new();
 /// vehicles.insert(1, Vehicle::new(1).with_speed(2).build());
 /// vehicles.insert(2, Vehicle::new(2).with_speed(3).build());
-/// 
+///
 /// // Conflict among vehicle IDs 1 and 2, first has priority
 /// let conflicts = vec![CellConflict {
 ///    cell_id: 1,
@@ -82,7 +90,7 @@ fn conflict_has_desperate(
 ///    priority_participant_index: 0,
 ///    conflict_type: ConflictType::ForwardLaneChange,
 /// }];
-/// 
+///
 /// let result = solve_conflicts(conflicts, &mut vehicles, &LocalLogger::none());
 /// assert!(result.is_ok(), "Conflict resolution failed");
 pub fn solve_conflicts<'b>(
@@ -94,7 +102,7 @@ pub fn solve_conflicts<'b>(
         verbose.log_with_fields(
             EVENT_CONFLICTS_SOLVE,
             "Solve conflicts",
-            &[("conflicts_num", &conflicts_data.len())]
+            &[("conflicts_num", &conflicts_data.len())],
         );
     }
     // Cycle participants use their cycle delay throughout this tick. Another zone
@@ -134,7 +142,8 @@ pub fn solve_conflicts<'b>(
     let conflicts_data: Vec<CellConflict> = {
         let (mut desperate_first, rest): (Vec<CellConflict>, Vec<CellConflict>) =
             conflicts_data.into_iter().partition(|c| {
-                c.conflict_type == ConflictType::MutualYield || conflict_has_desperate(c, vehicles, &cycle_participants)
+                c.conflict_type == ConflictType::MutualYield
+                    || conflict_has_desperate(c, vehicles, &cycle_participants)
             });
         desperate_first.extend(rest);
         desperate_first
@@ -164,8 +173,11 @@ pub fn solve_conflicts<'b>(
             let entered = candidate.first_motion_cell().unwrap_or(-1);
             let granted = candidate.yield_cycle_ready()
                 && candidate.intention.intention_speed > 0
-                && entered >= 0 && entered != candidate.cell_id
-                && occupancy.get(&entered).is_none_or(|&owner| owner == candidate_id)
+                && entered >= 0
+                && entered != candidate.cell_id
+                && occupancy
+                    .get(&entered)
+                    .is_none_or(|&owner| owner == candidate_id)
                 && claimed_cells.insert(entered);
             for id in &conflict.participants {
                 let vehicle = vehicles.get_mut(id).ok_or_else(|| {
@@ -203,9 +215,10 @@ pub fn solve_conflicts<'b>(
                 .iter()
                 .enumerate()
                 .filter_map(|(i, id)| {
-                    vehicles.get(id).filter(|v| {
-                        v.is_desperate() && !cycle_participants.contains(id)
-                    }).map(|v| (i, v.wait_steps, *id))
+                    vehicles
+                        .get(id)
+                        .filter(|v| v.is_desperate() && !cycle_participants.contains(id))
+                        .map(|v| (i, v.wait_steps, *id))
                 })
                 .max_by_key(|&(_, wait, id)| (wait, Reverse(id)));
             if let Some((win_idx, _, _)) = desperate_winner {
@@ -271,14 +284,17 @@ pub fn solve_conflicts<'b>(
                             ("cell", &conflict.cell_id),
                             ("conflict_type", &format!("{:?}", conflict.conflict_type)),
                             ("participants", &format!("{:?}", conflict.participants)),
-                        ]
+                        ],
                     );
                 }
                 continue;
             }
             ConflictType::CrossLaneChange | ConflictType::TailCrossLaneChange => {
                 // This must be crossing trajectories conflict. Need to postprocess after
-                if let Some(priority_participant_id) = conflict.participants.get(conflict.priority_participant_index) {
+                if let Some(priority_participant_id) = conflict
+                    .participants
+                    .get(conflict.priority_participant_index)
+                {
                     if let Some(priority_participant) = vehicles.get_mut(priority_participant_id) {
                         priority_participant.is_conflict_participant = false;
                     }
@@ -291,15 +307,21 @@ pub fn solve_conflicts<'b>(
                             ("cell", &conflict.cell_id),
                             ("conflict_type", &format!("{:?}", conflict.conflict_type)),
                             ("participants", &format!("{:?}", conflict.participants)),
-                            ("priority_participant_index", &conflict.priority_participant_index),
-                        ]
+                            (
+                                "priority_participant_index",
+                                &conflict.priority_participant_index,
+                            ),
+                        ],
                     );
                 }
                 trajectories_conflicts.push(conflict);
                 continue;
             }
             ConflictType::CrossConflictZone => {
-                if let Some(priority_participant_id) = conflict.participants.get(conflict.priority_participant_index) {
+                if let Some(priority_participant_id) = conflict
+                    .participants
+                    .get(conflict.priority_participant_index)
+                {
                     if let Some(priority_participant) = vehicles.get_mut(priority_participant_id) {
                         priority_participant.is_conflict_participant = false;
                     }
@@ -312,16 +334,18 @@ pub fn solve_conflicts<'b>(
                             ("cell", &conflict.cell_id),
                             ("conflict_type", &format!("{:?}", conflict.conflict_type)),
                             ("participants", &format!("{:?}", conflict.participants)),
-                            ("priority_participant_index", &conflict.priority_participant_index),
-                        ]
+                            (
+                                "priority_participant_index",
+                                &conflict.priority_participant_index,
+                            ),
+                        ],
                     );
                 }
                 conflict_zones_conflicts.push(conflict);
                 continue;
             }
-            _ => {}           
+            _ => {}
         }
-
 
         if verbose.is_at_least(VerboseLevel::Additional) {
             verbose.log_with_fields(
@@ -332,7 +356,7 @@ pub fn solve_conflicts<'b>(
                     ("conflict_type", &format!("{:?}", conflict.conflict_type)),
                     ("participants", &format!("{:?}", conflict.participants)),
                     ("priority_index", &conflict.priority_participant_index),
-                ]
+                ],
             );
         }
 
@@ -349,11 +373,19 @@ pub fn solve_conflicts<'b>(
 
         let priority_index = conflict.priority_participant_index;
         for (i, participant_id) in conflict.participants.iter().enumerate() {
-            let participant = vehicles.get_mut(participant_id).ok_or_else(|| ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", participant_id)))?;
+            let participant = vehicles.get_mut(participant_id).ok_or_else(|| {
+                ConflictSolverError::InvalidConflict(format!(
+                    "Vehicle {} not found",
+                    participant_id
+                ))
+            })?;
             if i == priority_index {
                 // Priority retains only an existing first step for a lane change.
                 // Conflict metadata cannot supply a replacement destination.
-                if matches!(participant.intention.intention_maneuver, LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight) {
+                if matches!(
+                    participant.intention.intention_maneuver,
+                    LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight
+                ) {
                     participant.restrict_intention_to_first_step();
                 }
                 // Sweep-through guard (one-occupant-per-cell): a multi-cell winner must not
@@ -361,7 +393,10 @@ pub fn solve_conflicts<'b>(
                 // the cells it would enter (the intermediate cells, then the head); if one is
                 // claimed, clamp the winner to a single step into its first cell - or block it
                 // outright when that very first cell is the claimed one.
-                let first_claimed = participant.intention.intermediate_cells.iter()
+                let first_claimed = participant
+                    .intention
+                    .intermediate_cells
+                    .iter()
                     .chain(once(&participant.intention.intention_cell_id))
                     .position(|c| claimed_cells.contains(c));
                 if let Some(j) = first_claimed {
@@ -377,7 +412,7 @@ pub fn solve_conflicts<'b>(
             }
         }
     }
-    
+
     // Postprocessing remaining possible trajectories conflicts
     for conflict in trajectories_conflicts {
         if verbose.is_at_least(VerboseLevel::Additional) {
@@ -389,14 +424,19 @@ pub fn solve_conflicts<'b>(
                     ("cell", &conflict.cell_id),
                     ("participants_ids", &format!("{:?}", vehicles_ids)),
                     ("conflict_type", &format!("{:?}", conflict.conflict_type)),
-                ]
+                ],
             );
         }
         match conflict.conflict_type {
             ConflictType::TailCrossLaneChange => {
                 let priority_index = conflict.priority_participant_index;
                 for (i, participant_id) in conflict.participants.iter().enumerate() {
-                    let participant = vehicles.get_mut(participant_id).ok_or_else(|| ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", participant_id)))?;
+                    let participant = vehicles.get_mut(participant_id).ok_or_else(|| {
+                        ConflictSolverError::InvalidConflict(format!(
+                            "Vehicle {} not found",
+                            participant_id
+                        ))
+                    })?;
                     if i != priority_index {
                         participant.block_with_speed(0);
                     }
@@ -414,7 +454,12 @@ pub fn solve_conflicts<'b>(
         let mut left_maneuver_index: Option<usize> = None;
         let mut right_maneuver_index: Option<usize> = None;
         for (i, participant_id) in conflict.participants.iter().enumerate() {
-            let participant = vehicles.get(participant_id).ok_or_else(|| ConflictSolverError::InvalidConflict(format!("Vehicle {} not found", participant_id)))?;
+            let participant = vehicles.get(participant_id).ok_or_else(|| {
+                ConflictSolverError::InvalidConflict(format!(
+                    "Vehicle {} not found",
+                    participant_id
+                ))
+            })?;
             match participant.intention.intention_maneuver {
                 LaneChangeType::ChangeLeft => left_maneuver_index = Some(i),
                 LaneChangeType::ChangeRight => right_maneuver_index = Some(i),
@@ -428,10 +473,15 @@ pub fn solve_conflicts<'b>(
             // it -> block all (one-occupant-per-cell).
             let winner_index = conflict.priority_participant_index;
             let winner_id = conflict.participants[winner_index];
-            let winner_target = vehicles.get(&winner_id).map(|v| v.intention.intention_cell_id).unwrap_or(-1);
+            let winner_target = vehicles
+                .get(&winner_id)
+                .map(|v| v.intention.intention_cell_id)
+                .unwrap_or(-1);
             if winner_target >= 0 && claimed_cells.contains(&winner_target) {
                 for participant_id in &conflict.participants {
-                    if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(0); }
+                    if let Some(v) = vehicles.get_mut(participant_id) {
+                        v.block_with_speed(0);
+                    }
                 }
             } else {
                 for (i, participant_id) in conflict.participants.iter().enumerate() {
@@ -458,25 +508,32 @@ pub fn solve_conflicts<'b>(
                     ("cell", &conflict.cell_id),
                     ("participants_ids", &format!("{:?}", vehicles_ids)),
                     ("conflict_type", &format!("{:?}", conflict.conflict_type)),
-                ]
+                ],
             );
         }
-        
+
         let priority_index = conflict.priority_participant_index;
         // If the zone winner's target cell was already taken by a desperate winner, it may
         // not enter it either: block all participants (preserve one-occupant-per-cell).
         let prio_id = conflict.participants[priority_index];
-        let prio_target = vehicles.get(&prio_id).map(|v| v.intention.intention_cell_id).unwrap_or(-1);
+        let prio_target = vehicles
+            .get(&prio_id)
+            .map(|v| v.intention.intention_cell_id)
+            .unwrap_or(-1);
         if prio_target >= 0 && claimed_cells.contains(&prio_target) {
             for participant_id in &conflict.participants {
-                if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(0); }
+                if let Some(v) = vehicles.get_mut(participant_id) {
+                    v.block_with_speed(0);
+                }
             }
             continue;
         }
         for (i, participant_id) in conflict.participants.iter().enumerate() {
             if i != priority_index {
                 // Yielding holds the current cell, so speed and standing time must record a stop.
-                if let Some(v) = vehicles.get_mut(participant_id) { v.block_with_speed(0); }
+                if let Some(v) = vehicles.get_mut(participant_id) {
+                    v.block_with_speed(0);
+                }
             }
         }
     }

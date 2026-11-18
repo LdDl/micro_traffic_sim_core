@@ -1,6 +1,6 @@
-use crate::conflicts::*;
 use crate::agents::{TailIntentionManeuver, Vehicle, VehicleIntention};
 use crate::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone};
+use crate::conflicts::*;
 use crate::grid::cell::Cell;
 use crate::grid::road_network::GridRoads;
 use crate::intentions::{IntentionType, Intentions};

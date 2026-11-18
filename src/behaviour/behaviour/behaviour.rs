@@ -1,7 +1,7 @@
 use crate::behaviour::relative_randomization::RelativeRandomization;
 use crate::behaviour::synchronization::SynchronizationParameters;
-use std::fmt;
 use rand::Rng;
+use std::fmt;
 
 /// Represents the behaviour type of an agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,15 +51,15 @@ impl BehaviourType {
 
 impl fmt::Display for BehaviourType {
     /// Formats the behaviour type for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::behaviour::BehaviourType;
-    /// 
+    ///
     /// assert_eq!(format!("{}", BehaviourType::Undefined), "undefined");
     /// assert_eq!(format!("{}", BehaviourType::Block), "block");
     /// assert_eq!(format!("{}", BehaviourType::Aggressive), "aggressive");
@@ -164,13 +164,14 @@ impl BehaviourParameters {
     /// let behaviour_params = BehaviourParameters::from_behaviour_type(BehaviourType::Aggressive);
     /// ```
     pub fn from_behaviour_type(behaviour: BehaviourType) -> Self {
-        let (p, p0, speed_limit, aggressive, min_safe, lc_cooldown, standstill_gap) = match behaviour {
-            BehaviourType::Block => (1.0, 1.0, 0, 1.0, 0, 0, 0),
-            BehaviourType::Aggressive => (0.1, 0.425, 5, 0.9, 0, 0, 0),
-            BehaviourType::Cooperative => (0.3, 0.425, 4, 0.0, 1, 1, 1),
-            BehaviourType::LimitSpeedByTrip => (0.4, 0.425, 3, 0.1, 1, 2, 1),
-            BehaviourType::Undefined => (0.2, 0.425, 2, 0.5, 0, 1, 1),
-        };
+        let (p, p0, speed_limit, aggressive, min_safe, lc_cooldown, standstill_gap) =
+            match behaviour {
+                BehaviourType::Block => (1.0, 1.0, 0, 1.0, 0, 0, 0),
+                BehaviourType::Aggressive => (0.1, 0.425, 5, 0.9, 0, 0, 0),
+                BehaviourType::Cooperative => (0.3, 0.425, 4, 0.0, 1, 1, 1),
+                BehaviourType::LimitSpeedByTrip => (0.4, 0.425, 3, 0.1, 1, 2, 1),
+                BehaviourType::Undefined => (0.2, 0.425, 2, 0.5, 0, 1, 1),
+            };
         Self {
             slowdown_factor_p: p,
             slow_to_start_factor_p0: p0,

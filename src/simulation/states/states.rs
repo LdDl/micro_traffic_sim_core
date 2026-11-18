@@ -1,7 +1,7 @@
-use crate::grid::cell::CellID;
-use crate::traffic_lights::lights::{TrafficLightID};
-use crate::agents_types::AgentType;
 use crate::agents::VehicleID;
+use crate::agents_types::AgentType;
+use crate::grid::cell::CellID;
+use crate::traffic_lights::lights::TrafficLightID;
 use crate::traffic_lights::signals::SignalType;
 use crate::trips::trip::TripID;
 use std::collections::HashMap;
@@ -63,5 +63,5 @@ pub struct TrafficLightGroupState {
     /// Signal group identifier
     pub group_id: i64,
     /// Last known signal type of the traffic light group
-    pub last_signal: SignalType
+    pub last_signal: SignalType,
 }

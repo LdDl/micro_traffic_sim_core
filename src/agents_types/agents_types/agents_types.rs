@@ -1,5 +1,5 @@
-use std::fmt;
 use rand::Rng;
+use std::fmt;
 
 /// Represents the type of an agent in Cellular Automata (CA).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,12 +22,12 @@ pub enum AgentType {
 
 impl fmt::Display for AgentType {
     /// Formats the agent type for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::agents_types::AgentType;
     ///

@@ -1,5 +1,5 @@
+use crate::grid::cell::{Cell, CellID};
 use std::collections::HashMap;
-use crate::grid::cell::{CellID, Cell};
 
 /// `GridRoads` is a struct representing a 2D grid of cells of the road network.
 /// It holds a collection of cells identified by unique `CellID`s.
@@ -180,8 +180,11 @@ impl GridRoads {
     pub fn precompute_edge_costs(&mut self) {
         use crate::geom::{Point, PointType};
         // Snapshot neighbour points first (immutable), then write costs back.
-        let points: HashMap<CellID, PointType> =
-            self.cells.iter().map(|(id, c)| (*id, *c.get_point())).collect();
+        let points: HashMap<CellID, PointType> = self
+            .cells
+            .iter()
+            .map(|(id, c)| (*id, *c.get_point()))
+            .collect();
         let mut max_speed = 1.0;
         for cell in self.cells.values_mut() {
             let here = *cell.get_point();
@@ -212,8 +215,11 @@ impl GridRoads {
     /// free-flow (max speed), so it remains an admissible lower bound (real >= free-flow).
     pub fn apply_congestion(&mut self, cell_speed: &HashMap<CellID, f64>) {
         use crate::geom::{Point, PointType};
-        let points: HashMap<CellID, PointType> =
-            self.cells.iter().map(|(id, c)| (*id, *c.get_point())).collect();
+        let points: HashMap<CellID, PointType> = self
+            .cells
+            .iter()
+            .map(|(id, c)| (*id, *c.get_point()))
+            .collect();
         for cell in self.cells.values_mut() {
             let here = *cell.get_point();
             let free_flow = (cell.get_speed_limit() as f64).max(1.0);
@@ -282,7 +288,7 @@ impl GridRoads {
     /// let mut grid = GridRoads::new();
     /// let cell = Cell::new(1).build();
     /// grid.add_cell(cell);
-    /// 
+    ///
     /// if let Some(cell) = grid.get_cell_mut(1) {
     ///     cell.set_state(CellState::Banned);
     /// }
@@ -305,21 +311,20 @@ impl GridRoads {
     /// let mut grid = GridRoads::new();
     /// grid.add_cell(Cell::new(1).build());
     /// grid.add_cell(Cell::new(2).build());
-    /// 
+    ///
     /// for (id, cell) in grid.iter() {
     ///     println!("Cell {}: {:?}", id, cell.get_point());
     /// }
     /// ```
-    pub fn iter(&self) -> impl Iterator<Item = (&CellID, &Cell)>
-    {
+    pub fn iter(&self) -> impl Iterator<Item = (&CellID, &Cell)> {
         self.cells.iter()
     }
 
     /// Returns the total number of cells in the grid.
-    /// 
+    ///
     /// # Returns
     /// The number of cells as a `usize`.
-    /// 
+    ///
     /// # Example
     /// ```
     /// use micro_traffic_sim_core::grid::cell::Cell;

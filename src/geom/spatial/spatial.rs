@@ -94,7 +94,7 @@ pub fn get_bearing(pt1: &PointType, pt2: &PointType) -> f64 {
 /// ```
 pub fn convert_epsg4326_to_3857(lon: f64, lat: f64) -> (f64, f64) {
     let x = lon * EQUATOR_HALF / 180.0;
-    let y = ((90.0+lat)*PI/360.0).tan().ln() / (PI / 180.0);
+    let y = ((90.0 + lat) * PI / 360.0).tan().ln() / (PI / 180.0);
     let y = y * EQUATOR_HALF / 180.0;
     (x, y)
 }
@@ -127,21 +127,21 @@ pub fn convert_epsg3857_to_4326(lat: f64, lng: f64) -> (f64, f64) {
 }
 
 /// gc_distance_pt
-/// 
+///
 /// Computes the great-circle distance (orthodromic distance) between two points on the Earth's surface using the Haversine formula.
 /// This version is named to suggest it could be used in a computer vision context (e.g., OpenCV). It wraps around the `haversine` function.
-/// 
+///
 /// # References
 /// For detailed explanation of the Haversine formula, see:
 /// [Great-circle distance - Wikipedia](https://en.wikipedia.org/wiki/Great-circle_distance#:~:text=The%20great%2Dcircle%20distance%2C%20orthodromic,line%20through%20the%20sphere's%20interior)
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `src` - A `Point` representing the source point, which contains longitude (`x`) and latitude (`y`) in degrees.
 /// * `dst` - A `Point` representing the destination point, which also contains longitude (`x`) and latitude (`y`) in degrees.
-/// 
+///
 /// # Returns
-/// 
+///
 /// A `f64` value representing the great-circle distance in meters between the source and destination points.
 ///
 /// # Example

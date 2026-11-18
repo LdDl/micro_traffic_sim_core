@@ -1,9 +1,7 @@
 use crate::maneuver::LaneChangeType;
 use crate::{
     agents::VehicleID,
-    grid::{
-        cell::{Cell, CellID, CellState},
-    },
+    grid::cell::{Cell, CellID, CellState},
     shortest_path::path::Path,
 };
 use std::collections::HashMap;
@@ -82,7 +80,13 @@ pub fn process_path<'a>(
     destination: CellID,
     current_state: &HashMap<CellID, VehicleID>,
 ) -> ObservablePath<'a> {
-    process_path_for_vehicle(shortest_path, speed_possible, destination, current_state, None)
+    process_path_for_vehicle(
+        shortest_path,
+        speed_possible,
+        destination,
+        current_state,
+        None,
+    )
 }
 
 /// Same as `process_path`, but cells claimed by the vehicle itself (its front standstill buffer)

@@ -1,11 +1,11 @@
 // In src/movement/mod.rs or src/movement/movement.rs
+use crate::agents::{Vehicle, VehicleID};
 use crate::agents_types::AgentType;
-use crate::agents::{VehicleID, Vehicle};
-use crate::grid::road_network::GridRoads;
+use crate::geom::get_bearing;
 use crate::grid::cell::{CellID, CellState};
+use crate::grid::road_network::GridRoads;
 use crate::grid::zones::ZoneType;
 use crate::maneuver::LaneChangeType;
-use crate::geom::get_bearing;
 use crate::verbose::*;
 use indexmap::IndexMap;
 use std::fmt;
@@ -30,15 +30,22 @@ pub enum MovementError {
         /// The cell ID that could not be found
         cell_id: CellID,
         /// The vehicle ID that referenced the invalid cell
-        vehicle_id: VehicleID
+        vehicle_id: VehicleID,
     },
 }
 
 impl fmt::Display for MovementError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MovementError::CellNotFound { cell_id, vehicle_id } => {
-                write!(f, "movement(): Can't find cell {} in the network for vehicle with ID {}", cell_id, vehicle_id)
+            MovementError::CellNotFound {
+                cell_id,
+                vehicle_id,
+            } => {
+                write!(
+                    f,
+                    "movement(): Can't find cell {} in the network for vehicle with ID {}",
+                    cell_id, vehicle_id
+                )
             }
         }
     }
@@ -160,7 +167,7 @@ pub fn movement(
         verbose.log_with_fields(
             EVENT_MOVEMENT,
             "Start movement process",
-            &[("vehicles_num", &vehicles.len())]
+            &[("vehicles_num", &vehicles.len())],
         );
     }
 
@@ -170,7 +177,6 @@ pub fn movement(
     let mut vehicles_lost = 0;
 
     for (vehicle_id, vehicle) in vehicles.iter_mut() {
-        
         if verbose.is_at_least(VerboseLevel::Additional) {
             verbose.log_with_fields(
                 EVENT_MOVEMENT_VEHICLE,
@@ -179,8 +185,11 @@ pub fn movement(
                     ("vehicle_id", &vehicle.id),
                     ("current_cell", &vehicle.cell_id),
                     ("next_cell", &vehicle.intention.intention_cell_id),
-                    ("intermediate_cells", &format!("{:?}", vehicle.intention.intermediate_cells)),
-                ]
+                    (
+                        "intermediate_cells",
+                        &format!("{:?}", vehicle.intention.intermediate_cells),
+                    ),
+                ],
             );
         }
 
@@ -205,16 +214,18 @@ pub fn movement(
         // Update bearing depending on intention maneuver
         if moved {
             // vehicle is moving? then set bearing based on actual movement
-            let cell_from = net.get_cell(&vehicle.cell_id)
+            let cell_from = net
+                .get_cell(&vehicle.cell_id)
                 .ok_or(MovementError::CellNotFound {
                     cell_id: vehicle.cell_id,
-                    vehicle_id: vehicle.id
+                    vehicle_id: vehicle.id,
                 })?;
-            let cell_to = net.get_cell(&vehicle.intention.intention_cell_id)
-                .ok_or(MovementError::CellNotFound {
+            let cell_to = net.get_cell(&vehicle.intention.intention_cell_id).ok_or(
+                MovementError::CellNotFound {
                     cell_id: vehicle.intention.intention_cell_id,
-                    vehicle_id: vehicle.id
-                })?;
+                    vehicle_id: vehicle.id,
+                },
+            )?;
 
             let pt_from = cell_from.get_point();
             let pt_to = cell_to.get_point();
@@ -224,11 +235,12 @@ pub fn movement(
             use crate::maneuver::LaneChangeType;
             match vehicle.intention.intention_maneuver {
                 LaneChangeType::Block | LaneChangeType::NoChange => {
-                    let current_cell = net.get_cell(&vehicle.cell_id)
-                        .ok_or(MovementError::CellNotFound {
-                            cell_id: vehicle.cell_id,
-                            vehicle_id: vehicle.id
-                        })?;
+                    let current_cell =
+                        net.get_cell(&vehicle.cell_id)
+                            .ok_or(MovementError::CellNotFound {
+                                cell_id: vehicle.cell_id,
+                                vehicle_id: vehicle.id,
+                            })?;
                     let forward_id = current_cell.get_forward_id();
                     if forward_id > 0 {
                         if let Some(forward_cell) = net.get_cell(&forward_id) {
@@ -329,10 +341,11 @@ pub fn movement(
         vehicle.cell_id = final_cell;
 
         // Get the cell to check zone type
-        let cell = net.get_cell(&vehicle.cell_id)
-            .ok_or(MovementError::CellNotFound { 
-                cell_id: vehicle.cell_id, 
-                vehicle_id: vehicle.id 
+        let cell = net
+            .get_cell(&vehicle.cell_id)
+            .ok_or(MovementError::CellNotFound {
+                cell_id: vehicle.cell_id,
+                vehicle_id: vehicle.id,
             })?;
         if verbose.is_at_least(VerboseLevel::Additional) {
             verbose.log_with_fields(
@@ -342,18 +355,26 @@ pub fn movement(
                     ("vehicle_id", &vehicle.id),
                     ("current_cell", &vehicle.cell_id),
                     ("next_cell", &vehicle.intention.intention_cell_id),
-                    ("intermediate_cells", &format!("{:?}", vehicle.intention.intermediate_cells)),
-                ]
+                    (
+                        "intermediate_cells",
+                        &format!("{:?}", vehicle.intention.intermediate_cells),
+                    ),
+                ],
             );
         }
 
         let zone_type = cell.get_zone_type();
 
         // Handle bus transit logic
-        if vehicle.vehicle_type == AgentType::Bus && zone_type == ZoneType::Transit && vehicle.cell_id == vehicle.destination {
+        if vehicle.vehicle_type == AgentType::Bus
+            && zone_type == ZoneType::Transit
+            && vehicle.cell_id == vehicle.destination
+        {
             vehicle.transits_made_inc();
             let transits_made = vehicle.get_transits_made();
-            if (transits_made as usize) < vehicle.transit_cells.len() && vehicle.get_relax_countdown() == 0 {
+            if (transits_made as usize) < vehicle.transit_cells.len()
+                && vehicle.get_relax_countdown() == 0
+            {
                 vehicle.destination = vehicle.transit_cells[transits_made as usize];
                 // Confusion means "current destination proven unreachable"; the verdict
                 // does not transfer to a newly assigned destination
@@ -376,7 +397,7 @@ pub fn movement(
                 verbose.log_with_fields(
                     EVENT_MOVEMENT_DESTINATION,
                     "Vehicle done movement due reaching destination",
-                    &[("vehicle_id", &vehicle.id)]
+                    &[("vehicle_id", &vehicle.id)],
                 );
             }
             vehicles_to_remove.push(*vehicle_id);
@@ -387,7 +408,7 @@ pub fn movement(
                 verbose.log_with_fields(
                     EVENT_MOVEMENT_DEAD_END,
                     "Vehicle done movement due going to dead-end",
-                    &[("vehicle_id", &vehicle.id)]
+                    &[("vehicle_id", &vehicle.id)],
                 );
             }
             vehicles_to_remove.push(*vehicle_id);

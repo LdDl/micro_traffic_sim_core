@@ -16,12 +16,12 @@ pub enum IntentionType {
 
 impl fmt::Display for IntentionType {
     /// Formats the intention type for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::intentions::IntentionType;
     ///
@@ -43,7 +43,7 @@ impl fmt::Display for IntentionType {
 
 /// Associates a vehicle with its intention type for a cell.
 #[derive(Debug, Clone)]
-pub struct CellIntention{
+pub struct CellIntention {
     /// ID of the vehicle that has the intention
     pub vehicle_id: VehicleID,
     /// Type of intention for the cell
@@ -72,7 +72,10 @@ impl CellIntention {
     /// println!("Cell intention: {:?}", cell_intention);
     /// ```
     pub fn new(vehicle_id: VehicleID, int_type: IntentionType) -> Self {
-        CellIntention { vehicle_id, int_type }
+        CellIntention {
+            vehicle_id,
+            int_type,
+        }
     }
 
     /// Returns a reference to the associated vehicle if present.

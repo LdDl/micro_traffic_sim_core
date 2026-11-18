@@ -15,7 +15,9 @@ pub struct VehiclesStorage(IndexMap<VehicleID, Vehicle>);
 
 impl VehiclesStorage {
     /// Create empty vehicles storage
-    pub fn new() -> Self { Self(IndexMap::new()) }
+    pub fn new() -> Self {
+        Self(IndexMap::new())
+    }
 
     /// Insert a vehicle by its id (vehicle.id is used as the key)
     pub fn insert_vehicle(&mut self, vehicle: Vehicle) {
@@ -24,43 +26,63 @@ impl VehiclesStorage {
     }
 
     /// Number of vehicles
-    pub fn len(&self) -> usize { self.0.len() }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 
     /// Whether storage is empty
-    pub fn is_empty(&self) -> bool { self.0.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 
     /// Immutable iterator over (&VehicleID, &Vehicle)
-    pub fn iter(&self) -> indexmap::map::Iter<'_, VehicleID, Vehicle> { self.0.iter() }
+    pub fn iter(&self) -> indexmap::map::Iter<'_, VehicleID, Vehicle> {
+        self.0.iter()
+    }
 
     /// Mutable iterator over (&VehicleID, &mut Vehicle)
-    pub fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, VehicleID, Vehicle> { self.0.iter_mut() }
+    pub fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, VehicleID, Vehicle> {
+        self.0.iter_mut()
+    }
 
     /// Convenience: values iterator
-    pub fn values(&self) -> indexmap::map::Values<'_, VehicleID, Vehicle> { self.0.values() }
+    pub fn values(&self) -> indexmap::map::Values<'_, VehicleID, Vehicle> {
+        self.0.values()
+    }
 
     /// Convenience: mutable values iterator
-    pub fn values_mut(&mut self) -> indexmap::map::ValuesMut<'_, VehicleID, Vehicle> { self.0.values_mut() }
+    pub fn values_mut(&mut self) -> indexmap::map::ValuesMut<'_, VehicleID, Vehicle> {
+        self.0.values_mut()
+    }
 }
 
 // Allow transparent access to IndexMap API and deref-coercions in function calls
 impl Deref for VehiclesStorage {
     type Target = IndexMap<VehicleID, Vehicle>;
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 impl DerefMut for VehiclesStorage {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 // Make `for (id, v) in &vehicles_storage { .. }` work like for &IndexMap
 impl<'a> IntoIterator for &'a VehiclesStorage {
     type Item = (&'a VehicleID, &'a Vehicle);
     type IntoIter = indexmap::map::Iter<'a, VehicleID, Vehicle>;
-    fn into_iter(self) -> Self::IntoIter { self.0.iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
 }
 
 // Mutable iteration with `for (id, v) in &mut vehicles_storage { .. }`
 impl<'a> IntoIterator for &'a mut VehiclesStorage {
     type Item = (&'a VehicleID, &'a mut Vehicle);
     type IntoIter = indexmap::map::IterMut<'a, VehicleID, Vehicle>;
-    fn into_iter(self) -> Self::IntoIter { self.0.iter_mut() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
 }

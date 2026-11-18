@@ -1,6 +1,6 @@
 use super::*;
-use crate::geom::new_point;
 use crate::geom::SRID;
+use crate::geom::new_point;
 
 #[test]
 fn test_cells_gc_distance() {

@@ -18,7 +18,7 @@ use std::collections::{BinaryHeap, HashMap};
 
 use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
-use crate::shortest_path::heuristics::{edge_time, Heuristic};
+use crate::shortest_path::heuristics::{Heuristic, edge_time};
 
 /// Predecessor adjacency: for each cell, the cells that have an out-edge into it.
 type ReverseAdj = HashMap<CellID, Vec<CellID>>;
@@ -69,7 +69,10 @@ pub fn dijkstra_from(source: CellID, net: &GridRoads) -> HashMap<CellID, f64> {
     let mut dist: HashMap<CellID, f64> = HashMap::new();
     let mut heap = BinaryHeap::new();
     dist.insert(source, 0.0);
-    heap.push(DijkstraEntry { dist: 0.0, cell: source });
+    heap.push(DijkstraEntry {
+        dist: 0.0,
+        cell: source,
+    });
     while let Some(DijkstraEntry { dist: d, cell }) = heap.pop() {
         if d > *dist.get(&cell).unwrap_or(&f64::INFINITY) {
             // stale heap entry
@@ -102,7 +105,10 @@ pub fn dijkstra_to(source: CellID, net: &GridRoads, rev: &ReverseAdj) -> HashMap
     let mut dist: HashMap<CellID, f64> = HashMap::new();
     let mut heap = BinaryHeap::new();
     dist.insert(source, 0.0);
-    heap.push(DijkstraEntry { dist: 0.0, cell: source });
+    heap.push(DijkstraEntry {
+        dist: 0.0,
+        cell: source,
+    });
     while let Some(DijkstraEntry { dist: d, cell }) = heap.pop() {
         if d > *dist.get(&cell).unwrap_or(&f64::INFINITY) {
             continue;
@@ -199,7 +205,10 @@ impl LandmarkTable {
             }
         }
 
-        let dist_to = landmarks.iter().map(|&l| dijkstra_to(l, net, &rev)).collect();
+        let dist_to = landmarks
+            .iter()
+            .map(|&l| dijkstra_to(l, net, &rev))
+            .collect();
 
         LandmarkTable {
             landmarks,
@@ -251,7 +260,12 @@ impl LandmarkTable {
     /// cost `O(num_active)` table lookups instead of `O(all landmarks)`. Any subset of
     /// landmarks stays admissible, so routes are unchanged. Build this once per A*
     /// search (it borrows the table; no copying of distance data).
-    pub fn active_for<'a>(&'a self, start: &Cell, goal: &Cell, num_active: usize) -> ActiveQuery<'a> {
+    pub fn active_for<'a>(
+        &'a self,
+        start: &Cell,
+        goal: &Cell,
+        num_active: usize,
+    ) -> ActiveQuery<'a> {
         let s = start.get_id();
         let g = goal.get_id();
         let mut scored: Vec<(f64, usize)> = (0..self.landmarks.len())
@@ -259,8 +273,15 @@ impl LandmarkTable {
             .collect();
         // Highest bound first; keep the top `num_active`.
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
-        let active = scored.into_iter().take(num_active).map(|(_, i)| i).collect();
-        ActiveQuery { table: self, active }
+        let active = scored
+            .into_iter()
+            .take(num_active)
+            .map(|(_, i)| i)
+            .collect();
+        ActiveQuery {
+            table: self,
+            active,
+        }
     }
 }
 

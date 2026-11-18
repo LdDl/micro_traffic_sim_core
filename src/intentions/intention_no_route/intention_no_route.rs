@@ -14,15 +14,15 @@ pub enum NoRouteError {
     /// Indicates that the destination cell vertex was not found in the graph.
     NoVertexFound {
         /// The ID of the cell that could not be found
-        cell_id: CellID
+        cell_id: CellID,
     },
     /// Indicates that the there is not exit path
     NoExitPath,
     /// Dead end reached
     DeadEndReached {
         /// The ID of the cell where dead end was reached
-        cell_id: CellID
-    }
+        cell_id: CellID,
+    },
 }
 
 impl fmt::Display for NoRouteError {
@@ -37,7 +37,7 @@ impl fmt::Display for NoRouteError {
             }
             NoRouteError::NoExitPath => {
                 write!(f, "Vehicle should have exited network in previous step")
-            },
+            }
             NoRouteError::DeadEndReached { cell_id } => {
                 write!(f, "Dead end reached at cell ID '{}'", cell_id)
             }

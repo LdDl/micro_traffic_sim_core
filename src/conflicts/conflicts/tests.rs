@@ -1,11 +1,10 @@
-
-use crate::conflicts::*;
-use crate::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone, ConflictZoneID};
-use crate::behaviour::BehaviourType;
 use crate::agents::{Vehicle, VehicleIntention, VehiclesStorage};
-use crate::intentions::{CellIntention, IntentionType, Intentions};
+use crate::behaviour::BehaviourType;
+use crate::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone, ConflictZoneID};
+use crate::conflicts::*;
 use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
+use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::maneuver::LaneChangeType;
 use std::collections::HashMap;
 
@@ -15,15 +14,22 @@ fn test_find_zone_conflict_for_two_intentions() {
     // Instead of basic conflict resolution, the conflict zone winner type should be used
     let mut conflict_zones: HashMap<ConflictZoneID, ConflictZone> = HashMap::new();
     let mut cells_conflicts_zones: HashMap<CellID, ConflictZoneID> = HashMap::new();
-    let first_edge = ConflictEdge { source: 100, target: 200 };
-    let second_edge = ConflictEdge { source: 111, target: 200 };
+    let first_edge = ConflictEdge {
+        source: 100,
+        target: 200,
+    };
+    let second_edge = ConflictEdge {
+        source: 111,
+        target: 200,
+    };
     let zone = ConflictZone::new(1, first_edge, second_edge)
         .with_winner_type(ConflictWinnerType::Second)
         .build();
     conflict_zones.insert(1, zone);
     cells_conflicts_zones.insert(200, 1);
     let correct_winner = 111;
-    let winner = find_zone_conflict_for_two_intentions(200, &conflict_zones, &cells_conflicts_zones);
+    let winner =
+        find_zone_conflict_for_two_intentions(200, &conflict_zones, &cells_conflicts_zones);
     assert_eq!(winner, Some(correct_winner), "Conflict winner is incorrect");
 }
 
@@ -42,12 +48,16 @@ fn test_find_cross_trajectories_no_right_maneuver() {
     });
     let cell_intention = CellIntention::new(vehicle.id, IntentionType::Target);
     let intention_cell = Cell::new(15).build();
-let collected_intentions = Intentions::new();
-let grid = GridRoads::new();
-let mut vehicles = VehiclesStorage::new();
+    let collected_intentions = Intentions::new();
+    let grid = GridRoads::new();
+    let mut vehicles = VehiclesStorage::new();
     vehicles.insert(vehicle.id, vehicle);
     let result = find_cross_trajectories_conflict_naive(
-        &cell_intention, &intention_cell, &collected_intentions, &grid, &vehicles
+        &cell_intention,
+        &intention_cell,
+        &collected_intentions,
+        &grid,
+        &vehicles,
     );
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
@@ -74,11 +84,15 @@ fn test_find_cross_trajectories_no_forward_cell() {
         // No forward cell
         .with_forward_node(-1)
         .build();
-grid.add_cell(cell.clone());
-let mut vehicles = VehiclesStorage::new();
+    grid.add_cell(cell.clone());
+    let mut vehicles = VehiclesStorage::new();
     vehicles.insert(vehicle.id, vehicle);
     let result = find_cross_trajectories_conflict_naive(
-        &cell_intention, &intention_cell, &collected_intentions, &grid, &vehicles
+        &cell_intention,
+        &intention_cell,
+        &collected_intentions,
+        &grid,
+        &vehicles,
     );
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
@@ -122,19 +136,26 @@ fn test_find_cross_trajectories_no_conflict_same_direction() {
     collected_intentions.add_intention(&mut vehicle2, IntentionType::Target);
 
     let vehicle1_intention = CellIntention::new(vehicle1.id, IntentionType::Target);
-let intention_cell = Cell::new(2).build();
-let mut vehicles = VehiclesStorage::new();
+    let intention_cell = Cell::new(2).build();
+    let mut vehicles = VehiclesStorage::new();
     vehicles.insert(vehicle1.id, vehicle1);
     let v2_id = 2;
     vehicles.insert(v2_id, vehicle2);
 
     let result = find_cross_trajectories_conflict_naive(
-        &vehicle1_intention, &intention_cell, &collected_intentions, &net, &vehicles
+        &vehicle1_intention,
+        &intention_cell,
+        &collected_intentions,
+        &net,
+        &vehicles,
     );
 
     assert!(result.is_ok());
     let conflict_info = result.unwrap();
-    assert!(conflict_info.is_none(), "Should not detect conflict when both vehicles go same direction");
+    assert!(
+        conflict_info.is_none(),
+        "Should not detect conflict when both vehicles go same direction"
+    );
 }
 
 #[test]
@@ -187,35 +208,49 @@ fn test_find_cross_trajectories_conflict_naive() {
     });
 
     // Set up intentions - vehicle2 wants cell 2
-let mut collected_intentions = Intentions::new();
-collected_intentions.add_intention(&mut vehicle2, IntentionType::Target);
+    let mut collected_intentions = Intentions::new();
+    collected_intentions.add_intention(&mut vehicle2, IntentionType::Target);
 
     // Test vehicle1's intention to go to cell 4
-let vehicle1_intention = CellIntention::new(vehicle1.id, IntentionType::Target);
+    let vehicle1_intention = CellIntention::new(vehicle1.id, IntentionType::Target);
     // Cell B
     let intention_cell = net.get_cell(&4).unwrap();
-let mut vehicles = VehiclesStorage::new();
-vehicles.insert(1, vehicle1);
-vehicles.insert(2, vehicle2);
+    let mut vehicles = VehiclesStorage::new();
+    vehicles.insert(1, vehicle1);
+    vehicles.insert(2, vehicle2);
 
     let result = find_cross_trajectories_conflict_naive(
-        &vehicle1_intention, intention_cell, &collected_intentions, &net, &vehicles
+        &vehicle1_intention,
+        intention_cell,
+        &collected_intentions,
+        &net,
+        &vehicles,
     );
 
     // Assertions
     assert!(result.is_ok(), "Should not return error");
     let conflict_info = result.unwrap();
-    assert!(conflict_info.is_some(), "Should detect crossing trajectories conflict");
+    assert!(
+        conflict_info.is_some(),
+        "Should detect crossing trajectories conflict"
+    );
 
     let info = conflict_info.unwrap();
-    assert_eq!(info.conflict_type, ConflictType::CrossLaneChange, "Should be cross lane change conflict");
+    assert_eq!(
+        info.conflict_type,
+        ConflictType::CrossLaneChange,
+        "Should be cross lane change conflict"
+    );
 
     // // Check that both vehicles are in the conflict
-assert_eq!(info.vehicle_id, 1, "Vehicle 1 should be primary vehicle");
-assert_eq!(info.side_vehicle_id, 2, "Vehicle 2 should be side vehicle");
+    assert_eq!(info.vehicle_id, 1, "Vehicle 1 should be primary vehicle");
+    assert_eq!(info.side_vehicle_id, 2, "Vehicle 2 should be side vehicle");
 
     // Vehicle 2 (left maneuver) should have priority over vehicle 1 (right maneuver)
-    assert_eq!(info.priority_vehicle_id, 2, "Left maneuver should have priority over right maneuver");
+    assert_eq!(
+        info.priority_vehicle_id, 2,
+        "Left maneuver should have priority over right maneuver"
+    );
 }
 
 /// Plain CrossLaneChange: a CUT-IN aggressor (aggressive_level > AGGRESSOR_CUT_IN_THRESHOLD, strictly more aggressive)
@@ -266,10 +301,19 @@ fn test_cross_lane_change_aggressor_gets_priority() {
     vehicles.insert(2, vehicle2);
 
     let info = find_cross_trajectories_conflict_naive(
-        &vehicle1_intention, intention_cell, &collected_intentions, &net, &vehicles,
-    ).unwrap().expect("crossing conflict should be detected");
+        &vehicle1_intention,
+        intention_cell,
+        &collected_intentions,
+        &net,
+        &vehicles,
+    )
+    .unwrap()
+    .expect("crossing conflict should be detected");
     assert_eq!(info.conflict_type, ConflictType::CrossLaneChange);
-    assert_eq!(info.priority_vehicle_id, 1, "cut-in aggressor (right maneuver) out-aggresses the left and wins");
+    assert_eq!(
+        info.priority_vehicle_id, 1,
+        "cut-in aggressor (right maneuver) out-aggresses the left and wins"
+    );
 }
 
 #[test]
@@ -312,15 +356,29 @@ fn test_find_conflict_type() {
         &vehicles,
     );
 
-    assert_eq!(winner.get_vehicle_id(), correct_id, "Tail intention should win over transit");
-    assert_eq!(conflict_type, ConflictType::Tail, "Conflict type should be Tail");
+    assert_eq!(
+        winner.get_vehicle_id(),
+        correct_id,
+        "Tail intention should win over transit"
+    );
+    assert_eq!(
+        conflict_type,
+        ConflictType::Tail,
+        "Conflict type should be Tail"
+    );
 
     // Test 2: Conflict zone winner - First edge source should win
     let mut conflict_zones = HashMap::new();
     let mut cells_conflicts_zones = HashMap::new();
 
-    let first_edge = ConflictEdge { source: 10, target: 15 };
-    let second_edge = ConflictEdge { source: 11, target: 15 };
+    let first_edge = ConflictEdge {
+        source: 10,
+        target: 15,
+    };
+    let second_edge = ConflictEdge {
+        source: 11,
+        target: 15,
+    };
     let zone = ConflictZone::new(1, first_edge, second_edge)
         .with_winner_type(ConflictWinnerType::First)
         .build();
@@ -351,10 +409,10 @@ fn test_find_conflict_type() {
 
     let correct_id = vehicle_three.id;
     let intention_three = CellIntention::new(vehicle_three.id, IntentionType::Target);
-let intention_four = CellIntention::new(vehicle_four.id, IntentionType::Target);
-let mut vehicles = VehiclesStorage::new();
-vehicles.insert(3, vehicle_three);
-vehicles.insert(4, vehicle_four);
+    let intention_four = CellIntention::new(vehicle_four.id, IntentionType::Target);
+    let mut vehicles = VehiclesStorage::new();
+    vehicles.insert(3, vehicle_three);
+    vehicles.insert(4, vehicle_four);
 
     let (winner, conflict_type) = find_conflict_type(
         15,
@@ -365,8 +423,16 @@ vehicles.insert(4, vehicle_four);
         &vehicles,
     );
 
-    assert_eq!(winner.get_vehicle_id(), correct_id, "First edge source vehicle should win");
-    assert_eq!(conflict_type, ConflictType::MergeForwardConflictZone, "Conflict type should be MergeForwardConflictZone");
+    assert_eq!(
+        winner.get_vehicle_id(),
+        correct_id,
+        "First edge source vehicle should win"
+    );
+    assert_eq!(
+        conflict_type,
+        ConflictType::MergeForwardConflictZone,
+        "Conflict type should be MergeForwardConflictZone"
+    );
 
     // Test 3: Merge lane change - Left maneuver should have priority over right
     let mut vehicle_five = Vehicle::new(5)
@@ -407,8 +473,16 @@ vehicles.insert(4, vehicle_four);
         &vehicles,
     );
 
-    assert_eq!(winner.get_vehicle_id(), correct_id, "Left maneuver should have priority over right");
-    assert_eq!(conflict_type, ConflictType::MergeLaneChange, "Conflict type should be MergeLaneChange");
+    assert_eq!(
+        winner.get_vehicle_id(),
+        correct_id,
+        "Left maneuver should have priority over right"
+    );
+    assert_eq!(
+        conflict_type,
+        ConflictType::MergeLaneChange,
+        "Conflict type should be MergeLaneChange"
+    );
 
     // Test 4: Aggressive vs Cooperative behavior
     let mut vehicle_seven = Vehicle::new(7)
@@ -449,8 +523,16 @@ vehicles.insert(4, vehicle_four);
         &vehicles,
     );
 
-    assert_eq!(winner.get_vehicle_id(), correct_id, "Aggressive vehicle should win over cooperative");
-    assert_eq!(conflict_type, ConflictType::MergeForward, "Conflict type should be MergeForward");
+    assert_eq!(
+        winner.get_vehicle_id(),
+        correct_id,
+        "Aggressive vehicle should win over cooperative"
+    );
+    assert_eq!(
+        conflict_type,
+        ConflictType::MergeForward,
+        "Conflict type should be MergeForward"
+    );
 }
 
 #[test]
@@ -493,7 +575,13 @@ fn test_new_conflict_multiple_basic() {
     vehicles.insert(1, vehicle1);
     vehicles.insert(2, vehicle2);
 
-    let result = new_conflict_multiple(&cell, &conflict_zones, &cells_conflicts_zones, &intentions, &vehicles);
+    let result = new_conflict_multiple(
+        &cell,
+        &conflict_zones,
+        &cells_conflicts_zones,
+        &intentions,
+        &vehicles,
+    );
 
     assert!(result.is_ok());
     let conflict = result.unwrap();
@@ -543,17 +631,26 @@ fn test_full_tie_winner_is_order_invariant() {
             .iter()
             .map(|&id| CellIntention::new(id, IntentionType::Target))
             .collect();
-        let conflict = new_conflict_multiple(&cell, &conflict_zones, &cells_conflicts_zones, &intentions, &vehicles).unwrap();
+        let conflict = new_conflict_multiple(
+            &cell,
+            &conflict_zones,
+            &cells_conflicts_zones,
+            &intentions,
+            &vehicles,
+        )
+        .unwrap();
         let winner = conflict.participants[conflict.priority_participant_index];
-        assert_eq!(winner, 1, "full-tie winner must be the lowest id (1) regardless of fold order {:?}", order);
+        assert_eq!(
+            winner, 1,
+            "full-tie winner must be the lowest id (1) regardless of fold order {:?}",
+            order
+        );
     }
 }
 
 #[test]
 fn test_new_conflict_multiple_deduplication() {
-    let vehicle1 = Vehicle::new(1)
-        .with_cell(10)
-        .build();
+    let vehicle1 = Vehicle::new(1).with_cell(10).build();
 
     // Same vehicle appears in multiple intentions
     let intentions = vec![
@@ -564,7 +661,13 @@ fn test_new_conflict_multiple_deduplication() {
     let cell = Cell::new(15).build();
     let mut vehicles = VehiclesStorage::new();
     vehicles.insert(1, vehicle1);
-    let result = new_conflict_multiple(&cell, &HashMap::new(), &HashMap::new(), &intentions, &vehicles);
+    let result = new_conflict_multiple(
+        &cell,
+        &HashMap::new(),
+        &HashMap::new(),
+        &intentions,
+        &vehicles,
+    );
 
     assert!(result.is_ok());
     let conflict = result.unwrap();

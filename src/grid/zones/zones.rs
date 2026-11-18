@@ -52,12 +52,12 @@ pub enum ZoneType {
 
 impl fmt::Display for ZoneType {
     /// Formats the zone type for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::grid::zones::ZoneType;
     ///

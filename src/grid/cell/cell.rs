@@ -1,4 +1,4 @@
-use crate::geom::{new_point, Point, PointType};
+use crate::geom::{Point, PointType, new_point};
 use crate::grid::zones::ZoneType;
 use std::fmt;
 
@@ -35,12 +35,12 @@ pub enum CellState {
 
 impl fmt::Display for CellState {
     /// Formats the cell state for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::grid::cell::CellState;
     ///
@@ -328,7 +328,7 @@ impl Cell {
     ///
     /// # Returns
     /// A `PointType` representing the coordinates of the cell.
-    /// 
+    ///
     /// # Example
     /// ```
     /// use micro_traffic_sim_core::geom::{new_point, SRID};
@@ -343,10 +343,10 @@ impl Cell {
     }
 
     /// Returns the zone type of the cell.
-    /// 
+    ///
     /// # Returns
     /// The `ZoneType` of the cell.
-    /// 
+    ///
     /// # Example
     /// ```
     /// use micro_traffic_sim_core::grid::cell::Cell;

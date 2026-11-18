@@ -1,12 +1,12 @@
 //! This module provides Point structure and its methods
-use std::fmt;
 use crate::geom::math::gc_distance;
+use std::fmt;
 
 /// Spatial Reference System Identifier
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SRID {
-    Euclidean = 0,    // Default Euclidean space
-    WGS84 = 4326,     // WGS84 coordinate system
+    Euclidean = 0, // Default Euclidean space
+    WGS84 = 4326,  // WGS84 coordinate system
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -19,13 +19,13 @@ pub enum PointType {
 pub trait Point: fmt::Display {
     /// Get x coordinate (longitude for WGS84)
     fn x(&self) -> f64;
-    
+
     /// Get y coordinate (latitude for WGS84)
     fn y(&self) -> f64;
-    
+
     /// Calculate distance to another point
     fn distance_to(&self, other: &Self) -> f64;
-    
+
     /// Get point's SRID
     fn srid(&self) -> SRID;
 }
@@ -34,7 +34,7 @@ impl Point for PointType {
     /// Returns x coordinate (longitude for WGS84 points)
     ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use micro_traffic_sim_core::geom::{Point, new_point};
     /// let point = new_point(4.0, 2.0, None);
@@ -46,11 +46,11 @@ impl Point for PointType {
             Self::WGS84(p) => p.x(),
         }
     }
-    
+
     /// Returns y coordinate (latitude for WGS84 points)
     ///     
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use micro_traffic_sim_core::geom::{Point, new_point};
     /// let point = new_point(4.0, 2.0, None);
@@ -62,31 +62,31 @@ impl Point for PointType {
             Self::WGS84(p) => p.y(),
         }
     }
-    
+
     /// Calculates distance to another point
-    /// 
+    ///
     /// # Arguments
     /// * `other` - Another point to calculate distance to.
-    /// 
+    ///
     /// # Returns
     /// A floating-point value representing the distance between two points.
-    /// For Euclidean points, returns Euclidean distance. For WGS84 points, 
+    /// For Euclidean points, returns Euclidean distance. For WGS84 points,
     /// returns great-circle distance in meters.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if attempting to calculate distance between points with different SRIDs.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use micro_traffic_sim_core::geom::{Point, new_point, SRID};
-    /// 
+    ///
     /// // Euclidean distance
     /// let point1 = new_point(0.0, 0.0, None);
     /// let point2 = new_point(3.0, 4.0, None);
     /// let distance = point1.distance_to(&point2); // Returns 5.0
-    /// 
+    ///
     /// // Great-circle distance
     /// let moscow = new_point(37.6176, 55.7558, Some(SRID::WGS84));
     /// let spb = new_point(30.3141, 59.9386, Some(SRID::WGS84));
@@ -99,14 +99,14 @@ impl Point for PointType {
             _ => panic!("Cannot calculate distance between points with different SRIDs"),
         }
     }
-    
+
     /// Returns the spatial reference system identifier (SRID) of the point.
-    /// 
+    ///
     /// # Returns
     /// The SRID of the point.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use micro_traffic_sim_core::geom::{Point, new_point};
     /// let point = new_point(4.0, 2.0, None);
@@ -122,12 +122,12 @@ impl Point for PointType {
 
 impl fmt::Display for PointType {
     /// Formats the point with given SRID for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::geom::{new_point, SRID};
     ///
@@ -153,7 +153,7 @@ impl fmt::Display for PointType {
 /// # Returns
 ///
 /// A new `Point` representing the geographic coordinates.
-/// 
+///
 /// # Example
 ///
 /// ```
@@ -192,9 +192,15 @@ pub struct EuclideanPoint {
 }
 
 impl Point for EuclideanPoint {
-    fn x(&self) -> f64 { self.x }
-    fn y(&self) -> f64 { self.y }
-    fn srid(&self) -> SRID { SRID::Euclidean }
+    fn x(&self) -> f64 {
+        self.x
+    }
+    fn y(&self) -> f64 {
+        self.y
+    }
+    fn srid(&self) -> SRID {
+        SRID::Euclidean
+    }
     fn distance_to(&self, other: &Self) -> f64 {
         ((self.x - other.x()).powi(2) + (self.y - other.y()).powi(2)).sqrt()
     }
@@ -214,9 +220,15 @@ pub struct WGS84Point {
 }
 
 impl Point for WGS84Point {
-    fn x(&self) -> f64 { self.lon }
-    fn y(&self) -> f64 { self.lat }
-    fn srid(&self) -> SRID { SRID::WGS84 }
+    fn x(&self) -> f64 {
+        self.lon
+    }
+    fn y(&self) -> f64 {
+        self.lat
+    }
+    fn srid(&self) -> SRID {
+        SRID::WGS84
+    }
     fn distance_to(&self, other: &Self) -> f64 {
         gc_distance(self.lon, self.lat, other.x(), other.y())
     }

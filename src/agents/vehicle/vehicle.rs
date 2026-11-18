@@ -1,14 +1,14 @@
 use crate::behaviour::{BehaviourType, RelativeRandomization, SynchronizationParameters};
 
+use crate::agents::vehicle_intention::{TailIntentionManeuver, VehicleIntention};
 use crate::agents_types::AgentType;
-use crate::agents::vehicle_intention::{VehicleIntention, TailIntentionManeuver};
 use crate::grid::cell::CellID;
-use crate::maneuver::LaneChangeType;
 use crate::grid::road_network::GridRoads;
+use crate::maneuver::LaneChangeType;
 use crate::trips::trip::TripID;
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 /// Errors returned by vehicle-related operations.
 #[derive(Debug, Clone)]
@@ -558,14 +558,14 @@ impl Vehicle {
                         source_cell_maneuver: *from_id,
                         target_cell_maneuver: *to_id,
                         intention_maneuver: LaneChangeType::ChangeRight,
-                    })
+                    });
                 }
                 (id, _) if id == from_cell.get_left_id() => {
                     return Ok(TailIntentionManeuver {
                         source_cell_maneuver: *from_id,
                         target_cell_maneuver: *to_id,
                         intention_maneuver: LaneChangeType::ChangeLeft,
-                    })
+                    });
                 }
                 _ => continue,
             }
@@ -608,27 +608,27 @@ impl Vehicle {
         })
     }
 
-    /// Applies vehicle's intention to the vehicle's current state 
-    /// 
+    /// Applies vehicle's intention to the vehicle's current state
+    ///
     /// # Example
     /// ```rust
     /// use micro_traffic_sim_core::agents::Vehicle;
     /// use micro_traffic_sim_core::maneuver::LaneChangeType;
-    /// 
+    ///
     /// let mut vehicle = Vehicle::new(1)
     ///     .with_cell(10)
     ///     .with_destination(100)
     ///     .with_speed(1)
     ///     .build();
-    /// 
+    ///
     /// // Set some intention
     /// vehicle.intention.intention_speed = 3;
     /// vehicle.intention.destination = Some(200);
     /// vehicle.intention.confusion = Some(true);
-    /// 
+    ///
     /// // Apply the intention
     /// vehicle.apply_intention();
-    /// 
+    ///
     /// // Now vehicle state is updated
     /// assert_eq!(vehicle.speed, 3);
     /// assert_eq!(vehicle.destination, 200);
@@ -637,7 +637,11 @@ impl Vehicle {
     pub fn apply_intention(&mut self) {
         // No need to update cell_id. It is done in movement.rs
         self.speed = self.intention.intention_speed;
-        self.stop_ticks = if self.speed == 0 { self.stop_ticks.saturating_add(1) } else { 0 };
+        self.stop_ticks = if self.speed == 0 {
+            self.stop_ticks.saturating_add(1)
+        } else {
+            0
+        };
         // Apply destination if set in intention
         if let Some(destination) = self.intention.destination {
             self.destination = destination;
@@ -657,7 +661,10 @@ impl Vehicle {
         {
             return None;
         }
-        self.intention.intermediate_cells.first().copied()
+        self.intention
+            .intermediate_cells
+            .first()
+            .copied()
             .or(Some(self.intention.intention_cell_id))
             .filter(|&cell| cell >= 0 && cell != self.cell_id)
     }
@@ -684,7 +691,9 @@ impl Vehicle {
         self.intention.tail_intention_cells.clear();
         if !self.tail_cells.is_empty() {
             // Reuse the intention buffer while dropping the furthest tail cell.
-            self.intention.tail_intention_cells.extend_from_slice(&self.tail_cells[1..]);
+            self.intention
+                .tail_intention_cells
+                .extend_from_slice(&self.tail_cells[1..]);
             self.intention.tail_intention_cells.push(self.cell_id);
         }
     }
@@ -798,7 +807,11 @@ impl Vehicle {
         if length_cells <= 1 {
             return p0;
         }
-        let gap = if mean_gap.is_finite() { mean_gap.max(0.0) } else { 0.0 };
+        let gap = if mean_gap.is_finite() {
+            mean_gap.max(0.0)
+        } else {
+            0.0
+        };
         1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
     }
 
@@ -1444,7 +1457,7 @@ impl VehicleBuilder {
     }
 
     /// Builds a reference to the `Vehicle` object.
-    /// 
+    ///
     /// Obsolete in terms of internal usage (it was used before passing VehiclesStorage
     /// to the simulation engine). Could be useful for external usage.
     ///     

@@ -73,7 +73,7 @@ impl<'a> Path<'a> {
     pub fn maneuvers_mut(&mut self) -> &mut Vec<LaneChangeType> {
         &mut self.maneuvers
     }
-    
+
     /// Returns the total cost of the path.
     pub fn cost(&self) -> f64 {
         self.cost

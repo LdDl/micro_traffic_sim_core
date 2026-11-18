@@ -1,22 +1,20 @@
-use crate::intentions::intention_no_route::{process_no_route_found, NoRouteError};
-use crate::intentions::intention_path::process_path_for_vehicle;
+use crate::agents::{TailIntentionManeuver, Vehicle, VehicleError, VehicleID, VehicleIntention};
 use crate::behaviour::BehaviourType;
-use crate::agents::{
-    TailIntentionManeuver, Vehicle, VehicleError, VehicleID, VehicleIntention,
-};
 use crate::grid::cell::{Cell, CellState};
-use crate::maneuver::LaneChangeType;
 use crate::grid::{cell::CellID, road_network::GridRoads};
+use crate::intentions::intention_no_route::{NoRouteError, process_no_route_found};
+use crate::intentions::intention_path::process_path_for_vehicle;
 use crate::intentions::intention_type::IntentionType;
 use crate::intentions::intentions_datastorage::Intentions;
+use crate::maneuver::LaneChangeType;
 use crate::shortest_path;
-use crate::shortest_path::router::{shortest_path, path_no_goal, reconnect_to_cache};
 use crate::shortest_path::heuristics::edge_time;
 use crate::shortest_path::path::Path;
 use crate::shortest_path::router::AStarError;
+use crate::shortest_path::router::{path_no_goal, reconnect_to_cache, shortest_path};
+use crate::utils::rand::random_f64;
 use crate::verbose::*;
 use indexmap::IndexMap;
-use crate::utils::rand::random_f64;
 use std::collections::HashMap;
 use std::f64::INFINITY;
 use std::fmt;
@@ -91,10 +89,10 @@ impl fmt::Display for IntentionError {
 ///
 /// ```rust
 /// use micro_traffic_sim_core::simulation::session::Session;
-/// 
+///
 /// let mut session = Session::default(None);
 /// // ... set up grid, trips, vehicles ...
-/// 
+///
 /// // This internally calls intentions::prepare_intentions()
 /// let result = session.step();
 /// ```
@@ -119,9 +117,7 @@ pub fn prepare_intentions<'a, 'b>(
         verbose.log_with_fields(
             EVENT_INTENTIONS_CREATE,
             "Collect intentions for vehicles",
-            &[
-                ("vehicles_num", &vehicles.len()),
-            ]
+            &[("vehicles_num", &vehicles.len())],
         );
     }
     for (_, vehicle) in vehicles.iter_mut() {
@@ -134,7 +130,7 @@ pub fn prepare_intentions<'a, 'b>(
                     ("current_cell_id", &vehicle.cell_id),
                     ("speed", &vehicle.speed),
                     ("destination", &vehicle.destination),
-                ]
+                ],
             );
         }
         // Keep the cached route fresh: advance the cursor, periodically reroute,
@@ -142,7 +138,8 @@ pub fn prepare_intentions<'a, 'b>(
         refresh_route(net, vehicle, steps, reroute_period, reconnect_max_depth);
         align_route_for_tail(net, vehicle, reconnect_max_depth)?;
         let routing_start = std::time::Instant::now();
-        let possible_intention = find_intention(net, current_state, speed_snapshot, &vehicle, verbose)?;
+        let possible_intention =
+            find_intention(net, current_state, speed_snapshot, &vehicle, verbose)?;
         if possible_intention.should_stop {
             // Calculate maneuvers_allowed for find_alternate_intention
             // Maneuvers are blocked if tail is still completing a previous maneuver
@@ -150,14 +147,24 @@ pub fn prepare_intentions<'a, 'b>(
             let maneuvers_allowed = vehicle.timer_non_maneuvers <= 0
                 && tail_maneuver != LaneChangeType::ChangeRight
                 && tail_maneuver != LaneChangeType::ChangeLeft;
-            let alt = find_alternate_intention(net, current_state, speed_snapshot, &vehicle, maneuvers_allowed, reconnect_max_depth, steps)?;
-            // Lane-change hysteresis: just after a change, 
+            let alt = find_alternate_intention(
+                net,
+                current_state,
+                speed_snapshot,
+                &vehicle,
+                maneuvers_allowed,
+                reconnect_max_depth,
+                steps,
+            )?;
+            // Lane-change hysteresis: just after a change,
             // suppress a REACTIVE re-weave (keep the forward roll / block).
             // Routing maneuvers go through the cached route, not here.
             // Cooldown duration is the baked-in lc_cooldown_cfg constant.
             let alternate_possible_intention = if vehicle.timer_reactive_lane_change > 0
-                && matches!(alt.intention_maneuver, LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight)
-            {
+                && matches!(
+                    alt.intention_maneuver,
+                    LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight
+                ) {
                 possible_intention
             } else {
                 alt
@@ -187,7 +194,7 @@ pub fn prepare_intentions<'a, 'b>(
                 &[
                     ("vehicle_id", &vehicle.id),
                     ("intention", &possible_intention),
-                ]
+                ],
             );
         }
         vehicle.set_intention(possible_intention);
@@ -204,7 +211,7 @@ pub fn prepare_intentions<'a, 'b>(
                 ("routing_min_us", &routing_min_us),
                 ("routing_max_us", &routing_max_us),
                 ("routing_avg_us", &routing_avg_us),
-            ]
+            ],
         );
     }
     Ok(intentions)
@@ -402,7 +409,12 @@ fn build_path_from_cache<'a>(
 /// cell we roll onto) will succeed. A larger bound here green-lights rolls the next tick
 /// then cannot follow up on, forcing a needless full A* rebuild; a smaller one stalls
 /// rolls that would in fact reconnect. Equal bounds make "authorized" mean "reconnects".
-fn forward_keeps_reachable(vehicle: &Vehicle, forward_id: CellID, net: &GridRoads, max_depth: usize) -> bool {
+fn forward_keeps_reachable(
+    vehicle: &Vehicle,
+    forward_id: CellID,
+    net: &GridRoads,
+    max_depth: usize,
+) -> bool {
     let route = &vehicle.cached_route;
     let idx = vehicle.route_idx;
     // The route continues straight onto forward_id (the common case).
@@ -454,7 +466,10 @@ pub fn find_intention<'a>(
         .ok_or(IntentionError::NoSourceCell(vehicle.cell_id))?;
 
     // Deadend check
-    if source_cell.get_forward_id() < 0 && source_cell.get_right_id() < 0  && source_cell.get_left_id() < 0 {
+    if source_cell.get_forward_id() < 0
+        && source_cell.get_right_id() < 0
+        && source_cell.get_left_id() < 0
+    {
         let result = VehicleIntention {
             intention_maneuver: LaneChangeType::Block,
             intention_speed: 0,
@@ -522,7 +537,14 @@ pub fn find_intention<'a>(
     let sync_leader = if sync.time_gap > 0.0 && intention_speed > 0 {
         let sync_gap = ((sync.time_gap * intention_speed as f64).floor() as i32)
             .max(sync.minimum_moving_range);
-        synchronization_leader(source_cell, net, current_state, speed_snapshot, vehicle, sync_gap.saturating_add(1))
+        synchronization_leader(
+            source_cell,
+            net,
+            current_state,
+            speed_snapshot,
+            vehicle,
+            sync_gap.saturating_add(1),
+        )
     } else {
         None
     };
@@ -555,7 +577,14 @@ pub fn find_intention<'a>(
     let rand_decel = if long_stop {
         1
     } else if rr.lookahead > 0 {
-        match leader_probe(source_cell, net, current_state, speed_snapshot, vehicle.id, rr.lookahead) {
+        match leader_probe(
+            source_cell,
+            net,
+            current_state,
+            speed_snapshot,
+            vehicle.id,
+            rr.lookahead,
+        ) {
             Some((_, leader_speed)) if intention_speed < leader_speed => rr.decel_slower,
             Some((_, leader_speed)) if intention_speed > leader_speed => rr.decel_faster,
             _ => rr.decel_equal,
@@ -572,8 +601,16 @@ pub fn find_intention<'a>(
     let mut synchronization_blocked = false;
     if sync.time_gap > 0.0 {
         // KKW equations (11) to (15): clamp the preliminary speed before noise.
-        let safe_gap = synchronization_leader(source_cell, net, current_state, speed_snapshot, vehicle, speed_limit + 1)
-            .map(|(gap, _)| gap).unwrap_or(speed_limit);
+        let safe_gap = synchronization_leader(
+            source_cell,
+            net,
+            current_state,
+            speed_snapshot,
+            vehicle,
+            speed_limit + 1,
+        )
+        .map(|(gap, _)| gap)
+        .unwrap_or(speed_limit);
         synchronization_blocked = safe_gap == 0;
         speed_possible = speed_possible.min(safe_gap);
         if slowdown_allowed {
@@ -584,16 +621,34 @@ pub fn find_intention<'a>(
             } else {
                 sync.noise
             };
-            let ordinary_pa = if intention_speed < sync.pinch_speed { sync.over_acceleration_low } else { sync.over_acceleration };
+            let ordinary_pa = if intention_speed < sync.pinch_speed {
+                sync.over_acceleration_low
+            } else {
+                sync.over_acceleration
+            };
             let pa = if speed_limit > 0 && vehicle.speed == speed_limit {
                 sync.free_speed_over_acceleration.unwrap_or(ordinary_pa)
             } else {
                 ordinary_pa
             };
             let draw = random_f64();
-            let noise = if draw < pb { -1 } else if draw < pb + pa { 1 } else { 0 };
-            let acceleration_cap = if acceleration_allowed { intention_speed + 1 } else { intention_speed };
-            speed_possible = (speed_possible + noise).max(0).min(acceleration_cap).min(speed_limit).min(safe_gap);
+            let noise = if draw < pb {
+                -1
+            } else if draw < pb + pa {
+                1
+            } else {
+                0
+            };
+            let acceleration_cap = if acceleration_allowed {
+                intention_speed + 1
+            } else {
+                intention_speed
+            };
+            speed_possible = (speed_possible + noise)
+                .max(0)
+                .min(acceleration_cap)
+                .min(speed_limit)
+                .min(safe_gap);
         }
     } else if slowdown_allowed && speed_possible > 0 {
         let draw = random_f64();
@@ -604,7 +659,9 @@ pub fn find_intention<'a>(
     // A random slowdown to zero is a decision to wait this tick, not a blocked vehicle: it must
     // not trigger the alternatives of a stuck vehicle (lane change, roll forward at speed 1),
     // which would defeat slow to start on routed networks and turn dawdles into weaving.
-    let dawdled_to_zero = !synchronization_blocked && speed_possible == 0 && (acceleration_allowed || intention_speed > 0);
+    let dawdled_to_zero = !synchronization_blocked
+        && speed_possible == 0
+        && (acceleration_allowed || intention_speed > 0);
 
     // Check if maneuvers are allowed (they could be prohibeted due the vehicle's tail is not done previous maneuver yet)
     let maneuvers_allowed = vehicle.timer_non_maneuvers <= 0
@@ -639,7 +696,7 @@ pub fn find_intention<'a>(
                 Ok(path) => path,
                 Err(e) => return Err(IntentionError::NoPathFound(e)),
             }
-        },
+        }
         // Reachability over directed edges is monotone: once the destination is
         // unreachable from the current cell, it is unreachable from every cell the
         // vehicle can ever get to. Full A* would just fail again (the most expensive
@@ -654,7 +711,7 @@ pub fn find_intention<'a>(
             intention_speed = 1;
             speed_possible = intention_speed;
             new_path
-        },
+        }
         // Follow the cached route if the vehicle is on it (built above): the slice is
         // fed through the same process_path/assembly below, replacing the per-tick
         // full A* with an O(speed) cache read.
@@ -664,13 +721,7 @@ pub fn find_intention<'a>(
             let target_cell = net
                 .get_cell(&vehicle.destination)
                 .ok_or(IntentionError::NoTargetCell(vehicle.destination))?;
-            match shortest_path(
-                source_cell,
-                target_cell,
-                net,
-                maneuvers_allowed,
-                None,
-            ) {
+            match shortest_path(source_cell, target_cell, net, maneuvers_allowed, None) {
                 Ok(path) => path,
                 Err(e)
                     if e != shortest_path::router::AStarError::NoPathFound {
@@ -747,7 +798,10 @@ pub fn find_intention<'a>(
     // (Session::apply_longitudinal_clearance).
     if vehicle.standstill_gap > 0 && observable_path.has_vehicle_on_path {
         let blocking = observable_path.blocking_cell_id;
-        let leader_stopped = current_state.get(&blocking).map(|&v| v != vehicle.id).unwrap_or(false)
+        let leader_stopped = current_state
+            .get(&blocking)
+            .map(|&v| v != vehicle.id)
+            .unwrap_or(false)
             && speed_snapshot.get(&blocking).copied() == Some(0);
         if leader_stopped && (vertices.len() as i32) <= vehicle.standstill_gap {
             vertices.clear();
@@ -835,11 +889,18 @@ fn create_block_intention(cell_id: CellID, should_stop: bool) -> VehicleIntentio
 
 /// INCENTIVE predicate: change only if the target lane is more open `LC_INCENTIVE_DEPTH`
 /// cells ahead.
-fn lc_incentive_pass(target_cell_id: CellID, net: &GridRoads, occ: &HashMap<CellID, VehicleID>) -> bool {
+fn lc_incentive_pass(
+    target_cell_id: CellID,
+    net: &GridRoads,
+    occ: &HashMap<CellID, VehicleID>,
+) -> bool {
     if LC_INCENTIVE_DEPTH <= 0 {
         return true;
     }
-    let fwd = net.get_cell(&target_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+    let fwd = net
+        .get_cell(&target_cell_id)
+        .map(|c| c.get_forward_id())
+        .unwrap_or(-1);
     clear_forward(fwd, net, occ, LC_INCENTIVE_DEPTH)
 }
 
@@ -859,7 +920,12 @@ fn lc_p1_pass(change_p1: f64) -> bool {
 /// the road ends first (open road = clear).
 /// Reads start-of-step occupancy.
 /// Front safety gap.
-fn clear_forward(start: CellID, net: &GridRoads, occ: &HashMap<CellID, VehicleID>, need: i32) -> bool {
+fn clear_forward(
+    start: CellID,
+    net: &GridRoads,
+    occ: &HashMap<CellID, VehicleID>,
+    need: i32,
+) -> bool {
     let mut id = start;
     for _ in 0..need {
         if id < 0 {
@@ -959,7 +1025,14 @@ fn check_alternate_direction(
         let front_ok = clear_forward(cell.get_forward_id(), net, current_state, v_n);
         let max_look = (global_vmax + rear_margin).max(1);
         let rear_ok = aggressor_cut_in
-            || lane_change_rear_safe(net.get_back_id(cell_id), net, current_state, speed_snapshot, rear_margin, max_look);
+            || lane_change_rear_safe(
+                net.get_back_id(cell_id),
+                net,
+                current_state,
+                speed_snapshot,
+                rear_margin,
+                max_look,
+            );
         if !front_ok || !rear_ok {
             return Ok((-1, INFINITY));
         }
@@ -972,9 +1045,7 @@ fn check_alternate_direction(
             let cost = path.cost() + edge_time(source_cell, cell);
             Ok((cell_id, cost))
         }
-        Err(shortest_path::router::AStarError::NoPathFound { .. }) => {
-            Ok((-1, INFINITY))
-        }
+        Err(shortest_path::router::AStarError::NoPathFound { .. }) => Ok((-1, INFINITY)),
         Err(_) => {
             if direction == "left" {
                 Err(IntentionError::LeftPathFind(cell_id))
@@ -1141,7 +1212,8 @@ pub fn find_alternate_intention<'a>(
         // A mandatory route change must NOT be suppressed by the discretionary gates below (else the vehicle
         // misses its turn -> would have to reroute -> the historical cause of `lost`).
         // Discretionary (gap-escape) changes go through incentive + P1; route changes bypass them.
-        let route_required = vehicle.cached_route.get(vehicle.route_idx + 1).copied() == Some(min_cell);
+        let route_required =
+            vehicle.cached_route.get(vehicle.route_idx + 1).copied() == Some(min_cell);
         if !route_required {
             // INCENTIVE: change only if the chosen lane is genuinely more open ahead (else the side
             // is equally congested -> changing is useless weaving -> WAIT). Surgical anti-weaving.
@@ -1165,7 +1237,7 @@ pub fn find_alternate_intention<'a>(
             intermediate_cells: Vec::with_capacity(0),
             tail_maneuver: TailIntentionManeuver::default(),
             should_stop: true,
-        })
+        });
     }
     Ok(create_block_intention(source_cell_id, false))
 }
@@ -1181,13 +1253,24 @@ fn synchronization_leader(
     max_cells: i32,
 ) -> Option<(i32, i32)> {
     let mut distance = max_cells;
-    if vehicle.destination >= 0 && !vehicle.confusion
-        && vehicle.cached_route.get(vehicle.route_idx) == Some(&vehicle.cell_id) {
+    if vehicle.destination >= 0
+        && !vehicle.confusion
+        && vehicle.cached_route.get(vehicle.route_idx) == Some(&vehicle.cell_id)
+    {
         distance = 0;
         let mut previous = source;
-        for id in vehicle.cached_route.iter().skip(vehicle.route_idx + 1).take(max_cells as usize) {
-            if previous.get_forward_id() != *id { break; }
-            let Some(next) = net.get_cell(id) else { break; };
+        for id in vehicle
+            .cached_route
+            .iter()
+            .skip(vehicle.route_idx + 1)
+            .take(max_cells as usize)
+        {
+            if previous.get_forward_id() != *id {
+                break;
+            }
+            let Some(next) = net.get_cell(id) else {
+                break;
+            };
             distance += 1;
             previous = next;
         }

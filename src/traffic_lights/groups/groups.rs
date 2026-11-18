@@ -35,7 +35,7 @@ impl TrafficLightGroup {
     /// use micro_traffic_sim_core::grid::cell::CellID;
     /// use micro_traffic_sim_core::traffic_lights::signals::SignalType;
     /// use micro_traffic_sim_core::traffic_lights::groups::TrafficLightGroup;
-    /// 
+    ///
     /// let group = TrafficLightGroup::new(1)
     ///     .with_label("new signal group".to_string())
     ///     .with_geometry(vec![new_point(0.0, 0.0, None), new_point(1.0, 1.0, None)])

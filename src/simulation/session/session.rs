@@ -1,27 +1,30 @@
-use crate::simulation::clearance::LongitudinalClearance;
-use crate::maneuver::LaneChangeType;
-use crate::behaviour::BehaviourParameters;
+use crate::agents::{Vehicle, VehicleID, VehiclesStorage};
 use crate::agents_types::AgentType;
-use crate::agents::{VehicleID, Vehicle, VehiclesStorage};
+use crate::behaviour::BehaviourParameters;
 use crate::conflict_zones::{ConflictZone, ConflictZoneID};
-use crate::grid::cell::{CellID, Cell};
-use crate::trips::trip::{Trip, TripID, TripType};
-use crate::simulation::grids_storage::{GridsStorage, GridsStorageError};
+use crate::conflicts::{
+    ConflictError, ConflictSolverError, CrossingZoneIndex, collect_conflicts_indexed,
+    solve_conflicts,
+};
 use crate::geom::{Point, SRID};
+use crate::grid::cell::{Cell, CellID};
 use crate::intentions::{IntentionError, prepare_intentions};
-use crate::conflicts::{ConflictError, ConflictSolverError, CrossingZoneIndex, collect_conflicts_indexed, solve_conflicts};
+use crate::maneuver::LaneChangeType;
 use crate::movement::{MovementError, movement};
 use crate::shortest_path::router::shortest_path;
+use crate::simulation::clearance::LongitudinalClearance;
+use crate::simulation::grids_storage::{GridsStorage, GridsStorageError};
 use crate::simulation::states::{AutomataState, VehicleState};
-use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
+use crate::traffic_lights::lights::{TrafficLight, TrafficLightID};
+use crate::trips::trip::{Trip, TripID, TripType};
 use crate::verbose::*;
-use std::collections::{HashMap, HashSet, BTreeMap};
-use uuid::Uuid;
-use std::fmt;
-use std::time::{SystemTime, UNIX_EPOCH};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
+use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 /// Fixed seed for the per-session spawn RNG so vehicle generation is reproducible
 /// run-to-run (replaces the previous unseeded thread-local RNG).
@@ -71,25 +74,25 @@ impl fmt::Display for SessionError {
         match self {
             SessionError::ErrorPlaceholder(value) => {
                 write!(f, "ErrorPlaceholder: {}", value)
-            },
+            }
             SessionError::GridsStorageError(err) => {
                 write!(f, "GridsStorage error: {}", err)
-            },
+            }
             SessionError::IntentionError(err) => {
                 write!(f, "Intention error: {}", err)
-            },
+            }
             SessionError::ConflictError(err) => {
                 write!(f, "Conflict error: {}", err)
-            },
+            }
             SessionError::ConflictSolverError(err) => {
                 write!(f, "Conflict solver error: {}", err)
-            },
+            }
             SessionError::CellNotFound(cell_id) => {
                 write!(f, "Cell with ID {} not found", cell_id)
-            },
+            }
             SessionError::MovementError(err) => {
                 write!(f, "Movement error: {}", err)
-            },
+            }
         }
     }
 }
@@ -446,7 +449,8 @@ impl Session {
     pub fn set_routing_options(&mut self, options: RoutingOptions) {
         if options.adaptation_interval > 0
             && options.reroute_period <= 0
-            && self.verbose.is_at_least(VerboseLevel::Main) {
+            && self.verbose.is_at_least(VerboseLevel::Main)
+        {
             self.verbose.log_with_fields(
                 EVENT_ROUTING_CONFIG,
                 "congestion enabled but periodic rerouting is off: congestion will shape \
@@ -455,7 +459,7 @@ impl Session {
                 &[
                     ("adaptation_interval", &options.adaptation_interval),
                     ("reroute_period", &options.reroute_period),
-                ]
+                ],
             );
         }
         self.routing = options;
@@ -472,7 +476,7 @@ impl Session {
     }
 
     /// Returns a reference to the traffic light with the given ID if it exists in the traffic lights storage.
-    pub fn get_tls_ref(&self, ) -> &HashMap<TrafficLightID, TrafficLight> {
+    pub fn get_tls_ref(&self) -> &HashMap<TrafficLightID, TrafficLight> {
         self.grids_storage.get_tls_ref()
     }
 
@@ -512,7 +516,9 @@ impl Session {
     }
 
     /// Returns a reference to the vehicles storage
-    pub fn get_vehicles(&self) -> &VehiclesStorage { &self.vehicles }
+    pub fn get_vehicles(&self) -> &VehiclesStorage {
+        &self.vehicles
+    }
 
     /// Tells whether a cell is occupied by any vehicle body: a head or a materialized tail cell.
     /// Tail placeholders (`TAIL_PLACEHOLDER`, a tail that has not materialized yet) are ignored.
@@ -557,7 +563,7 @@ impl Session {
                 ("vehicles_num", &self.vehicles.len()),
                 ("trips_num", &self.trips_data.len()),
                 ("tls_num", &self.grids_storage.tls_num()),
-            ]
+            ],
         );
 
         // Clear vehicles
@@ -588,10 +594,12 @@ impl Session {
         let first_edge = conflict_zone.get_first_edge();
         let second_edge = conflict_zone.get_second_edge();
         if first_edge.target >= 0 {
-            self.cells_conflicts_zones.insert(first_edge.target, conflict_zone_id);
+            self.cells_conflicts_zones
+                .insert(first_edge.target, conflict_zone_id);
         }
         if second_edge.target >= 0 {
-            self.cells_conflicts_zones.insert(second_edge.target, conflict_zone_id);
+            self.cells_conflicts_zones
+                .insert(second_edge.target, conflict_zone_id);
         }
         // Add conflict zone to storage
         self.conflict_zones.insert(conflict_zone_id, conflict_zone);
@@ -607,15 +615,16 @@ impl Session {
         // the LAST stop. Setting trip_destination to the first stop made buses despawn as
         // "completed" the moment they reached stop #1. Other vehicles go straight to `to_node`
         // for both.
-        let (target_node, final_destination) = if trip.allowed_agent_type == AgentType::Bus
-            && !trip.transit_cells.is_empty() {
-            (trip.transit_cells[0], *trip.transit_cells.last().unwrap())
-        } else {
-            (trip.to_node, trip.to_node)
-        };
+        let (target_node, final_destination) =
+            if trip.allowed_agent_type == AgentType::Bus && !trip.transit_cells.is_empty() {
+                (trip.transit_cells[0], *trip.transit_cells.last().unwrap())
+            } else {
+                (trip.to_node, trip.to_node)
+            };
 
         // Create behaviour parameters based on allowed behaviour type
-        let behaviour_params = BehaviourParameters::from_behaviour_type(trip.allowed_behaviour_type);
+        let behaviour_params =
+            BehaviourParameters::from_behaviour_type(trip.allowed_behaviour_type);
 
         // Determine speed limit: use trip's explicit value if set, otherwise from behaviour
         let speed_limit = if trip.speed_limit >= 0 {
@@ -629,7 +638,8 @@ impl Session {
             // Assign standstill gaps deterministically from vehicle IDs without RNG draws.
             // The requested share is approximate.
             i32::from(
-                (self.last_vehicle_id.wrapping_mul(GAP_SHARE_HASH_MULTIPLIER) % GAP_SHARE_RESOLUTION) as f64
+                (self.last_vehicle_id.wrapping_mul(GAP_SHARE_HASH_MULTIPLIER)
+                    % GAP_SHARE_RESOLUTION) as f64
                     / (GAP_SHARE_RESOLUTION as f64)
                     < share,
             )
@@ -664,10 +674,20 @@ impl Session {
             .with_cell(trip.from_node)
             .with_speed(trip.initial_speed)
             .with_speed_limit(speed_limit)
-            .with_slowdown(if trip.slowdown >= 0.0 { trip.slowdown } else { behaviour_params.slowdown_factor_p() })
+            .with_slowdown(if trip.slowdown >= 0.0 {
+                trip.slowdown
+            } else {
+                behaviour_params.slowdown_factor_p()
+            })
             .with_slow_to_start(slow_to_start)
-            .with_relative_randomization(trip.relative_randomization.unwrap_or(behaviour_params.relative_randomization()))
-            .with_synchronization(trip.synchronization.unwrap_or(behaviour_params.synchronization()))
+            .with_relative_randomization(
+                trip.relative_randomization
+                    .unwrap_or(behaviour_params.relative_randomization()),
+            )
+            .with_synchronization(
+                trip.synchronization
+                    .unwrap_or(behaviour_params.synchronization()),
+            )
             .with_change_p1(behaviour_params.change_p1())
             .with_lc_cooldown(behaviour_params.lc_cooldown())
             .with_min_safe_distance(behaviour_params.min_safe_distance())
@@ -690,7 +710,11 @@ impl Session {
         let mut route_index = if vehicle.confusion {
             None
         } else {
-            vehicle.cached_route.iter().enumerate().skip(vehicle.route_idx)
+            vehicle
+                .cached_route
+                .iter()
+                .enumerate()
+                .skip(vehicle.route_idx)
                 .take(vehicle.speed.max(0) as usize + 1)
                 .find_map(|(index, id)| (*id == vehicle.cell_id).then_some(index))
         };
@@ -701,7 +725,9 @@ impl Session {
             if vehicle.destination >= 0 && cell == vehicle.destination {
                 break;
             }
-            let Some(current) = net.get_cell(&cell) else { break; };
+            let Some(current) = net.get_cell(&cell) else {
+                break;
+            };
             let next = current.get_forward_id();
             if next < 0 || net.get_cell(&next).is_none() || !seen.insert(next) {
                 break;
@@ -729,7 +755,7 @@ impl Session {
                     ("step", &self.steps),
                     ("vehicles_num", &self.vehicles.len()),
                     ("trips_num", &self.trips_data.len()),
-                ]
+                ],
             );
         }
         if self.trips_data.is_empty() {
@@ -737,9 +763,14 @@ impl Session {
         }
         // The intention snapshot can precede movement or a direct add_vehicles call.
         // Build current occupancy once and update it after each accepted source.
-        let mut occupied: HashSet<CellID> = self.vehicles.values().flat_map(|vehicle|
-            std::iter::once(vehicle.cell_id).chain(vehicle.tail_cells.iter().copied().filter(|id| *id >= 0))
-        ).collect();
+        let mut occupied: HashSet<CellID> = self
+            .vehicles
+            .values()
+            .flat_map(|vehicle| {
+                std::iter::once(vehicle.cell_id)
+                    .chain(vehicle.tail_cells.iter().copied().filter(|id| *id >= 0))
+            })
+            .collect();
         let mut protected = HashSet::new();
         for vehicle in self.vehicles.values() {
             for cell in self.generation_reserve_cells(vehicle) {
@@ -867,7 +898,7 @@ impl Session {
                         ("trip_id", &chosen_id),
                         ("from_node", &from_node),
                         ("vehicle_id", &generated_vehicle.id),
-                    ]
+                    ],
                 );
             }
 
@@ -888,7 +919,7 @@ impl Session {
                     ("step", &self.steps),
                     ("vehicles_num", &self.vehicles.len()),
                     ("trips_num", &self.trips_data.len()),
-                ]
+                ],
             );
         }
         self.current_position.clear();
@@ -898,10 +929,7 @@ impl Session {
                 self.verbose.log_with_fields(
                     EVENT_UPD_POS,
                     "Vehicle position",
-                    &[
-                        ("vehicle_id", &vehicle.id),
-                        ("cell_id", &vehicle.cell_id),
-                    ]
+                    &[("vehicle_id", &vehicle.id), ("cell_id", &vehicle.cell_id)],
                 );
                 for (id, &tail_cell) in vehicle.tail_cells.iter().enumerate() {
                     if self.verbose.is_at_least(VerboseLevel::All) {
@@ -912,7 +940,7 @@ impl Session {
                                 ("vehicle_id", &vehicle.id),
                                 ("tail_idx", &id),
                                 ("tail_cell_id", &tail_cell),
-                            ]
+                            ],
                         );
                     }
                 }
@@ -942,7 +970,10 @@ impl Session {
                     continue;
                 }
                 let mut free_cells: Vec<CellID> = Vec::with_capacity(g0 as usize + 1);
-                let mut id = net.get_cell(&vehicle.cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+                let mut id = net
+                    .get_cell(&vehicle.cell_id)
+                    .map(|c| c.get_forward_id())
+                    .unwrap_or(-1);
                 for _ in 0..=g0 {
                     if id < 0 {
                         break;
@@ -992,7 +1023,9 @@ impl Session {
                 continue;
             }
             // Only a verified forward one-cell path supplies a release guarantee.
-            if !v.tail_cells.is_empty() || v.intention.intention_maneuver != LaneChangeType::NoChange {
+            if !v.tail_cells.is_empty()
+                || v.intention.intention_maneuver != LaneChangeType::NoChange
+            {
                 continue;
             }
             if v.intention.intention_cell_id == v.cell_id {
@@ -1001,7 +1034,11 @@ impl Session {
             }
             let mut previous = v.cell_id;
             let mut forward = true;
-            for cell in v.intention.intermediate_cells.iter().copied()
+            for cell in v
+                .intention
+                .intermediate_cells
+                .iter()
+                .copied()
                 .chain(std::iter::once(v.intention.intention_cell_id))
             {
                 if net.get_cell(&previous).map(|c| c.get_forward_id()) != Some(cell) {
@@ -1024,8 +1061,13 @@ impl Session {
                 continue;
             }
             let granted = v.intention.intermediate_cells.len() + 1;
-            let mut route_cursor = if v.destination >= 0 && !v.confusion
-                && v.cached_route.iter().skip(v.route_idx).take(granted + 1).copied()
+            let mut route_cursor = if v.destination >= 0
+                && !v.confusion
+                && v.cached_route
+                    .iter()
+                    .skip(v.route_idx)
+                    .take(granted + 1)
+                    .copied()
                     .eq(std::iter::once(v.cell_id)
                         .chain(v.intention.intermediate_cells.iter().copied())
                         .chain(std::iter::once(v.intention.intention_cell_id)))
@@ -1034,7 +1076,10 @@ impl Session {
             } else {
                 None
             };
-            let mut cell = net.get_cell(&v.intention.intention_cell_id).map(|c| c.get_forward_id()).unwrap_or(-1);
+            let mut cell = net
+                .get_cell(&v.intention.intention_cell_id)
+                .map(|c| c.get_forward_id())
+                .unwrap_or(-1);
             for offset in 0..reserve {
                 if cell < 0 {
                     break;
@@ -1057,21 +1102,33 @@ impl Session {
                     }
                     break;
                 }
-                cell = net.get_cell(&cell).map(|c| c.get_forward_id()).unwrap_or(-1);
+                cell = net
+                    .get_cell(&cell)
+                    .map(|c| c.get_forward_id())
+                    .unwrap_or(-1);
             }
         }
         // Frozen lower bounds prevent dependence on another final trimmed intention.
         for (id, granted, reserve_shortfall, owner) in limits {
             // An initially stopped leader supplies no bound, even if its granted move starts now.
-            let leader_was_moving = self.vehicles.get(&owner).map(|v| v.speed > 0).unwrap_or(false);
-            let leader_motion_bound = if self.longitudinal_clearance == LongitudinalClearance::MovingLeader
+            let leader_was_moving = self
+                .vehicles
+                .get(&owner)
+                .map(|v| v.speed > 0)
+                .unwrap_or(false);
+            let leader_motion_bound = if self.longitudinal_clearance
+                == LongitudinalClearance::MovingLeader
                 && leader_was_moving
             {
                 conservative_motion_bounds.get(&owner).copied().unwrap_or(0)
             } else {
                 0
             };
-            let permitted = granted.min(granted.saturating_add(leader_motion_bound).saturating_sub(reserve_shortfall));
+            let permitted = granted.min(
+                granted
+                    .saturating_add(leader_motion_bound)
+                    .saturating_sub(reserve_shortfall),
+            );
             if let Some(v) = self.vehicles.get_mut(&id) {
                 v.trim_forward_intention(permitted);
             }
@@ -1137,9 +1194,9 @@ impl Session {
             .get_vehicles_net_mut()
             .apply_congestion(&cell_speed);
     }
-    
+
     /// Main simulation step function
-    /// 
+    ///
     /// Pipeline is:
     /// ```text
     /// 1. Generate vehicles (trips)
@@ -1161,13 +1218,13 @@ impl Session {
                     ("vehicles_num", &self.vehicles.len()),
                     ("trips_num", &self.trips_data.len()),
                     ("tls_num", &self.grids_storage.tls_num()),
-                ]
+                ],
             );
         }
-        
+
         // 1. Generate vehicles for given trips
         self.generate_vehicles();
-        
+
         // 2. Update current positions
         self.update_current_positions();
 
@@ -1184,7 +1241,16 @@ impl Session {
         let tl_states_dump = self.grids_storage.tick_traffic_lights(&self.verbose)?;
 
         // 4. Create intentions for all vehicles
-        let collected_intentions = prepare_intentions(self.grids_storage.get_vehicles_net_ref(), &self.current_position, &self.speed_snapshot, &mut self.vehicles, &self.verbose, self.steps, self.routing.reroute_period, self.routing.reconnect_max_depth)?;
+        let collected_intentions = prepare_intentions(
+            self.grids_storage.get_vehicles_net_ref(),
+            &self.current_position,
+            &self.speed_snapshot,
+            &mut self.vehicles,
+            &self.verbose,
+            self.steps,
+            self.routing.reroute_period,
+            self.routing.reconnect_max_depth,
+        )?;
 
         // 5. Collect conflicts
         let conflicts_data = collect_conflicts_indexed(
@@ -1225,7 +1291,12 @@ impl Session {
                 occupied_points,
                 last_cell: vehicle.cell_id,
                 // Only materialized tail cells leave the core; placeholders are an internal detail.
-                tail_cells: vehicle.tail_cells.iter().copied().filter(|&t| t >= 0).collect(),
+                tail_cells: vehicle
+                    .tail_cells
+                    .iter()
+                    .copied()
+                    .filter(|&t| t >= 0)
+                    .collect(),
                 last_intermediate_cells: vehicle.intention.intermediate_cells.clone(),
                 last_speed: vehicle.speed,
                 last_angle: vehicle.bearing,
@@ -1250,7 +1321,7 @@ impl Session {
                     ("active_vehicles", &self.vehicles.len()),
                     ("vehicles_completed", &self.vehicles_completed),
                     ("vehicles_lost", &self.vehicles_lost),
-                ]
+                ],
             );
         }
 

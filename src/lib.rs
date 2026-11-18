@@ -1,13 +1,13 @@
 //! Export library
-pub mod behaviour;
-pub mod maneuver;
-pub mod agents_types;
 pub mod agents;
+pub mod agents_types;
+pub mod behaviour;
 pub mod conflict_zones;
+pub mod conflicts;
 pub mod geom;
 pub mod grid;
 pub mod intentions;
-pub mod conflicts;
+pub mod maneuver;
 pub mod movement;
 pub mod shortest_path;
 pub mod simulation;

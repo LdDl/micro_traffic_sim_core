@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
+use crate::grid::cell::CellID;
 use crate::grid::road_network::GridRoads;
-use crate::grid::cell::{CellID};
-use crate::traffic_lights::lights::{TrafficLightID, TrafficLight};
+use crate::simulation::states::TrafficLightGroupState;
+use crate::traffic_lights::lights::{TrafficLight, TrafficLightID};
 use crate::traffic_lights::signals::SignalType;
-use crate::simulation::states::{TrafficLightGroupState};
 use crate::verbose::*;
 use std::fmt;
 
@@ -20,8 +20,12 @@ impl fmt::Display for GridsStorageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GridsStorageError::CellInGroupNotFound(cell_id, group_id) => {
-                write!(f, "Cell with ID {} not found in group with ID {}", cell_id, group_id)
-            },
+                write!(
+                    f,
+                    "Cell with ID {} not found in group with ID {}",
+                    cell_id, group_id
+                )
+            }
         }
     }
 }
@@ -122,12 +126,15 @@ impl GridsStorage {
     }
 
     /// Advances the state of all traffic lights by one tick, updating their phases and cell states accordingly.
-    pub fn tick_traffic_lights(&mut self, verbose: &LocalLogger) -> Result<HashMap<TrafficLightID, Vec<TrafficLightGroupState>>, GridsStorageError> {
+    pub fn tick_traffic_lights(
+        &mut self,
+        verbose: &LocalLogger,
+    ) -> Result<HashMap<TrafficLightID, Vec<TrafficLightGroupState>>, GridsStorageError> {
         if verbose.is_at_least(VerboseLevel::Main) {
             verbose.log_with_fields(
                 EVENT_TL_TICK,
                 "Tick on traffic lights",
-                &[("tl_num", &self.tls.len())]
+                &[("tl_num", &self.tls.len())],
             );
         }
         let mut tl_states = HashMap::new();
@@ -140,7 +147,7 @@ impl GridsStorage {
                         ("tl_id", &format!("{:?}", tl_id)),
                         ("active_phase", &tl.get_active_phase()),
                         ("tl_timer", &tl.get_current_time()),
-                    ]
+                    ],
                 );
             }
             tl.step();
@@ -150,10 +157,10 @@ impl GridsStorage {
             for group in tl_groups {
                 let active_signal = group.get_signal_at(active_phase_idx);
                 let is_banned = match active_signal {
-                    SignalType::Red |
-                    SignalType::Yellow |
-                    SignalType::RedYellow |
-                    SignalType::Blinking => true,
+                    SignalType::Red
+                    | SignalType::Yellow
+                    | SignalType::RedYellow
+                    | SignalType::Blinking => true,
                     _ => false,
                 };
                 let cells_ids = group.get_cells_ids();
@@ -165,7 +172,10 @@ impl GridsStorage {
                             cell.set_state(crate::grid::cell::CellState::Free);
                         }
                     } else {
-                        return Err(GridsStorageError::CellInGroupNotFound(cell_id, group.get_id()));
+                        return Err(GridsStorageError::CellInGroupNotFound(
+                            cell_id,
+                            group.get_id(),
+                        ));
                     }
                 }
                 group_states.push(TrafficLightGroupState {
@@ -210,22 +220,22 @@ impl GridsStorageBuilder {
     }
 
     /// Puts the traffic lights into the storage
-    /// 
+    ///
     /// # Arguments
     /// * `tls` - HashMap of traffic lights to be stored
     ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// use micro_traffic_sim_core::traffic_lights::lights::TrafficLight;
     /// use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
-    /// 
+    ///
     /// let mut tls = std::collections::HashMap::new();
     /// let tl1 = TrafficLight::new(1).build();
     /// let tl2 = TrafficLight::new(2).build();
     /// tls.insert(tl1.get_id(), tl1);
     /// tls.insert(tl2.get_id(), tl2);
-    /// 
+    ///
     /// let storage = GridsStorage::new()
     ///     .with_tls(tls)
     ///     .build();

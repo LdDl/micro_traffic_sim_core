@@ -1,7 +1,7 @@
-use crate::conflicts::conflict_types::ConflictError;
-use crate::conflicts::conflict_rule::resolve_simple_rules;
 use crate::agents::{Vehicle, VehicleID};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone};
+use crate::conflicts::conflict_rule::resolve_simple_rules;
+use crate::conflicts::conflict_types::ConflictError;
 use crate::grid::cell::CellID;
 use crate::intentions::{CellIntention, IntentionType};
 use crate::utils::rand::random_bool;

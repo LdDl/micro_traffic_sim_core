@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::verbose::{VerboseLevel, LocalLogger, EVENT_SESSION_CREATE, EVENT_SESSION_EXPIRED};
 use crate::simulation::session::Session;
+use crate::verbose::{EVENT_SESSION_CREATE, EVENT_SESSION_EXPIRED, LocalLogger, VerboseLevel};
 
 // 5 minutes
 const DEFAULT_EXP_SECS: u64 = 300;
@@ -205,7 +205,11 @@ impl SessionsStorage {
                 self.logger.log_with_fields(
                     EVENT_SESSION_EXPIRED,
                     "Session has been expired",
-                    &[("session_id", sid), ("session_exp_at", &s.get_expire_at()), ("now", &now)],
+                    &[
+                        ("session_id", sid),
+                        ("session_exp_at", &s.get_expire_at()),
+                        ("now", &now),
+                    ],
                 );
             }
             alive

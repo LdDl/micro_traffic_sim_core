@@ -1,6 +1,6 @@
 use crate::agents::Vehicle;
-use crate::grid::cell::CellID;
 use crate::agents::VehicleID;
+use crate::grid::cell::CellID;
 use crate::intentions::intention_type::{CellIntention, IntentionType};
 use indexmap::IndexMap;
 

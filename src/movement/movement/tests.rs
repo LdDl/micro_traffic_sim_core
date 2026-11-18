@@ -1,13 +1,13 @@
 use super::*;
 use crate::agents::Vehicle;
+use crate::agents::{VehicleIntention, VehiclesStorage};
 use crate::agents_types::AgentType;
+use crate::geom::new_point;
+use crate::grid::cell::{Cell, CellState};
 use crate::grid::road_network::GridRoads;
 use crate::grid::zones::ZoneType;
 use crate::maneuver::LaneChangeType;
 use crate::verbose::LocalLogger;
-use crate::agents::{VehicleIntention, VehiclesStorage};
-use crate::geom::new_point;
-use crate::grid::cell::{Cell, CellState};
 
 /// Regression: a dwelling tailed vehicle (relax_countdown > 0) that intended to move
 /// must NOT advance its tail while its head stays - head and tail share the single

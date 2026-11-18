@@ -1,6 +1,6 @@
+use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::fmt;
-use lazy_static::lazy_static;
 
 /// Custom error types for `SignalType`.
 #[derive(Debug, Clone)]
@@ -70,7 +70,7 @@ impl SignalType {
     ///
     /// # Returns
     /// A `Result` containing the corresponding `SignalType` or an error if the string is invalid.
-    /// 
+    ///
     /// # Example
     /// ```
     /// use micro_traffic_sim_core::traffic_lights::signals::{SignalType};
@@ -86,15 +86,15 @@ impl SignalType {
 
 impl fmt::Display for SignalType {
     /// Formats the signal type for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::traffic_lights::signals::SignalType;
-    /// 
+    ///
     /// assert_eq!(format!("{}", SignalType::Undefined), "undefined");
     /// assert_eq!(format!("{}", SignalType::Red), "r");
     /// assert_eq!(format!("{}", SignalType::Yellow), "y");

@@ -1,10 +1,10 @@
-use crate::maneuver::LaneChangeType;
 use crate::grid::{
     cell::{Cell, CellID},
     road_network::GridRoads,
 };
+use crate::maneuver::LaneChangeType;
 use crate::shortest_path::{
-    heuristics::{edge_time, GeometricHeuristic, Heuristic},
+    heuristics::{GeometricHeuristic, Heuristic, edge_time},
     path::Path,
 };
 use indexmap::IndexMap;
@@ -16,23 +16,23 @@ use std::{cell::RefCell, cmp::Ordering, collections::BinaryHeap, fmt, rc::Rc};
 #[derive(Debug, Clone, PartialEq)]
 pub enum AStarError {
     /// Invalid cell reference encountered during pathfinding.
-    /// 
+    ///
     /// This occurs when a cell references another cell ID that doesn't exist
     /// in the provided grid network.
-    /// 
+    ///
     /// # Example
     /// ```text
     /// Cell 5 references forward_node 99, but cell 99 doesn't exist in the grid
     /// ```
     BadData {
         /// The cell ID that caused the error
-        cell_id: CellID
+        cell_id: CellID,
     },
     /// No path exists between the start and end cells.
-    /// 
+    ///
     /// This occurs when the cells are in disconnected components of the graph
     /// or there is simply no possible route between them.
-    /// 
+    ///
     /// # Example
     /// ```text
     /// Trying to route from cell 1 to cell 100, but they're in separate road networks
@@ -41,7 +41,7 @@ pub enum AStarError {
         /// The starting cell ID
         start_id: CellID,
         /// The target cell ID
-        end_id: CellID
+        end_id: CellID,
     },
 }
 
@@ -64,9 +64,9 @@ impl fmt::Display for AStarError {
 ///
 /// This structure is used internally by the A* algorithm to track search progress
 /// and maintain the priority queue of cells to explore.
-/// 
+///
 /// # Fields
-/// 
+///
 /// - `cell`: Reference to the grid cell this node represents
 /// - `g_cost`: Actual cost from start to this node  
 /// - `f_cost`: Total estimated cost (g_cost + heuristic to goal)
@@ -159,7 +159,7 @@ impl<'a> Ord for AStarNode<'a> {
 /// - **Heuristic**: admissible travel-time lower bound (straight-line distance / max speed)
 ///
 /// ## Performance characteristics
-/// 
+///
 /// I did not measured actual performance yet, but in theory:
 /// - **Time complexity**: O(b^d) where b is branching factor, d is solution depth  
 /// - **Space complexity**: O(b^d) for storing explored nodes
@@ -173,7 +173,7 @@ impl<'a> Ord for AStarNode<'a> {
 /// use micro_traffic_sim_core::shortest_path::router::shortest_path;
 /// use micro_traffic_sim_core::grid::{road_network::GridRoads, cell::Cell};
 /// use micro_traffic_sim_core::geom::new_point;
-/// 
+///
 /// let mut grid = GridRoads::new();
 /// let cell1 = Cell::new(1)
 ///     .with_point(new_point(0.0, 0.0, None))
@@ -182,10 +182,10 @@ impl<'a> Ord for AStarNode<'a> {
 /// let cell2 = Cell::new(2)
 ///     .with_point(new_point(1.0, 0.0, None))
 ///     .build();
-/// 
+///
 /// grid.add_cell(cell1.clone());
 /// grid.add_cell(cell2.clone());
-/// 
+///
 /// // Find path without lane changes
 /// let result = shortest_path(&cell1, &cell2, &grid, false, None);
 /// assert!(result.is_ok());
@@ -197,7 +197,7 @@ impl<'a> Ord for AStarNode<'a> {
 /// use micro_traffic_sim_core::shortest_path::router::shortest_path;
 /// use micro_traffic_sim_core::grid::{road_network::GridRoads, cell::Cell};
 /// use micro_traffic_sim_core::geom::new_point;
-/// 
+///
 /// let mut grid = GridRoads::new();
 /// let cell1 = Cell::new(1)
 ///     .with_point(new_point(0.0, 0.0, None))
@@ -215,15 +215,15 @@ impl<'a> Ord for AStarNode<'a> {
 /// let cell4 = Cell::new(4)
 ///   .with_point(new_point(2.0, 1.0, None))
 ///   .build();
-/// 
+///
 /// grid.add_cell(cell1.clone());
 /// grid.add_cell(cell2.clone());
 /// grid.add_cell(cell3.clone());
 /// grid.add_cell(cell4.clone());
-/// 
+///
 /// // Enable lane changes for optimal routing
 /// let result = shortest_path(&cell1, &cell4, &grid, true, None);
-/// 
+///
 /// match result {
 ///     Ok(path) => {
 ///         println!("Found path with {} vertices", path.vertices().len());
@@ -264,16 +264,16 @@ impl<'a> Ord for AStarNode<'a> {
 /// let cell5 = Cell::new(5)
 ///   .with_point(new_point(4.0, 0.0, None))
 ///   .build();
-/// 
+///
 /// grid.add_cell(cell1.clone());
 /// grid.add_cell(cell2.clone());
 /// grid.add_cell(cell3.clone());
 /// grid.add_cell(cell4.clone());
 /// grid.add_cell(cell5.clone());
-/// 
+///
 /// // Limit search to prevent excessive computation time
 /// let result = shortest_path(&cell1, &cell5, &grid, true, Some(3));
-/// 
+///
 /// match result {
 ///     Ok(path) => {
 ///         println!("Found path within depth limit");
@@ -657,7 +657,11 @@ pub fn reconnect_to_cache(
             // dangling id - skip, do not abort the whole search
             None => continue,
         };
-        for nb in [cell.get_forward_id(), cell.get_left_id(), cell.get_right_id()] {
+        for nb in [
+            cell.get_forward_id(),
+            cell.get_left_id(),
+            cell.get_right_id(),
+        ] {
             if nb > -1 && !visited.contains(&nb) {
                 visited.insert(nb);
                 parent.insert(nb, cell_id);
@@ -696,7 +700,7 @@ pub fn reconnect_to_cache(
 /// use micro_traffic_sim_core::shortest_path::router::path_no_goal;
 /// use micro_traffic_sim_core::grid::{road_network::GridRoads, cell::Cell};
 /// use micro_traffic_sim_core::geom::new_point;
-/// 
+///
 /// let mut grid = GridRoads::new();
 /// let cell1 = Cell::new(1)
 ///     .with_point(new_point(1.0, 1.0, None))
@@ -719,7 +723,7 @@ pub fn reconnect_to_cache(
 /// grid.add_cell(cell2.clone());
 /// grid.add_cell(cell3.clone());
 /// grid.add_cell(cell4.clone());
-/// 
+///
 /// // Find path of depth 5 starting from cell #1
 /// let result = path_no_goal(&cell1, &grid, true, 5);
 /// match result {
@@ -755,7 +759,11 @@ pub fn path_no_goal<'a>(
                     next_cell = Some(cell);
                     next_maneuver = LaneChangeType::NoChange;
                 }
-                None => return Err(AStarError::BadData { cell_id: forward_id }),
+                None => {
+                    return Err(AStarError::BadData {
+                        cell_id: forward_id,
+                    });
+                }
             }
         }
 

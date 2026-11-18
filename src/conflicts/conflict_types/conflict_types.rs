@@ -41,12 +41,12 @@ pub enum ConflictType {
 
 impl fmt::Display for ConflictType {
     /// Formats the conflict type for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::conflicts::ConflictType;
     ///
@@ -100,9 +100,10 @@ pub struct CellConflict {
 
 impl fmt::Display for CellConflict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let participants: Vec<String> =
-            self.participants.iter().map(|p| p.to_string()).collect();
-        let priority_participant_id = self.participants.get(self.priority_participant_index)
+        let participants: Vec<String> = self.participants.iter().map(|p| p.to_string()).collect();
+        let priority_participant_id = self
+            .participants
+            .get(self.priority_participant_index)
             .map_or("None".to_string(), |p| p.to_string());
         let priority_label = if self.conflict_type == ConflictType::MutualYield {
             "Cycle candidate"
@@ -152,4 +153,3 @@ pub struct TrajectoryConflictInfo {
     /// ID of the vehicle that has priority in the conflict
     pub priority_vehicle_id: u64,
 }
-
