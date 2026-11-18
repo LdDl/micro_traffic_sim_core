@@ -1,0 +1,427 @@
+// In src/movement/mod.rs or src/movement/movement.rs
+use crate::agents::{Vehicle, VehicleID};
+use crate::agents_types::AgentType;
+use crate::geom::get_bearing;
+use crate::grid::cell::{CellID, CellState};
+use crate::grid::road_network::GridRoads;
+use crate::grid::zones::ZoneType;
+use crate::maneuver::LaneChangeType;
+use crate::verbose::*;
+use indexmap::IndexMap;
+use std::fmt;
+
+/// Errors that can occur during vehicle movement execution.
+///
+/// These errors indicate serious problems with simulation state consistency
+/// and typically require debugging the grid setup or intention computation.
+#[derive(Debug, Clone)]
+pub enum MovementError {
+    /// Vehicle references a cell ID that doesn't exist in the grid network.
+    ///
+    /// This error indicates grid network corruption or inconsistent state:
+    /// - Vehicle was assigned an invalid cell ID during intention computation
+    /// - Grid network was modified during simulation without updating vehicles
+    /// - Cell references became invalid due to network topology changes
+    ///
+    /// # Recovery
+    /// This is typically a fatal error requiring simulation reset and
+    /// investigation of grid setup or intention computation logic.
+    CellNotFound {
+        /// The cell ID that could not be found
+        cell_id: CellID,
+        /// The vehicle ID that referenced the invalid cell
+        vehicle_id: VehicleID,
+    },
+}
+
+impl fmt::Display for MovementError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MovementError::CellNotFound {
+                cell_id,
+                vehicle_id,
+            } => {
+                write!(
+                    f,
+                    "movement(): Can't find cell {} in the network for vehicle with ID {}",
+                    cell_id, vehicle_id
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for MovementError {}
+
+/// Executes movement for all vehicles based on their resolved intentions.
+///
+/// This function applies the final movement phase of cellular automata simulation,
+/// updating vehicle positions according to their computed intentions and handling
+/// all special movement cases.
+///
+/// **Internal function** - Do not call directly. Use [`Session::step()`](crate::simulation::session::Session::step) instead.
+///
+/// # Arguments
+///
+/// * `net` - The road network grid containing all cells and connections.
+/// * `vehicles` - Mutable reference to all active vehicles in the simulation.
+/// * `verbose` - Logging level for debug output.
+///
+/// # Returns
+///
+/// * `Ok(())` - Movement completed successfully for all vehicles.
+/// * `Err(MovementError)` - Movement failed due to data inconsistency.
+///
+/// # Movement process
+///
+/// ## 1. Apply Vehicle Intentions
+/// For each vehicle:
+/// - Applies the intention computed by the intentions module.
+/// - Resets conflict participation flag.
+/// - Updates position to intended cell.
+///
+/// ## 2. Update Vehicle State
+/// - **Bearing calculation**: Updates direction angle based on movement vector
+/// - **Timers/counters management**: Decrements acceleration/maneuver/slowdown counters.
+/// - **Tail cell updates**: Updates multi-cell vehicle positions.
+/// - **Travel time increment**: Tracks how long vehicle has been in simulation.
+///
+/// ## 3. Handle Special Cases
+///
+/// ### Lane Change Timers
+/// After lane changes, vehicles get temporary movement restrictions:
+/// ```rust
+/// // After left/right lane change
+/// // vehicle.timer_non_acceleration = tail_size;  // Can't accelerate
+/// // vehicle.timer_non_maneuvers = tail_size;     // Can't change lanes  
+/// // vehicle.timer_non_slowdown = tail_size;      // Can't slow down
+/// ```
+///
+/// ### Transit Logic **FUTURE WORKS**
+/// Some vehicles e.g. busses follow multi-stop routes through transit cells:
+/// - When reaching a transit stop, increments `transits_made` counter.
+/// - Updates destination to next transit cell in sequence.
+/// - Uses relax countdown for dwell time at stops.
+///
+/// ### Relax countdown **FUTURE WORKS**
+/// Some vehicles must wait before moving:
+/// - Buses at transit stops (dwell time).
+/// - Vehicles after certain maneuvers.
+/// - While countdown > 0, vehicle stays in current cell.
+///
+/// ## 4. Vehicle removal
+/// Vehicles are removed from simulation when:
+/// - **Despawn zone reached**: Vehicle enters [`ZoneType::Death`](ZoneType::Death) cell.
+/// - **Destination reached**: Vehicle arrives at intended destination.
+///
+/// # Performance Characteristics
+/// I did not measured actual performance yet, but in theory:
+/// - **Time complexity**: O(n) where n = number of active vehicles.
+/// - **Space complexity**: O(1) additional space.
+/// - **Memory management**: Uses `swap_remove()` for efficient vehicle removal.
+///
+/// # Integration Notes
+///
+/// This function is called as step 7 in the simulation pipeline which is:
+/// ```text
+/// Session::step() Pipeline:
+/// 1. Generate vehicles (trips)
+/// 2. Update positions  
+/// 3. Traffic light updates
+/// 4. Prepare intentions  ← intentions module
+/// 5. Collect conflicts   ← conflicts module  
+/// 6. Solve conflicts     ← conflicts module
+/// 7. Execute movement    ← THIS MODULE
+/// 8. Collect state dump
+/// ```
+/// - Vehicle intentions have been computed and conflicts resolved.
+/// - Each vehicle has a valid field `intention.intention_cell_id` to move to.
+/// - Movement simply applies these pre-computed decisions.
+/// - No pathfinding or decision-making occurs here.
+///
+/// # Logging
+///
+/// Provides structured logging at multiple verbosity levels:
+/// - **Main**: Vehicle removal events (despawn zones/destination).
+/// - **Additional**: Individual vehicle movements.
+/// - **Detailed**: Tail cell updates and timer changes.
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::simulation::session::Session;
+///
+/// let mut session = Session::default(None);
+/// // ... set up grid, trips, vehicles ...
+///
+/// // This internally calls movement::movement()
+/// let result = session.step();
+/// ```
+///
+pub fn movement(
+    net: &GridRoads,
+    vehicles: &mut IndexMap<VehicleID, Vehicle>,
+    verbose: &LocalLogger,
+) -> Result<(i32, i32), MovementError> {
+    if verbose.is_at_least(VerboseLevel::Main) {
+        verbose.log_with_fields(
+            EVENT_MOVEMENT,
+            "Start movement process",
+            &[("vehicles_num", &vehicles.len())],
+        );
+    }
+
+    // Collect vehicles to remove (to avoid borrowing issues during iteration)
+    let mut vehicles_to_remove = Vec::new();
+    let mut vehicles_completed = 0;
+    let mut vehicles_lost = 0;
+
+    for (vehicle_id, vehicle) in vehicles.iter_mut() {
+        if verbose.is_at_least(VerboseLevel::Additional) {
+            verbose.log_with_fields(
+                EVENT_MOVEMENT_VEHICLE,
+                "Moving vehicle",
+                &[
+                    ("vehicle_id", &vehicle.id),
+                    ("current_cell", &vehicle.cell_id),
+                    ("next_cell", &vehicle.intention.intention_cell_id),
+                    (
+                        "intermediate_cells",
+                        &format!("{:?}", vehicle.intention.intermediate_cells),
+                    ),
+                ],
+            );
+        }
+
+        // Apply the vehicle's intention
+        vehicle.apply_intention();
+        vehicle.is_conflict_participant = false;
+
+        // The cell the vehicle ACTUALLY ends on this tick: a dwelling vehicle (relax_countdown > 0)
+        // stays put even if it intended to move. Head, tail, timers and bearing must all
+        // key off this single decision-otherwise a dwelling tailed vehicle's tail would
+        // advance while its head stays, leaving the head inside its own tail.
+        let was_dwelling = vehicle.get_relax_countdown() > 0;
+        let final_cell = if was_dwelling {
+            vehicle.relax_countdown_dec();
+            // Stay in current cell
+            vehicle.cell_id
+        } else {
+            vehicle.intention.intention_cell_id
+        };
+        let moved = final_cell != vehicle.cell_id;
+
+        // Update bearing depending on intention maneuver
+        if moved {
+            // vehicle is moving? then set bearing based on actual movement
+            let cell_from = net
+                .get_cell(&vehicle.cell_id)
+                .ok_or(MovementError::CellNotFound {
+                    cell_id: vehicle.cell_id,
+                    vehicle_id: vehicle.id,
+                })?;
+            let cell_to = net.get_cell(&vehicle.intention.intention_cell_id).ok_or(
+                MovementError::CellNotFound {
+                    cell_id: vehicle.intention.intention_cell_id,
+                    vehicle_id: vehicle.id,
+                },
+            )?;
+
+            let pt_from = cell_from.get_point();
+            let pt_to = cell_to.get_point();
+            vehicle.bearing = get_bearing(pt_from, pt_to);
+        } else {
+            // vehicle is stopped or blocked? bearing = angle to forward direction
+            use crate::maneuver::LaneChangeType;
+            match vehicle.intention.intention_maneuver {
+                LaneChangeType::Block | LaneChangeType::NoChange => {
+                    let current_cell =
+                        net.get_cell(&vehicle.cell_id)
+                            .ok_or(MovementError::CellNotFound {
+                                cell_id: vehicle.cell_id,
+                                vehicle_id: vehicle.id,
+                            })?;
+                    let forward_id = current_cell.get_forward_id();
+                    if forward_id > 0 {
+                        if let Some(forward_cell) = net.get_cell(&forward_id) {
+                            let pt_from = current_cell.get_point();
+                            let pt_to = forward_cell.get_point();
+                            vehicle.bearing = get_bearing(pt_from, pt_to);
+                        }
+                    }
+                }
+                _ => {
+                    // keep bearing as is, dunno if it's good
+                }
+            }
+        }
+
+        // Tail/maneuver timers count down with FORWARD MOVEMENT (they track the tail completing the
+        // maneuver over `tail_size` cells), so they are decremented only when the vehicle moved.
+        if moved {
+            if vehicle.timer_non_acceleration > 0 {
+                vehicle.timer_non_acceleration -= 1;
+            }
+            if vehicle.timer_non_maneuvers > 0 {
+                vehicle.timer_non_maneuvers -= 1;
+            }
+            if vehicle.timer_non_slowdown > 0 {
+                vehicle.timer_non_slowdown -= 1;
+            }
+        }
+        // The reactive-lane-change cooldown is a WALL-CLOCK timer ("steps since the last change"), so
+        // it ticks down EVERY step, even when the vehicle is stuck. Otherwise a stuck vehicle would
+        // keep the cooldown frozen and could never make the escape lane change it actually needs.
+        if vehicle.timer_reactive_lane_change > 0 {
+            vehicle.timer_reactive_lane_change -= 1;
+        }
+
+        // Update tail cells only if vehicle is actually moving
+        if moved {
+            let tail_size = vehicle.tail_cells.len();
+            if tail_size > 0 {
+                let tail_intention = vehicle.intention.tail_intention_cells.clone();
+                vehicle.tail_cells = tail_intention;
+            }
+        }
+
+        // Set timers for a lane change maneuver - ONLY when it was actually PERFORMED (the head moved
+        // into the new lane this step), not on mere intention. `moved` = the head's cell changed; a
+        // lane change always changes the cell, so this excludes exactly the "wanted but blocked" case.
+        if moved
+            && (vehicle.intention.intention_maneuver == LaneChangeType::ChangeLeft
+                || vehicle.intention.intention_maneuver == LaneChangeType::ChangeRight)
+        {
+            let tail_size = vehicle.tail_cells.len() as i64;
+            vehicle.timer_non_acceleration = tail_size;
+            vehicle.timer_non_maneuvers = tail_size;
+            vehicle.timer_non_slowdown = tail_size;
+            // Reactive-lane-change hysteresis (MOBIL-like I think? @todo: need to investigate it better):
+            // block only the next REACTIVE escape, not routing.
+            // Duration is the per-vehicle / per-type `lc_cooldown` (0 = off).
+            vehicle.timer_reactive_lane_change = vehicle.lc_cooldown;
+        }
+
+        // Patience accrual: reset on any real move, otherwise the vehicle is stuck this
+        // tick. Once wait_steps reaches the patience threshold the vehicle is "desperate"
+        // and overrides right-of-way in the conflict solver (see Vehicle::is_desperate).
+        //
+        // A non-contention stop must NOT accrue patience: a vehicle held by a red light
+        // ahead (forward cell Banned) or still dwelling at a stop (relax_countdown) is not
+        // being starved of right-of-way, so it must not be pushed into the desperate
+        // override for a reason that has nothing to do with conflicts. Pause accrual in
+        // those cases (do not reset, so genuine prior starvation is preserved).
+        // Reset ONLY on genuine FORWARD progress. A pure lateral lane change (ChangeLeft/Right) does
+        // not advance the vehicle toward its goal, so it must NOT reset patience - otherwise a car
+        // crossing several lanes re-earns patience on every hop and never stays desperate long enough
+        // to force its way in (needed for the route-merger desperate override). On a lateral hop we
+        // HOLD wait_steps (neither reset nor accrue).
+        let lateral_hop = matches!(
+            vehicle.intention.intention_maneuver,
+            LaneChangeType::ChangeLeft | LaneChangeType::ChangeRight
+        );
+        let mut eligible_wait = false;
+        if moved && !lateral_hop {
+            vehicle.wait_steps = 0;
+        } else if !moved {
+            let held_by_red = net
+                .get_cell(&vehicle.cell_id)
+                .map(|c| c.get_forward_id())
+                .filter(|&fwd| fwd >= 0)
+                .and_then(|fwd| net.get_cell(&fwd))
+                .map(|fwd_cell| fwd_cell.get_state() == CellState::Banned)
+                .unwrap_or(false);
+            eligible_wait = !was_dwelling && !held_by_red;
+            if eligible_wait {
+                vehicle.wait_steps = vehicle.wait_steps.saturating_add(1);
+            }
+        }
+
+        vehicle.update_yield_cycle_wait(moved, eligible_wait);
+        vehicle.cell_id = final_cell;
+
+        // Get the cell to check zone type
+        let cell = net
+            .get_cell(&vehicle.cell_id)
+            .ok_or(MovementError::CellNotFound {
+                cell_id: vehicle.cell_id,
+                vehicle_id: vehicle.id,
+            })?;
+        if verbose.is_at_least(VerboseLevel::Additional) {
+            verbose.log_with_fields(
+                EVENT_MOVEMENT_VEHICLE,
+                "Done movement for vehicle",
+                &[
+                    ("vehicle_id", &vehicle.id),
+                    ("current_cell", &vehicle.cell_id),
+                    ("next_cell", &vehicle.intention.intention_cell_id),
+                    (
+                        "intermediate_cells",
+                        &format!("{:?}", vehicle.intention.intermediate_cells),
+                    ),
+                ],
+            );
+        }
+
+        let zone_type = cell.get_zone_type();
+
+        // Handle bus transit logic
+        if vehicle.vehicle_type == AgentType::Bus
+            && zone_type == ZoneType::Transit
+            && vehicle.cell_id == vehicle.destination
+        {
+            vehicle.transits_made_inc();
+            let transits_made = vehicle.get_transits_made();
+            if (transits_made as usize) < vehicle.transit_cells.len()
+                && vehicle.get_relax_countdown() == 0
+            {
+                vehicle.destination = vehicle.transit_cells[transits_made as usize];
+                // Confusion means "current destination proven unreachable"; the verdict
+                // does not transfer to a newly assigned destination
+                vehicle.confusion = false;
+                // The cached route still ends at the OLD stop the bus is sitting on; without
+                // clearing it, advance_route_cursor would report on_route=true (current cell == last route cell)
+                // and refresh_route would keep the dead cache, stalling the bus at the stop.
+                // Clear it so next tick rebuilds a route to the new destination.
+                vehicle.clear_cached_route();
+                vehicle.relax_countdown_reset();
+            }
+        }
+
+        vehicle.travel_time += 1;
+
+        // Check for vehicle removal conditions
+        if vehicle.cell_id == vehicle.trip_destination {
+            // Vehicle has reached the destination (priority check)
+            if verbose.is_at_least(VerboseLevel::Main) {
+                verbose.log_with_fields(
+                    EVENT_MOVEMENT_DESTINATION,
+                    "Vehicle done movement due reaching destination",
+                    &[("vehicle_id", &vehicle.id)],
+                );
+            }
+            vehicles_to_remove.push(*vehicle_id);
+            vehicles_completed += 1;
+        } else if zone_type == ZoneType::Death {
+            // Vehicle has reached the death zone without reaching destination (lost)
+            if verbose.is_at_least(VerboseLevel::Main) {
+                verbose.log_with_fields(
+                    EVENT_MOVEMENT_DEAD_END,
+                    "Vehicle done movement due going to dead-end",
+                    &[("vehicle_id", &vehicle.id)],
+                );
+            }
+            vehicles_to_remove.push(*vehicle_id);
+            vehicles_lost += 1;
+        }
+    }
+
+    // Remove vehicles that have reached their destination or death zone
+    for vehicle_id in vehicles_to_remove {
+        // - Disrupts order - swaps with last element before removing
+        // - Non-deterministic
+        vehicles.swap_remove(&vehicle_id);
+    }
+
+    Ok((vehicles_completed, vehicles_lost))
+}

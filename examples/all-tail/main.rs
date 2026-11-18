@@ -1,13 +1,13 @@
-use micro_traffic_sim_core::geom::new_point;
-use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads};
 use micro_traffic_sim_core::agents::Vehicle;
 use micro_traffic_sim_core::agents_types::AgentType;
 use micro_traffic_sim_core::behaviour::BehaviourType;
-use micro_traffic_sim_core::simulation::session::Session;
+use micro_traffic_sim_core::geom::new_point;
+use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads};
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
+use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::trips::trip::{Trip, TripType};
-use micro_traffic_sim_core::verbose::init_logger;
 use micro_traffic_sim_core::verbose::VerboseLevel;
+use micro_traffic_sim_core::verbose::init_logger;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -630,9 +630,7 @@ fn main() {
     ];
 
     // Prepare simulation session
-    let grids_storage = GridsStorage::new()
-        .with_vehicles_net(grid)
-        .build();
+    let grids_storage = GridsStorage::new().with_vehicles_net(grid).build();
     let mut session = Session::new(grids_storage, None);
     session.set_verbose_level(VerboseLevel::None);
     session.add_vehicles(vehicles);
@@ -680,7 +678,10 @@ fn main() {
     // Write gnuplot config
     write_gnuplot_config(num_steps, out_dir);
 
-    println!("Simulation complete ({} steps). Data written to:", num_steps);
+    println!(
+        "Simulation complete ({} steps). Data written to:",
+        num_steps
+    );
     println!("  - cells.dat");
     println!("  - edges.dat");
     println!("  - vehicle_step_*.dat");
@@ -744,7 +745,12 @@ fn write_edges_data(session: &Session, positions: &HashMap<i64, (f64, f64)>, out
     }
 }
 
-fn write_vehicle_step(session: &Session, positions: &HashMap<i64, (f64, f64)>, step: usize, out_dir: &str) {
+fn write_vehicle_step(
+    session: &Session,
+    positions: &HashMap<i64, (f64, f64)>,
+    step: usize,
+    out_dir: &str,
+) {
     let filename = format!("{}vehicle_step_{:02}.dat", out_dir, step);
     let mut file = File::create(&filename).expect("Failed to create vehicle step file");
     writeln!(file, "# X Y VehicleID Type").unwrap();

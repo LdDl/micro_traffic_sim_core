@@ -1,12 +1,12 @@
-use std::fmt;
 use crate::grid::cell::CellID;
+use std::fmt;
 
 /// Identifier for a conflict zone.
 pub type ConflictZoneID = i32;
 
 /// Types of conflict zones for different management strategies.
-/// 
-/// Currently only [`Undefined`](ConflictZoneType::Undefined) is implemented, 
+///
+/// Currently only [`Undefined`](ConflictZoneType::Undefined) is implemented,
 /// but this enum is designed for future extensions.
 ///
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,18 +16,18 @@ pub enum ConflictZoneType {
 }
 
 /// Priority rules determining which traffic flow has precedence in a conflict zone.
-/// 
+///
 /// This enum defines the conflict resolution strategy when two traffic flows
 /// compete for the same space.
 ///
 /// # Examples
-/// 
+///
 /// ```rust
 /// use micro_traffic_sim_core::conflict_zones::ConflictWinnerType;
-/// 
+///
 /// // Main road vs side road - main road has priority
 /// let priority = ConflictWinnerType::First;
-/// 
+///
 /// // Four-way stop - equal priority, first arrival wins
 /// let equal_priority = ConflictWinnerType::Equal;
 /// ```
@@ -35,7 +35,7 @@ pub enum ConflictZoneType {
 pub enum ConflictWinnerType {
     /// Priority not yet determined or default state.
     Undefined,
-    /// Both traffic flows have equal priority. 
+    /// Both traffic flows have equal priority.
     /// Vehicles proceed based on arrival order (first-come, first-served).
     Equal,
     /// First edge (first traffic flow) has priority over second edge.
@@ -103,12 +103,16 @@ impl ConflictZone {
     ///     .with_winner_type(ConflictWinnerType::Second)
     ///     .build();
     /// ```
-    pub fn new(id: ConflictZoneID, first_edge: ConflictEdge, second_edge: ConflictEdge) -> ConflictZoneBuilder {
+    pub fn new(
+        id: ConflictZoneID,
+        first_edge: ConflictEdge,
+        second_edge: ConflictEdge,
+    ) -> ConflictZoneBuilder {
         ConflictZoneBuilder {
             conflict_zone: ConflictZone {
                 id,
-                zone_type: ConflictZoneType::Undefined,  // Default: Undefined
-                winner_type: ConflictWinnerType::Equal,  // Default: Equal
+                zone_type: ConflictZoneType::Undefined, // Default: Undefined
+                winner_type: ConflictWinnerType::Equal, // Default: Equal
                 first_edge,
                 second_edge,
             },

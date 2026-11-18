@@ -6,10 +6,10 @@
 //! congested baseline). Otherwise it is entropy-seeded in production, and fixed at 42 under
 //! `cfg(test)` so unit tests stay reproducible.
 
-use std::cell::RefCell;
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use std::cell::RefCell;
 
 thread_local! {
     static RNG: RefCell<StdRng> = RefCell::new(make_rng());

@@ -1,0 +1,596 @@
+//! Patience-based overrides of supplied merge and crossing priorities.
+//!
+//! These fixtures provide conflicts and intentions directly to the solver.
+//! Body occupancy, existing reservations, and the one-step grant still constrain overrides.
+
+use crate::agents::{PATIENCE_MAX, PATIENCE_MIN, Vehicle, VehicleIntention, VehiclesStorage};
+use crate::conflicts::{CellConflict, ConflictType, solve_conflicts};
+use crate::grid::cell::CellID;
+use crate::maneuver::LaneChangeType;
+use crate::verbose::LocalLogger;
+
+/// Build a vehicle with explicit cooperativity (via aggressive level), stuck counter,
+/// maneuver and target cell. `wait` >= patience makes it desperate.
+fn veh(
+    id: u64,
+    cell: CellID,
+    aggr: f64,
+    speed: i32,
+    wait: i32,
+    maneuver: LaneChangeType,
+    target: CellID,
+) -> Vehicle {
+    let mut v = Vehicle::new(id)
+        .with_cell(cell)
+        .with_aggressive_level(aggr)
+        .with_speed(speed)
+        .build();
+    v.wait_steps = wait;
+    v.set_intention(VehicleIntention {
+        intention_maneuver: maneuver,
+        intention_cell_id: target,
+        intention_speed: speed,
+        ..Default::default()
+    });
+    v
+}
+
+fn speed(v: &VehiclesStorage, id: u64) -> i32 {
+    v.get(&id).unwrap().intention.intention_speed
+}
+
+// Without exhausted patience, the nominated vehicle wins. Raising the other's wait counter
+// transfers the grant and stops the original winner.
+#[test]
+fn test_desperate_overrides_right_of_way() {
+    let log = LocalLogger::none();
+
+    // Baseline: nobody desperate -> the priority participant (index 0) wins.
+    let mut vehicles = VehiclesStorage::new();
+    vehicles.insert(1, veh(1, 10, 0.0, 3, 0, LaneChangeType::NoChange, 15));
+    vehicles.insert(2, veh(2, 11, 0.0, 1, 0, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_ne!(
+        speed(&vehicles, 1),
+        0,
+        "priority vehicle moves when nobody is desperate"
+    );
+    assert_eq!(speed(&vehicles, 2), 0);
+
+    // With vehicle 2 desperate it wins, despite vehicle 1 being the priority participant.
+    let mut vehicles = VehiclesStorage::new();
+    vehicles.insert(1, veh(1, 10, 0.0, 3, 0, LaneChangeType::NoChange, 15));
+    vehicles.insert(2, veh(2, 11, 0.0, 1, 9999, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_eq!(
+        speed(&vehicles, 1),
+        0,
+        "patient priority vehicle yields to the desperate one"
+    );
+    assert_ne!(
+        speed(&vehicles, 2),
+        0,
+        "desperate vehicle wins the contested cell"
+    );
+}
+
+// A slower vehicle with exhausted patience beats the supplied faster priority winner. The
+// otherwise identical patient control yields.
+#[test]
+fn test_desperate_slow_violator_beats_faster_normal_winner() {
+    let log = LocalLogger::none();
+
+    // Baseline (nobody desperate): the FASTER vehicle (index 0, speed 4) is the rightful
+    // winner by the normal speed rule. The slower one yields. This is exactly the
+    // "intermediate-cell conflicts go to whoever is faster" behaviour.
+    let mut vehicles = VehiclesStorage::new();
+    // FAST, patient
+    vehicles.insert(1, veh(1, 10, 0.5, 4, 0, LaneChangeType::NoChange, 15));
+    // SLOW, patient
+    vehicles.insert(2, veh(2, 11, 0.5, 1, 0, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_ne!(
+        speed(&vehicles, 1),
+        0,
+        "faster vehicle is the normal winner"
+    );
+    assert_eq!(
+        speed(&vehicles, 2),
+        0,
+        "slower patient vehicle yields by the normal speed rule"
+    );
+
+    // Same conflict, but now the SLOW vehicle has starved past patience: it VIOLATES and
+    // takes the cell. The faster, patient vehicle is forced to brake.
+    let mut vehicles = VehiclesStorage::new();
+    // FAST, patient
+    vehicles.insert(1, veh(1, 10, 0.5, 4, 0, LaneChangeType::NoChange, 15));
+    // SLOW, DESPERATE
+    vehicles.insert(2, veh(2, 11, 0.5, 1, 9999, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_eq!(
+        speed(&vehicles, 1),
+        0,
+        "the faster vehicle is forced to brake (yield) to the violator"
+    );
+    assert_ne!(
+        speed(&vehicles, 2),
+        0,
+        "the starved slow vehicle violates right-of-way and wins the cell"
+    );
+}
+
+// A cooperative vehicle with exhausted patience beats an aggressive but patient priority
+// participant.
+#[test]
+fn test_cooperative_desperate_beats_aggressive() {
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // cooperative, desperate
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    // aggressive, patient
+    vehicles.insert(2, veh(2, 11, 1.0, 2, 0, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 1,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_ne!(speed(&vehicles, 1), 0, "cooperative-desperate wins");
+    assert_eq!(speed(&vehicles, 2), 0, "aggressive-patient yields");
+}
+
+// A supplied Tail constraint protects its priority participant even when the opponent has
+// exhausted its patience.
+#[test]
+fn test_desperate_does_not_override_tail() {
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // owns the cell as a tail
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 0, LaneChangeType::NoChange, 15));
+    // desperate, but only transit
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::Tail,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_ne!(
+        speed(&vehicles, 1),
+        0,
+        "tail (physical body) keeps the cell"
+    );
+    assert_eq!(
+        speed(&vehicles, 2),
+        0,
+        "desperate vehicle must NOT force through a body"
+    );
+}
+
+// Among the two desperate participants, the greater wait counter determines the winner.
+#[test]
+fn test_most_starved_wins() {
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // desperate
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 5000, LaneChangeType::NoChange, 15));
+    // MORE desperate
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_eq!(
+        speed(&vehicles, 1),
+        0,
+        "less-starved desperate vehicle yields"
+    );
+    assert_ne!(
+        speed(&vehicles, 2),
+        0,
+        "most-starved desperate vehicle wins (single winner)"
+    );
+}
+
+// Equal desperate wait counters select the lowest vehicle ID in both participant orders.
+#[test]
+fn test_most_starved_tie_broken_by_lowest_id() {
+    let log = LocalLogger::none();
+
+    // participants [1, 2]: equal wait_steps -> lower id (1) wins.
+    let mut vehicles = VehiclesStorage::new();
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_ne!(
+        speed(&vehicles, 1),
+        0,
+        "lowest-id desperate vehicle wins the tie"
+    );
+    assert_eq!(speed(&vehicles, 2), 0, "higher-id desperate vehicle yields");
+
+    // participants [2, 1]: SAME winner (1) despite reversed order -> order-independent.
+    let mut vehicles = VehiclesStorage::new();
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![2, 1],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_ne!(
+        speed(&vehicles, 1),
+        0,
+        "winner unchanged when participant order is reversed"
+    );
+    assert_eq!(
+        speed(&vehicles, 2),
+        0,
+        "tie-break does not depend on iteration order"
+    );
+}
+
+// A desperate participant overrides the supplied priority in a crossing-zone constraint.
+#[test]
+fn test_desperate_overrides_conflict_zone() {
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // zone-favoured, patient
+    vehicles.insert(3, veh(3, 10, 0.0, 2, 0, LaneChangeType::NoChange, 15));
+    // zone-disfavoured, desperate
+    vehicles.insert(4, veh(4, 11, 0.0, 2, 9999, LaneChangeType::NoChange, 16));
+    let conflicts = vec![CellConflict {
+        cell_id: -1,
+        participants: vec![3, 4],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::CrossConflictZone,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_ne!(
+        speed(&vehicles, 4),
+        0,
+        "desperate vehicle overrides the fixed conflict-zone winner"
+    );
+    assert_eq!(
+        speed(&vehicles, 3),
+        0,
+        "zone-favoured but patient vehicle yields"
+    );
+}
+
+// A desperate right changer receives the single-cell grant and stops the normally
+// preferred left changer.
+#[test]
+fn test_desperate_overrides_cross_lane_change() {
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // left normally wins, patient
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 0, LaneChangeType::ChangeLeft, 20));
+    // right, desperate
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 9999, LaneChangeType::ChangeRight, 21));
+    let conflicts = vec![CellConflict {
+        cell_id: -1,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::CrossLaneChange,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_eq!(
+        speed(&vehicles, 2),
+        1,
+        "desperate right-maneuver wins (speed 1) over the patient left-maneuver"
+    );
+    assert_eq!(
+        speed(&vehicles, 1),
+        0,
+        "patient left-maneuver yields to the desperate one"
+    );
+}
+
+// Two conflicts requesting cell 30 grant it to only one desperate vehicle.
+#[test]
+fn test_claimed_cells_dedup() {
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // desperate, wants 30
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 30));
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 0, LaneChangeType::NoChange, 30));
+    // desperate, also wants 30
+    vehicles.insert(3, veh(3, 12, 0.0, 2, 9999, LaneChangeType::NoChange, 30));
+    vehicles.insert(4, veh(4, 13, 0.0, 2, 0, LaneChangeType::NoChange, 30));
+    let conflicts = vec![
+        CellConflict {
+            cell_id: 30,
+            participants: vec![1, 2],
+            priority_participant_index: 0,
+            conflict_type: ConflictType::MergeForward,
+        },
+        CellConflict {
+            cell_id: 30,
+            participants: vec![3, 4],
+            priority_participant_index: 0,
+            conflict_type: ConflictType::MergeForward,
+        },
+    ];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    let movers: Vec<u64> = [1, 2, 3, 4]
+        .into_iter()
+        .filter(|&id| speed(&vehicles, id) > 0)
+        .collect();
+    assert_eq!(
+        movers,
+        vec![1],
+        "exactly one vehicle (the first desperate winner) enters cell 30; the second desperate vehicle is deduped"
+    );
+}
+
+// A desperate vehicle requesting 15 -> 16 -> 17 -> 18 receives only the first step to 16,
+// and its opponent stops.
+#[test]
+fn test_desperate_multicell_winner_clamped_to_one_cell() {
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // Desperate vehicle 1 intends to move 3 cells: current 15 -> 16 -> 17 -> head 18.
+    let mut w = Vehicle::new(1)
+        .with_cell(15)
+        .with_aggressive_level(0.0)
+        .with_speed(3)
+        .build();
+    w.wait_steps = 9999;
+    w.set_intention(VehicleIntention {
+        intention_maneuver: LaneChangeType::NoChange,
+        intention_cell_id: 18,
+        intermediate_cells: vec![16, 17],
+        intention_speed: 3,
+        ..Default::default()
+    });
+    vehicles.insert(1, w);
+    // Vehicle 2 contends the FIRST swept cell (16). Conflict is keyed on 16.
+    vehicles.insert(2, veh(2, 11, 0.0, 1, 0, LaneChangeType::NoChange, 16));
+    let conflicts = vec![CellConflict {
+        cell_id: 16,
+        participants: vec![1, 2],
+        priority_participant_index: 1,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    let w = vehicles.get(&1).unwrap();
+    assert_eq!(
+        w.intention.intention_cell_id, 16,
+        "winner clamped to its first path cell (the entered cell)"
+    );
+    assert!(
+        w.intention.intermediate_cells.is_empty(),
+        "no multi-cell sweep of unreserved cells"
+    );
+    assert_eq!(w.intention.intention_speed, 1, "single-cell step");
+    assert_eq!(
+        speed(&vehicles, 2),
+        0,
+        "the other contender for cell 16 is blocked"
+    );
+}
+
+// Clamping the desperate truck to one step rebuilds its tail as [14, 15] behind head 16,
+// without a head-tail overlap.
+#[test]
+fn test_desperate_tailed_winner_tail_stays_behind_head() {
+    // cell            13    14    15    16    17  18
+    // body            tail  tail  head  .     .   .
+    // requested head  .     .     .     .     .   head
+    // granted body    .     tail  tail  head  .   .
+    // The granted prefix contains exactly one step.
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // Tailed vehicle: head at 15, tail [13, 14] (furthest..nearest). Intends a 3-cell
+    // move 15 -> 16 -> 17 -> head 18. Its stale tail intention (multi-cell) would be [16,17].
+    let mut w = Vehicle::new(1)
+        .with_cell(15)
+        .with_aggressive_level(0.0)
+        .with_speed(3)
+        .build();
+    w.wait_steps = 9999;
+    w.tail_cells = vec![13, 14];
+    w.set_intention(VehicleIntention {
+        intention_maneuver: LaneChangeType::NoChange,
+        intention_cell_id: 18,
+        intermediate_cells: vec![16, 17],
+        // what add_intention computes for the 3-cell move
+        tail_intention_cells: vec![16, 17],
+        intention_speed: 3,
+        ..Default::default()
+    });
+    vehicles.insert(1, w);
+    vehicles.insert(2, veh(2, 11, 0.0, 1, 0, LaneChangeType::NoChange, 16));
+    let conflicts = vec![CellConflict {
+        cell_id: 16,
+        participants: vec![1, 2],
+        priority_participant_index: 1,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    let w = vehicles.get(&1).unwrap();
+    assert_eq!(
+        w.intention.intention_cell_id, 16,
+        "head clamped to the entered cell"
+    );
+    // One-cell step: tail shifts forward, vacated cell 15 becomes the nearest tail cell.
+    assert_eq!(
+        w.intention.tail_intention_cells,
+        vec![14, 15],
+        "tail rebuilt for the 1-cell step (stays behind the head)"
+    );
+    assert!(
+        !w.intention.tail_intention_cells.contains(&16),
+        "the head cell is not also occupied by the tail"
+    );
+}
+
+// A non-participant standing on the requested cell blocks the desperate winner. Removing
+// that occupant allows the grant.
+#[test]
+fn test_desperate_does_not_enter_occupied_cell() {
+    let log = LocalLogger::none();
+
+    // Cell 15 is occupied by a standing non-participant (id 99) -> desperate winner blocked.
+    let mut vehicles = VehiclesStorage::new();
+    // desperate, wants 15
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    // loser
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 0, LaneChangeType::NoChange, 15));
+    // standing ON 15, NOT a participant
+    vehicles.insert(99, veh(99, 15, 0.0, 0, 0, LaneChangeType::Block, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_eq!(
+        speed(&vehicles, 1),
+        0,
+        "desperate winner must NOT enter a cell occupied by a standing non-participant"
+    );
+    assert_eq!(
+        speed(&vehicles, 99),
+        0,
+        "the standing occupant is untouched"
+    );
+
+    // Same conflict but cell 15 is free -> desperate winner is granted it.
+    let mut vehicles = VehiclesStorage::new();
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 15));
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 0, LaneChangeType::NoChange, 15));
+    let conflicts = vec![CellConflict {
+        cell_id: 15,
+        participants: vec![1, 2],
+        priority_participant_index: 0,
+        conflict_type: ConflictType::MergeForward,
+    }];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    assert_ne!(
+        speed(&vehicles, 1),
+        0,
+        "desperate winner is granted a free cell"
+    );
+}
+
+// The desperate conflict reserves cell 30 before a normal conflict listed earlier. Only
+// the desperate winner receives a move.
+#[test]
+fn test_desperate_blocks_normal_winner_on_same_cell() {
+    let log = LocalLogger::none();
+    let mut vehicles = VehiclesStorage::new();
+    // desperate, wants 30
+    vehicles.insert(1, veh(1, 10, 0.0, 2, 9999, LaneChangeType::NoChange, 30));
+    vehicles.insert(2, veh(2, 11, 0.0, 2, 0, LaneChangeType::NoChange, 30));
+    // NORMAL priority for 30, separate conflict
+    vehicles.insert(3, veh(3, 12, 0.0, 2, 0, LaneChangeType::NoChange, 30));
+    vehicles.insert(4, veh(4, 13, 0.0, 2, 0, LaneChangeType::NoChange, 30));
+    // The NORMAL conflict is listed FIRST to prove desperate conflicts are resolved first.
+    let conflicts = vec![
+        CellConflict {
+            cell_id: 30,
+            participants: vec![3, 4],
+            priority_participant_index: 0,
+            conflict_type: ConflictType::MergeForward,
+        },
+        CellConflict {
+            cell_id: 30,
+            participants: vec![1, 2],
+            priority_participant_index: 0,
+            conflict_type: ConflictType::MergeForward,
+        },
+    ];
+    solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
+    let movers: Vec<u64> = [1, 2, 3, 4]
+        .into_iter()
+        .filter(|&id| speed(&vehicles, id) > 0)
+        .collect();
+    assert_eq!(
+        movers,
+        vec![1],
+        "only the desperate vehicle enters cell 30; the normal winner of the other conflict is blocked"
+    );
+}
+
+// Cooperativity 0, 0.5, and 1 maps to the minimum patience, the midpoint, and the maximum
+// patience.
+#[test]
+fn test_patience_scales_with_cooperativity() {
+    // cooperativity 0
+    let aggressive = Vehicle::new(1).with_aggressive_level(1.0).build();
+    // cooperativity 1
+    let cooperative = Vehicle::new(2).with_aggressive_level(0.0).build();
+    // cooperativity 0.5
+    let middling = Vehicle::new(3).with_aggressive_level(0.5).build();
+    assert_eq!(
+        aggressive.patience(),
+        PATIENCE_MIN,
+        "aggressive vehicle uses the impatient threshold"
+    );
+    assert_eq!(
+        cooperative.patience(),
+        PATIENCE_MAX,
+        "cooperative vehicle waits the longest"
+    );
+    assert_eq!(
+        middling.patience(),
+        (PATIENCE_MIN + PATIENCE_MAX) / 2,
+        "middling cooperativity is halfway"
+    );
+}
+
+// At minimum patience minus one tick the driver remains patient. At the threshold it
+// becomes desperate.
+#[test]
+fn test_is_desperate_threshold() {
+    // Use the configured minimum rather than a separate literal threshold.
+    let mut aggressive = Vehicle::new(1).with_aggressive_level(1.0).build();
+    aggressive.wait_steps = PATIENCE_MIN - 1;
+    assert!(
+        !aggressive.is_desperate(),
+        "below threshold -> not desperate"
+    );
+    aggressive.wait_steps = PATIENCE_MIN;
+    assert!(aggressive.is_desperate(), "at threshold -> desperate");
+}

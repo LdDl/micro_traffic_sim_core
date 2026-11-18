@@ -2,7 +2,7 @@ use micro_traffic_sim_core::grid::road_network::GridRoads;
 use micro_traffic_sim_core::shortest_path::router::shortest_path;
 use micro_traffic_sim_core::utils::generators::generate_one_lane_cells;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
 pub fn benchmark_shortest_path(c: &mut Criterion) {

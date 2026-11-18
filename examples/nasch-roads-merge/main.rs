@@ -1,11 +1,10 @@
+use micro_traffic_sim_core::agents::Vehicle;
 use micro_traffic_sim_core::geom::{Point, new_point};
 use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads};
-use micro_traffic_sim_core::agents::Vehicle;
-use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
-use micro_traffic_sim_core::verbose::init_logger;
+use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::verbose::VerboseLevel;
- 
+use micro_traffic_sim_core::verbose::init_logger;
 
 fn main() {
     init_logger();
@@ -82,15 +81,10 @@ fn main() {
         .with_cell(5)
         .with_destination(14)
         .build();
-    let vehicles: Vec<Vehicle> = vec![
-        vehicle0,
-        vehicle1,
-    ];
+    let vehicles: Vec<Vehicle> = vec![vehicle0, vehicle1];
 
     // 3. Prepare simulation session
-    let grids_storage = GridsStorage::new()
-        .with_vehicles_net(grid)
-        .build();
+    let grids_storage = GridsStorage::new().with_vehicles_net(grid).build();
     let mut session = Session::new(grids_storage, None);
     session.set_verbose_level(VerboseLevel::None);
     session.add_vehicles(vehicles);
@@ -108,14 +102,7 @@ fn main() {
         };
         println!(
             "-1;{};{};{};{:.5};{};{};{:.5};{:.5}",
-            v.id,
-            v.vehicle_type,
-            v.speed,
-            0.0,
-            "",
-            v.cell_id,
-            x,
-            y
+            v.id, v.vehicle_type, v.speed, 0.0, "", v.cell_id, x, y
         );
     }
     for step in 0..steps {
@@ -130,7 +117,8 @@ fn main() {
                         (f64::NAN, f64::NAN)
                     };
                     // Join intermediate cells as comma-separated string
-                    let intermediate_cells = v.last_intermediate_cells
+                    let intermediate_cells = v
+                        .last_intermediate_cells
                         .iter()
                         .map(|cell| cell.to_string())
                         .collect::<Vec<_>>()
