@@ -30,6 +30,22 @@ const SPAWN_SEED: u64 = 0x00C0_FFEE;
 // The deterministic gap-share sample uses increments of 0.0001.
 const GAP_SHARE_RESOLUTION: u64 = 10_000;
 
+const GAP_SHARE_MULTIPLIER: f64 = std::f64::consts::GOLDEN_RATIO;
+
+// floor(2^64 / phi). Correct the floating-point estimate using the largest integer m
+// satisfying m^2 + m * 2^64 < 2^128, with subtraction to avoid overflowing u128.
+const GAP_SHARE_HASH_MULTIPLIER: u64 = {
+    let scale: u128 = 1 << u64::BITS;
+    let mut multiplier = (scale as f64 / GAP_SHARE_MULTIPLIER) as u128;
+    while multiplier * multiplier > u128::MAX - multiplier * scale {
+        multiplier -= 1;
+    }
+    while (multiplier + 1) * (multiplier + 1) <= u128::MAX - (multiplier + 1) * scale {
+        multiplier += 1;
+    }
+    multiplier as u64
+};
+
 /// Custom error types for `Session`.
 #[derive(Debug, Clone)]
 pub enum SessionError {
@@ -553,10 +569,10 @@ impl Session {
 
         // Resolve a configured population mixture before fixed trip and behaviour gaps.
         let standstill_gap = if let Some(share) = trip.standstill_gap_share {
-            // 0x9E3779B97F4A7C15 - use a golden-ratio-based multiplier to assign standstill gaps deterministically
-            // from vehicle IDs without consuming RNG draws. The requested share is approximate.
+            // Assign standstill gaps deterministically from vehicle IDs without RNG draws.
+            // The requested share is approximate.
             i32::from(
-                (self.last_vehicle_id.wrapping_mul(0x9E3779B97F4A7C15) % GAP_SHARE_RESOLUTION) as f64
+                (self.last_vehicle_id.wrapping_mul(GAP_SHARE_HASH_MULTIPLIER) % GAP_SHARE_RESOLUTION) as f64
                     / (GAP_SHARE_RESOLUTION as f64)
                     < share,
             )
