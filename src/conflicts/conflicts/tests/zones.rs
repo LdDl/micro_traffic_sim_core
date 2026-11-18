@@ -14,8 +14,14 @@ use crate::utils::test_grids::{
 use crate::verbose::{LocalLogger, VerboseLevel};
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
+
+// The directed edges (3, 4) and (9, 10) identify a crossing conflict even though their
+// target cells differ.
 #[test]
 fn test_find_conflicts_in_conflict_zones_trajectories() {
+    // preferred edge: 3 -> 4
+    // other edge:     9 -> 10
+    // One declared zone relates these two directed edges.
     let grid = create_conflict_zones_grid();
 
     let mut vehicle1 = Vehicle::new(1)
@@ -91,6 +97,8 @@ fn test_find_conflicts_in_conflict_zones_trajectories() {
     assert_eq!(conflict.conflict_type, ConflictType::CrossConflictZone);
 }
 
+// An extra claimant near the second approach does not hide the crossing pair. The vehicle
+// using the first zone edge retains priority.
 #[test]
 fn test_find_conflicts_in_conflict_zones_trajectories_invalidated() {
     let grid = create_conflict_zones_multiple_grid();
@@ -188,8 +196,14 @@ fn test_find_conflicts_in_conflict_zones_trajectories_invalidated() {
     assert_eq!(priority_vehicle_id, 2);
 }
 
+// Querying intermediate cell 2 produces no zone conflict when the declared edges both end
+// at merge cell 3.
 #[test]
 fn test_find_conflicts_in_conflict_zones_cross_grid() {
+    // 1 -> 2 --+
+    //          +--> 3
+    // 6 -> 7 --+
+    // The zone prefers edge (7, 3) over (2, 3).
     let grid = create_simple_cross_shape_grid();
 
     let mut vehicle1 = Vehicle::new(1)
@@ -265,8 +279,13 @@ fn test_find_conflicts_in_conflict_zones_cross_grid() {
     assert!(conflict_result.is_none());
 }
 
+// A truck's tail claim across (4, 12) outranks the configured priority of the other zone
+// edge (11, 5).
 #[test]
 fn test_find_conflicts_in_conflict_zones_cross_tail() {
+    // truck body: 3(tail) -> 4(tail) -> 12(head)
+    // zone edges: (4, 12) and (11, 5)
+    // The zone prefers (11, 5), but the truck's body takes precedence.
     let cells_set = generate_one_lane_cells(31.5, 4.5, 3);
     let mut grid = GridRoads::new();
     for cell in cells_set {
@@ -358,8 +377,13 @@ fn test_find_conflicts_in_conflict_zones_cross_tail() {
     assert_eq!(priority_vehicle_id, 1);
 }
 
+// The same tail-protection rule holds on the fixture with a forward continuation beyond
+// the truck.
 #[test]
 fn test_find_conflicts_in_conflict_zones_cross_tail_forward() {
+    // truck body: 3(tail) -> 4(tail) -> 12(head)
+    // zone edges: (4, 12) and (11, 5)
+    // The zone prefers (11, 5), but the truck's body takes precedence.
     let cells_set = vec![
         Cell::new(1)
             .with_point(new_point(1.0, 1.0, None))
@@ -581,9 +605,13 @@ struct CorrectConflict {
     priority_participant_id: u64,
 }
 
+// Full collection reports the declared crossing and nominates vehicle 2 on the preferred
+// first edge.
 #[test]
 fn test_conflict_zones_trajectories() {
-    // Based on TestConflictZonesTrajectories
+    // preferred edge: 3 -> 4
+    // other edge:     9 -> 10
+    // One declared zone relates these two directed edges.
     let verbose = LocalLogger::new(VerboseLevel::None);
     let grid = create_conflict_zones_grid();
 
@@ -684,9 +712,10 @@ fn test_conflict_zones_trajectories() {
     }
 }
 
+// Full collection retains both the shared-cell and crossing-zone constraints for three
+// vehicles, and the solver accepts the collected constraints.
 #[test]
 fn test_conflict_zones_trajectories_invalidated() {
-    // Based on TestConflictZonesTrajectoriesInvalidated
     let verbose = LocalLogger::new(VerboseLevel::None);
     let grid = create_conflict_zones_multiple_grid();
 
@@ -818,9 +847,14 @@ fn test_conflict_zones_trajectories_invalidated() {
     assert!(solve_result.is_ok(), "Can't solve conflicts");
 }
 
+// Full collection recognizes the shared-target zone as MergeForwardConflictZone, preserves
+// its winner, and passes it to the solver successfully.
 #[test]
 fn test_conflict_zones_cross_grid() {
-    // Based on TestConflictZonesCrossGrid
+    // 1 -> 2 --+
+    //          +--> 3
+    // 6 -> 7 --+
+    // The zone prefers edge (7, 3) over (2, 3).
     let verbose = LocalLogger::new(VerboseLevel::None);
     let grid = create_simple_cross_shape_grid();
 
@@ -931,9 +965,13 @@ fn test_conflict_zones_cross_grid() {
     assert!(solve_result.is_ok(), "Can't solve conflicts");
 }
 
+// Full collection protects the truck's tail across the declared diagonal edges despite the
+// other approach's nominal priority.
 #[test]
 fn test_conflict_zones_cross_tail() {
-    // Based on TestConflictZonesCrossTail
+    // truck body: 3(tail) -> 4(tail) -> 12(head)
+    // zone edges: (4, 12) and (11, 5)
+    // The zone prefers (11, 5), but the truck's body takes precedence.
     let verbose = LocalLogger::new(VerboseLevel::None);
 
     // Generate 3x7 grid
@@ -1045,9 +1083,13 @@ fn test_conflict_zones_cross_tail() {
     }
 }
 
+// Full collection retains the tail-crossing classification and truck priority when the
+// truck's route continues forward.
 #[test]
 fn test_conflict_zones_cross_tail_forward() {
-    // Based on TestConflictZonesCrossTailForward
+    // truck body: 3(tail) -> 4(tail) -> 12(head)
+    // zone edges: (4, 12) and (11, 5)
+    // The zone prefers (11, 5), but the truck's body takes precedence.
     let verbose = LocalLogger::new(VerboseLevel::None);
 
     let cells_set = vec![

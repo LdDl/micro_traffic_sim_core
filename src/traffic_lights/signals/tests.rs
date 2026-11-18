@@ -1,5 +1,7 @@
 use super::*;
 
+// All supported one-character signal codes map to their distinct variants, including
+// case-sensitive pairs.
 #[test]
 fn test_parse_signal_valid() {
     // Test for valid signal strings
@@ -15,6 +17,8 @@ fn test_parse_signal_valid() {
     assert_eq!(SignalType::from_str("o").unwrap(), SignalType::Blinking);
     assert_eq!(SignalType::from_str("O").unwrap(), SignalType::NoSignal);
 }
+
+// An unsupported code returns an error containing that exact code.
 #[test]
 fn test_parse_signal_invalid() {
     // Test for invalid signal strings

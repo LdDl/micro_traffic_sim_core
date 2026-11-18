@@ -2,8 +2,10 @@ use super::*;
 use crate::geom::{SRID, new_point};
 use crate::grid::cell::Cell;
 
+// With maximum speed 1, the travel-time heuristic equals the reference geographic
+// distance.
 #[test]
-fn test_heuristic() {
+fn test_unit_speed_heuristic_matches_geographic_distance() {
     let cell1 = Cell::new(1)
         // Moscow
         .with_point(new_point(37.61556, 55.75222, Some(SRID::WGS84)))

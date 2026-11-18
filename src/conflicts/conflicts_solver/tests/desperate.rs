@@ -1,10 +1,7 @@
-//! Tests for the patience-based right-of-way override ("desperate" vehicles), resolved
-//! authoritatively in `solve_conflicts`.
+//! Patience-based overrides of supplied merge and crossing priorities.
 //!
-//! A vehicle stuck past its cooperativity-scaled patience threshold (`Vehicle::is_desperate`)
-//! wins a contested cell, overriding normal right-of-way, the fixed conflict-zone winner
-//! and the left/right rule - across EVERY conflict type - but NEVER a `Tail` conflict
-//! (physical body), and never two vehicles into the same cell (claimed-cell dedup).
+//! These fixtures provide conflicts and intentions directly to the solver.
+//! Body occupancy, existing reservations, and the one-step grant still constrain overrides.
 
 use crate::agents::{PATIENCE_MAX, PATIENCE_MIN, Vehicle, VehicleIntention, VehiclesStorage};
 use crate::conflicts::{CellConflict, ConflictType, solve_conflicts};
@@ -42,7 +39,8 @@ fn speed(v: &VehiclesStorage, id: u64) -> i32 {
     v.get(&id).unwrap().intention.intention_speed
 }
 
-/// A stuck vehicle wins a contested cell even though it is NOT the priority participant.
+// Without exhausted patience, the nominated vehicle wins. Raising the other's wait counter
+// transfers the grant and stops the original winner.
 #[test]
 fn test_desperate_overrides_right_of_way() {
     let log = LocalLogger::none();
@@ -88,17 +86,14 @@ fn test_desperate_overrides_right_of_way() {
     );
 }
 
-/// The "stuck-too-long violator" scenario, spelled out along the SPEED axis: the normal
-/// rule hands a contested cell to whoever is FASTER (`resolve_by_speed_and_cooperativity`,
-/// conflict_rule.rs) - so the priority participant here is the fast vehicle (index 0). A
-/// SLOW vehicle that has starved past its patience threshold violates right-of-way and
-/// takes the cell anyway; the faster, patient vehicle is forced to brake (yield, speed 0).
+// A slower vehicle with exhausted patience beats the supplied faster priority winner. The
+// otherwise identical patient control yields.
 #[test]
 fn test_desperate_slow_violator_beats_faster_normal_winner() {
     let log = LocalLogger::none();
 
     // Baseline (nobody desperate): the FASTER vehicle (index 0, speed 4) is the rightful
-    // winner by the normal speed rule; the slower one yields. This is exactly the
+    // winner by the normal speed rule. The slower one yields. This is exactly the
     // "intermediate-cell conflicts go to whoever is faster" behaviour.
     let mut vehicles = VehiclesStorage::new();
     // FAST, patient
@@ -124,7 +119,7 @@ fn test_desperate_slow_violator_beats_faster_normal_winner() {
     );
 
     // Same conflict, but now the SLOW vehicle has starved past patience: it VIOLATES and
-    // takes the cell; the faster, patient vehicle is forced to brake.
+    // takes the cell. The faster, patient vehicle is forced to brake.
     let mut vehicles = VehiclesStorage::new();
     // FAST, patient
     vehicles.insert(1, veh(1, 10, 0.5, 4, 0, LaneChangeType::NoChange, 15));
@@ -149,8 +144,8 @@ fn test_desperate_slow_violator_beats_faster_normal_winner() {
     );
 }
 
-/// Desperation is orthogonal to aggression: a cooperative-but-desperate vehicle beats
-/// an aggressive-but-patient one even when the latter is the priority participant.
+// A cooperative vehicle with exhausted patience beats an aggressive but patient priority
+// participant.
 #[test]
 fn test_cooperative_desperate_beats_aggressive() {
     let log = LocalLogger::none();
@@ -170,7 +165,8 @@ fn test_cooperative_desperate_beats_aggressive() {
     assert_eq!(speed(&vehicles, 2), 0, "aggressive-patient yields");
 }
 
-/// Desperation NEVER overrides a Tail conflict: you cannot force through a body.
+// A supplied Tail constraint protects its priority participant even when the opponent has
+// exhausted its patience.
 #[test]
 fn test_desperate_does_not_override_tail() {
     let log = LocalLogger::none();
@@ -198,8 +194,7 @@ fn test_desperate_does_not_override_tail() {
     );
 }
 
-/// Several desperate vehicles still yield exactly ONE winner: the most-starved
-/// (highest wait_steps) one.
+// Among the two desperate participants, the greater wait counter determines the winner.
 #[test]
 fn test_most_starved_wins() {
     let log = LocalLogger::none();
@@ -227,10 +222,7 @@ fn test_most_starved_wins() {
     );
 }
 
-/// Tie-break determinism: when several desperate vehicles share the SAME wait_steps, the
-/// winner is the LOWEST vehicle id (earliest spawn), NOT whoever happens to be last in the
-/// participant list. Proven by flipping the participant order and getting the same winner -
-/// previously `max_by_key` returned the last equal-maximum, so order silently decided it.
+// Equal desperate wait counters select the lowest vehicle ID in both participant orders.
 #[test]
 fn test_most_starved_tie_broken_by_lowest_id() {
     let log = LocalLogger::none();
@@ -276,8 +268,7 @@ fn test_most_starved_tie_broken_by_lowest_id() {
     );
 }
 
-/// Desperation overrides a fixed conflict-zone winner (breaks junction right-of-way
-/// starvation). The zone conflict is intercepted before its normal handling.
+// A desperate participant overrides the supplied priority in a crossing-zone constraint.
 #[test]
 fn test_desperate_overrides_conflict_zone() {
     let log = LocalLogger::none();
@@ -305,7 +296,8 @@ fn test_desperate_overrides_conflict_zone() {
     );
 }
 
-/// Desperation overrides the left-beats-right rule in a crossing-trajectory conflict.
+// A desperate right changer receives the single-cell grant and stops the normally
+// preferred left changer.
 #[test]
 fn test_desperate_overrides_cross_lane_change() {
     let log = LocalLogger::none();
@@ -333,8 +325,7 @@ fn test_desperate_overrides_cross_lane_change() {
     );
 }
 
-/// Two separate conflicts cannot grant the same cell to two desperate vehicles: the
-/// second is blocked (claimed-cell dedup).
+// Two conflicts requesting cell 30 grant it to only one desperate vehicle.
 #[test]
 fn test_claimed_cells_dedup() {
     let log = LocalLogger::none();
@@ -371,9 +362,8 @@ fn test_claimed_cells_dedup() {
     );
 }
 
-/// A desperate winner moving multiple cells (speed>1) is clamped to a single-cell step
-/// into the cell it actually ENTERS (its first path cell), and only that cell is reserved
-/// -so it never sweeps unreserved intermediate cells.
+// A desperate vehicle requesting 15 -> 16 -> 17 -> 18 receives only the first step to 16,
+// and its opponent stops.
 #[test]
 fn test_desperate_multicell_winner_clamped_to_one_cell() {
     let log = LocalLogger::none();
@@ -393,7 +383,7 @@ fn test_desperate_multicell_winner_clamped_to_one_cell() {
         ..Default::default()
     });
     vehicles.insert(1, w);
-    // Vehicle 2 contends the FIRST swept cell (16); conflict is keyed on 16.
+    // Vehicle 2 contends the FIRST swept cell (16). Conflict is keyed on 16.
     vehicles.insert(2, veh(2, 11, 0.0, 1, 0, LaneChangeType::NoChange, 16));
     let conflicts = vec![CellConflict {
         cell_id: 16,
@@ -419,14 +409,19 @@ fn test_desperate_multicell_winner_clamped_to_one_cell() {
     );
 }
 
-/// Regression: clamping a TAILED desperate multi-cell winner must rebuild its tail for
-/// the one-cell step, otherwise the stale multi-cell tail lands ahead of / on the head.
+// Clamping the desperate truck to one step rebuilds its tail as [14, 15] behind head 16,
+// without a head-tail overlap.
 #[test]
 fn test_desperate_tailed_winner_tail_stays_behind_head() {
+    // cell            13    14    15    16    17  18
+    // body            tail  tail  head  .     .   .
+    // requested head  .     .     .     .     .   head
+    // granted body    .     tail  tail  head  .   .
+    // The granted prefix contains exactly one step.
     let log = LocalLogger::none();
     let mut vehicles = VehiclesStorage::new();
     // Tailed vehicle: head at 15, tail [13, 14] (furthest..nearest). Intends a 3-cell
-    // move 15 -> 16 -> 17 -> head 18; its stale tail intention (multi-cell) would be [16,17].
+    // move 15 -> 16 -> 17 -> head 18. Its stale tail intention (multi-cell) would be [16,17].
     let mut w = Vehicle::new(1)
         .with_cell(15)
         .with_aggressive_level(0.0)
@@ -469,10 +464,8 @@ fn test_desperate_tailed_winner_tail_stays_behind_head() {
     );
 }
 
-/// One-occupant-per-cell vs a standing non-participant: a desperate winner must NOT be
-/// granted a cell that is physically occupied this tick by a vehicle outside the conflict
-/// (this CA has no same-tick "following" into a vacated cell). It is granted only when the
-/// cell is actually free.
+// A non-participant standing on the requested cell blocks the desperate winner. Removing
+// that occupant allows the grant.
 #[test]
 fn test_desperate_does_not_enter_occupied_cell() {
     let log = LocalLogger::none();
@@ -521,9 +514,8 @@ fn test_desperate_does_not_enter_occupied_cell() {
     );
 }
 
-/// A desperate winner of one conflict blocks the NORMAL winner of a *separate* conflict
-/// that targets the same cell -and the desperate-first reordering makes this hold
-/// regardless of input order.
+// The desperate conflict reserves cell 30 before a normal conflict listed earlier. Only
+// the desperate winner receives a move.
 #[test]
 fn test_desperate_blocks_normal_winner_on_same_cell() {
     let log = LocalLogger::none();
@@ -561,7 +553,8 @@ fn test_desperate_blocks_normal_winner_on_same_cell() {
     );
 }
 
-/// Patience threshold scales linearly with cooperativity; every value is finite.
+// Cooperativity 0, 0.5, and 1 maps to the minimum patience, the midpoint, and the maximum
+// patience.
 #[test]
 fn test_patience_scales_with_cooperativity() {
     // cooperativity 0
@@ -587,10 +580,11 @@ fn test_patience_scales_with_cooperativity() {
     );
 }
 
-/// `is_desperate` flips exactly at the threshold, never before (no premature forcing).
+// At minimum patience minus one tick the driver remains patient. At the threshold it
+// becomes desperate.
 #[test]
 fn test_is_desperate_threshold() {
-    // patience 300
+    // Use the configured minimum rather than a separate literal threshold.
     let mut aggressive = Vehicle::new(1).with_aggressive_level(1.0).build();
     aggressive.wait_steps = PATIENCE_MIN - 1;
     assert!(

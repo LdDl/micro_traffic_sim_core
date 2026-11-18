@@ -4,9 +4,11 @@ use crate::grid::cell::Cell;
 use crate::grid::road_network::GridRoads;
 use crate::shortest_path::router::{shortest_path, shortest_path_with_heuristic};
 
-/// A straight 5-cell chain 1->2->3->4->5 plus a parallel lane 2->6->7->4 (a left
-/// detour off cell 2 that rejoins at 4). Euclidean coords, speed_limit 1 so each
-/// edge time equals its length.
+// Main chain: 1 -> 2 -> 3 -> 4 -> 5
+//                 |         ^
+//                 6 -> 7 ---+
+// Edge 2 -> 6 is a left connection. The others are forward connections.
+// Euclidean coordinates and speed limit 1 make edge cost equal its length.
 fn build_test_grid() -> GridRoads {
     let mut grid = GridRoads::new();
     let mk = |id: CellID, x: f64, y: f64, f: CellID, l: CellID, r: CellID| {
@@ -31,6 +33,8 @@ fn build_test_grid() -> GridRoads {
     grid
 }
 
+// Reverse adjacency includes both forward and lateral predecessors and leaves the source
+// without incoming neighbors.
 #[test]
 fn test_reverse_adj() {
     let grid = build_test_grid();
@@ -45,6 +49,8 @@ fn test_reverse_adj() {
     assert!(rev.get(&1).is_none());
 }
 
+// Forward and reverse Dijkstra distances match known costs on the main chain and its
+// detour.
 #[test]
 fn test_dijkstra_from_and_to() {
     let grid = build_test_grid();
@@ -55,13 +61,13 @@ fn test_dijkstra_from_and_to() {
     assert!((df[&2] - 1.0).abs() < 1e-9);
     // 1->2->3
     assert!((df[&3] - 2.0).abs() < 1e-9);
-    // 1->2->3->4 (3) beats 1->2->6->7->4 (1+sqrt2+1+1)
+    // 1->2->3->4 costs 3. 1->2->6->7->4 costs 1+1+1+sqrt(2).
     assert!((df[&4] - 3.0).abs() < 1e-9);
     assert!((df[&5] - 4.0).abs() < 1e-9);
     // 6 is reachable via left from 2: 1->2 (1) + 2->6 (1, vertical) = 2.
     assert!((df[&6] - 2.0).abs() < 1e-9);
 
-    // Distances TO cell 5 (reverse). Only the main lane reaches 5.
+    // Reverse distances to cell 5. The detour also reaches 5 via cell 4.
     let rev = build_reverse_adj(&grid);
     let dt = dijkstra_to(5, &grid, &rev);
     assert!((dt[&5] - 0.0).abs() < 1e-9);
@@ -71,6 +77,8 @@ fn test_dijkstra_from_and_to() {
     assert!((dt[&1] - 4.0).abs() < 1e-9);
 }
 
+// Requested landmarks are distinct and have both distance tables. Zero requests give an
+// empty table and oversized requests are capped.
 #[test]
 fn test_landmark_build() {
     let grid = build_test_grid();
@@ -82,11 +90,13 @@ fn test_landmark_build() {
     assert_eq!(table.dist_to.len(), 2);
     // Landmarks are distinct.
     assert_ne!(table.landmarks()[0], table.landmarks()[1]);
-    // k = 0 yields an empty table; k larger than the grid is capped.
+    // A request of k = 0 yields an empty table. Larger requests are capped by the grid size.
     assert!(LandmarkTable::build(&grid, 0).is_empty());
     assert!(LandmarkTable::build(&grid, 999).len() <= 7);
 }
 
+// For all pairs in this fixture, ALT stays above the geometric bound and below each
+// successful geometric-A* route cost.
 #[test]
 fn test_landmark_heuristic_admissible() {
     let grid = build_test_grid();
@@ -111,6 +121,8 @@ fn test_landmark_heuristic_admissible() {
     }
 }
 
+// For every fixture pair, full-table ALT and geometric A* agree on reachability and, when
+// reachable, route vertices and cost.
 #[test]
 fn test_routing_with_alt_matches_geometric() {
     let grid = build_test_grid();
@@ -142,6 +154,7 @@ fn test_routing_with_alt_matches_geometric() {
     }
 }
 
+// With no landmarks, the estimate equals the geometric lower bound.
 #[test]
 fn test_empty_table_degrades_to_geometric() {
     let grid = build_test_grid();
@@ -153,6 +166,8 @@ fn test_empty_table_degrades_to_geometric() {
     assert!((est - geo).abs() < 1e-9);
 }
 
+// Each fixture query uses at most two landmarks. Its estimate stays between the geometric
+// and full-table bounds and below successful A* route costs.
 #[test]
 fn test_active_query_admissible_and_bounded() {
     let grid = build_test_grid();
@@ -180,6 +195,8 @@ fn test_active_query_admissible_and_bounded() {
     }
 }
 
+// Using two active landmarks preserves geometric A* reachability, route vertices, and cost
+// for all fixture pairs.
 #[test]
 fn test_routing_with_active_landmarks_matches_geometric() {
     let grid = build_test_grid();

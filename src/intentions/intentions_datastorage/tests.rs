@@ -1,6 +1,9 @@
 use super::*;
 use crate::agents::VehicleIntention;
 use crate::agents_types::AgentType;
+
+// The first target claim creates one cell entry containing the vehicle ID and Target
+// category.
 #[test]
 fn test_add_to_empty_intentions() {
     let mut intentions = Intentions::new();
@@ -25,6 +28,8 @@ fn test_add_to_empty_intentions() {
     );
 }
 
+// Two claims for the same cell coexist in insertion order and retain their distinct Target
+// and Transit categories.
 #[test]
 fn test_add_multiple_to_same_cell() {
     let mut intentions = Intentions::new();
@@ -68,6 +73,7 @@ fn test_add_multiple_to_same_cell() {
     );
 }
 
+// Claims for different cells remain in separate entries with their own vehicle IDs.
 #[test]
 fn test_add_to_different_cells() {
     let mut intentions = Intentions::new();
@@ -112,8 +118,15 @@ fn test_add_to_different_cells() {
     );
 }
 
+// A truck's projected tail shares cell 10 with another vehicle's target claim. The vacated
+// rear cell 8 has no projected claim.
 #[test]
 fn test_add_multiple_to_same_cell_tail() {
+    // cell             8     9     10      11
+    // truck body       tail  tail  head    .
+    // truck intention  .     tail  tail    head
+    // other claim      .     .     target  .
+    // This test checks stored intentions. Body occupancy is checked separately.
     let mut intentions = Intentions::new();
 
     // Setup first vehicle with tail

@@ -1,6 +1,9 @@
 use super::*;
 use crate::agents::VehicleIntention;
 use crate::behaviour::BehaviourType;
+
+// Merge-lane priority favors the stronger cut-in aggressor. Without that override, the
+// left-changing vehicle wins the tested pair.
 #[test]
 fn test_resolve_merge_lane_change() {
     // Case 1: Aggressive vehicle should win
@@ -67,6 +70,9 @@ fn test_resolve_merge_lane_change() {
         "Conflict type is not correct"
     );
 }
+
+// Forward-merge priority compares speed, then cooperativity, then lowest ID for a full
+// tie. Reversing a tied pair preserves its winner.
 #[test]
 fn test_resolve_by_speed_and_cooperativity() {
     // Case 1: Vehicle with higher speed should win
@@ -153,6 +159,9 @@ fn test_resolve_by_speed_and_cooperativity() {
         "full-tie tie-break is order-invariant (same winner when args are swapped)"
     );
 }
+
+// Forward merging checks aggression, Transit over Target, and the speed/cooperativity
+// fallback for equal intention categories.
 #[test]
 fn test_resolve_merge_forward() {
     // Case 1: Aggressive vehicle should win over cooperative
@@ -240,6 +249,9 @@ fn test_resolve_merge_forward() {
         "Conflict type is not correct"
     );
 }
+
+// The rule table selects the expected winner and conflict type for two lane changes, two
+// forward moves, and both orders of forward/blocked versus lane change.
 #[test]
 fn test_resolve_simple_rules() {
     // Case 1: both vehicles are changing lane on a single road
@@ -470,10 +482,8 @@ fn fwd_or_changer(id: u64, aggressive_level: f64, maneuver: LaneChangeType) -> V
     v
 }
 
-/// A CUT-IN aggressor (aggressive_level > 0.8) changing lane WINS over a less aggressive
-/// vehicle moving straight - overturning the normal "forward traffic has priority" rule. With
-/// EQUAL aggression the forward vehicle keeps priority ("higher aggression wins, ties go
-/// straight"). Verified through the public `resolve_simple_rules` entry point.
+// A stronger cut-in aggressor can beat forward traffic. Equal aggression and the threshold
+// boundary preserve forward priority, in either argument order.
 #[test]
 fn test_aggressor_cuts_in_forward_lane_change() {
     // changer (id 2, aggressive_level 0.9) cuts in front of the forward follower (id 1, 0.0).

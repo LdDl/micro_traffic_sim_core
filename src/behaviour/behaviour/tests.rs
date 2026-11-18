@@ -1,19 +1,26 @@
 use super::*;
 use crate::behaviour::RelativeRandomization;
 
+// Aggressive and Cooperative display as their lowercase external labels.
 #[test]
 fn test_behaviour_display() {
     assert_eq!(format!("{}", BehaviourType::Aggressive), "aggressive");
     assert_eq!(format!("{}", BehaviourType::Cooperative), "cooperative");
 }
+
+// The Aggressive preset exposes the expected slowdown, desired speed, aggression, and
+// safety margin.
 #[test]
-fn test_behaviour_parameters_from() {
+fn test_aggressive_preset_parameters() {
     let params = BehaviourParameters::from_behaviour_type(BehaviourType::Aggressive);
     assert_eq!(params.slowdown_factor_p(), 0.1);
     assert_eq!(params.speed_limit(), 5);
     assert_eq!(params.aggressive_level(), 0.9);
     assert_eq!(params.min_safe_distance(), 0);
 }
+
+// Moving presets share p0 = 0.425 with p0 >= p. Block uses p0 = 1. This checks preset
+// values, not an empirical jam-line fit.
 #[test]
 fn test_slow_to_start_presets_use_line_j_value() {
     let p0 = |b| BehaviourParameters::from_behaviour_type(b).slow_to_start_factor_p0();
@@ -29,6 +36,8 @@ fn test_slow_to_start_presets_use_line_j_value() {
     assert_eq!(p0(BehaviourType::Block), 1.0);
 }
 
+// Preset gaps match their configured empty-cell reserves. The basic constructor and a
+// negative override both give zero.
 #[test]
 fn test_standstill_gap_presets() {
     let gap = |b| BehaviourParameters::from_behaviour_type(b).standstill_gap();
@@ -49,6 +58,8 @@ fn test_standstill_gap_presets() {
     );
 }
 
+// Moving presets select KKW randomization, the basic constructor selects VDR, and custom
+// negative thresholds and decelerations are clamped.
 #[test]
 fn test_relative_randomization_presets() {
     for b in [
@@ -79,6 +90,8 @@ fn test_relative_randomization_presets() {
     assert_eq!(params.relative_randomization().decel_faster, 2);
 }
 
+// The three presets map aggression through P1 = 0.5 + 0.5 * aggression to 0.5, 0.75, and
+// 0.95.
 #[test]
 fn test_change_p1_maps_aggressiveness() {
     // P1 = 0.5 + 0.5 * aggressive_level, in [0.5, 1.0].
@@ -95,6 +108,9 @@ fn test_change_p1_maps_aggressiveness() {
         "aggressive -> ~0.95"
     );
 }
+
+// With the supplied mixture weights, sampled behaviours belong to Aggressive or
+// Cooperative. Their frequencies are not tested.
 #[test]
 fn test_random_vehicle_behaviour_type() {
     let ratio_a = 0.7;

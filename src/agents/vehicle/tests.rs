@@ -3,6 +3,8 @@ use crate::agents::vehicle_intention::VehicleIntention;
 use crate::agents_types::AgentType;
 use crate::maneuver::LaneChangeType;
 
+// Length scaling preserves (L + gap)(1 - p) = (1 + gap)(1 - p0) for the sampled inputs. a
+// one-cell vehicle keeps p0.
 #[test]
 fn test_slow_to_start_for_length() {
     // A one cell vehicle keeps the behaviour value.
@@ -38,10 +40,12 @@ fn test_slow_to_start_for_length() {
     );
 }
 
+// Trimming keeps a prefix of the requested forward path, with matching speed and
+// destination. a larger limit does not extend it.
 #[test]
 fn test_trim_forward_intention() {
     // 3(head) 4 5 6(requested)
-    // Trimming to two cells retains [4, 5]; trimming to zero retains the head at 3.
+    // Trimming to two cells retains [4, 5]. Trimming to zero retains the head at 3.
     let mut vehicle = Vehicle::new(1).with_cell(3).with_speed(3).build();
     vehicle.set_intention(VehicleIntention {
         intention_maneuver: LaneChangeType::NoChange,
@@ -68,10 +72,14 @@ fn test_trim_forward_intention() {
     assert_eq!(vehicle.intention.intention_speed, 0);
 }
 
+// Shortening a truck's forward intention recomputes its projected tail. Trimming to zero
+// retains the stored tail projection, which movement must not apply.
 #[test]
 fn test_trim_forward_intention_moves_tail() {
-    // before: 1(tail) 2(tail) 3(head) 4(.) 5(requested)
-    // trim=1: 1(.)    2(tail) 3(tail) 4(head)
+    // cell            1     2     3     4     5
+    // body            tail  tail  head  .     .
+    // requested head  .     .     .     .     head
+    // trimmed to 1    .     tail  tail  head  .
     // The shortened intention must move the whole body consistently.
     let mut truck = Vehicle::new(1)
         .with_cell(3)
@@ -89,12 +97,14 @@ fn test_trim_forward_intention_moves_tail() {
     assert_eq!(truck.intention.intention_cell_id, 4);
     assert_eq!(truck.intention.tail_intention_cells, vec![2, 3]);
     // Staying in place follows the intention storage convention for a vehicle that does not
-    // move; movement applies the tail intention only when the head moves, so the body stays.
+    // move. Movement applies the tail intention only when the head moves, so the body stays.
     truck.trim_forward_intention(0);
     assert_eq!(truck.intention.intention_cell_id, 3);
     assert_eq!(truck.intention.tail_intention_cells, vec![2, 3]);
 }
 
+// Each countdown call removes one dwell tick. Reset restores the configured dwell
+// duration.
 #[test]
 fn test_relaxation_countdown() {
     let relax_time = 9;
@@ -121,6 +131,8 @@ fn test_relaxation_countdown() {
         "Incorrect countdown after reset"
     );
 }
+
+// The vehicle builder maps aggression to its complementary cooperativity: 1 - aggression.
 #[test]
 fn test_cooperative_level() {
     let coop_level = 0.75;

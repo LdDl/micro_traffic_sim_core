@@ -2,6 +2,8 @@ use super::*;
 use crate::geom::SRID;
 use crate::geom::new_point;
 
+// Cell distance uses the stored WGS84 coordinates and matches the geographic distance
+// reference in meters.
 #[test]
 fn test_cells_gc_distance() {
     let correct_distance = 634430.92026;

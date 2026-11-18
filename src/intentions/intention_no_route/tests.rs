@@ -2,6 +2,7 @@ use super::*;
 use crate::grid::cell::Cell;
 use crate::grid::road_network::GridRoads;
 
+// A cell with no forward or lateral exits returns DeadEndReached carrying that cell's ID.
 #[test]
 fn test_process_no_route_found_deadend() {
     // Create a cell with no exits

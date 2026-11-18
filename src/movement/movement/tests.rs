@@ -9,12 +9,12 @@ use crate::grid::zones::ZoneType;
 use crate::maneuver::LaneChangeType;
 use crate::verbose::LocalLogger;
 
-/// Regression: a dwelling tailed vehicle (relax_countdown > 0) that intended to move
-/// must NOT advance its tail while its head stays - head and tail share the single
-/// `final_cell`/`moved` decision. Without it, the tail moved (head ending inside its
-/// own tail).
+// A dwelling truck keeps its head and tail in their initial cells even when its intention
+// contains a forward move.
 #[test]
 fn test_dwelling_tailed_vehicle_tail_does_not_advance() {
+    // before and after: 1(tail) -> 2(tail) -> 3(head, dwelling) -> 4
+    // The unused intention proposes head 4 and tail [2, 3].
     // Linear road 1 -> 2 -> 3 -> 4.
     let mut net = GridRoads::new();
     for (id, fwd, x) in [(1, 2, 0.0), (2, 3, 1.0), (3, 4, 2.0), (4, -1, 3.0)] {
@@ -27,8 +27,8 @@ fn test_dwelling_tailed_vehicle_tail_does_not_advance() {
         );
     }
 
-    // Tailed vehicle: head at 3, tail [1,2]; dwelling (relax_countdown > 0) but its
-    // intention is a forward move to 4 with the already-advanced tail [2,3].
+    // The vehicle dwells with head 3 and tail [1, 2]. Its unused intention
+    // proposes a forward move to 4 with projected tail [2, 3].
     let mut v = Vehicle::new(1)
         .with_cell(3)
         .with_tail_size(2, vec![1, 2])
@@ -68,12 +68,14 @@ fn test_dwelling_tailed_vehicle_tail_does_not_advance() {
     );
 }
 
-/// Regression: a multi-stop bus must complete its trip at the LAST transit stop, not the
-/// first. `trip_destination` used to be set to the FIRST stop, so a bus despawned as
-/// "completed" the instant it reached stop #1 and never served the rest of its route.
+// Arrival at the first transit stop updates the bus's next destination. Arrival at the
+// final stop removes the other bus as completed.
 #[test]
 fn test_bus_completes_at_last_stop_not_first() {
-    // Linear road 1 -> 2 -> 3 -> 4; cells 2 and 4 are Transit stops.
+    // bus A: 1 -> 2(first stop) -> 3 -> 4(final stop)
+    // bus B:                      3 -> 4(final stop)
+    // A remains and targets 4. B completes at 4.
+    // Linear road 1 -> 2 -> 3 -> 4. Cells 2 and 4 are Transit stops.
     let mut net = GridRoads::new();
     for (id, fwd, x, zone) in [
         (1, 2, 0.0, ZoneType::Common),
@@ -156,12 +158,13 @@ fn test_bus_completes_at_last_stop_not_first() {
     );
 }
 
-/// Patience (`wait_steps`) must accrue only under right-of-way starvation, not for a
-/// non-contention stop. A vehicle held by a red light ahead (forward cell Banned) or
-/// still dwelling at a stop must NOT gain patience (else it would wrongly become
-/// "desperate" and override right-of-way); a vehicle blocked by traffic still does.
+// Red-light and dwell holds leave both waiting clocks unchanged. A traffic hold increments
+// both. Cell zero is also tested as a red-light target.
 #[test]
 fn test_wait_steps_not_accrued_on_red_or_dwell() {
+    // 1(red hold)     -> 0 or 2(banned): both counters unchanged
+    // 3(traffic hold) -> 4(free):        both counters + 1
+    // 5(dwelling)     -> 6(free):        both counters unchanged
     for red_target in [0, 2] {
         let mut net = GridRoads::new();
         // The forward red-light target can be cell zero.
@@ -266,6 +269,9 @@ fn test_wait_steps_not_accrued_on_red_or_dwell() {
         );
     }
 }
+
+// An executed lane change resets the yield-cycle clock while preserving the separate
+// ordinary wait counter in this fixture.
 #[test]
 fn cycle_clock_clears_on_actual_lateral_progress() {
     let mut net = GridRoads::new();

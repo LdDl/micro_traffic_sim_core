@@ -37,6 +37,8 @@ fn intended(target: i64) -> Intentions {
     intentions
 }
 
+// The index retains every zone sharing a target, removes old incidences on replacement,
+// and omits shared-target merges from crossing candidates.
 #[test]
 fn crossing_index_keeps_all_shared_targets_and_replaces_incidence() {
     let mut index = CrossingZoneIndex::default();
@@ -183,13 +185,15 @@ fn collect_fixture(indexed: bool, case: usize, order: usize) -> String {
             vehicle.is_conflict_participant, vehicle.intention
         ));
     }
-    // Fresh threads have identical initial seeded streams; the sentinel checks draw count and order.
+    // Fresh threads have identical initial seeded streams. The sentinel checks draw count and order.
     for _ in 0..16 {
         output.push_str(&format!(";{:016x}", random_f64().to_bits()));
     }
     output
 }
 
+// Indexed and full-scan collection produce identical conflicts, errors, solved intentions,
+// participation flags, and subsequent random values for each fixture and insertion order.
 #[test]
 fn indexed_collection_matches_full_scan_constraints_errors_solver_and_rng() {
     for case in 0..32 {
@@ -269,6 +273,8 @@ fn malformed_fixture(indexed: bool, case: usize) -> String {
     output
 }
 
+// Both collectors agree on missing vehicles, stale zone references, inactive zones, and
+// the random stream after these cases.
 #[test]
 fn indexed_one_sided_invalid_and_stale_references_keep_full_scan_behavior() {
     for case in 0..4 {

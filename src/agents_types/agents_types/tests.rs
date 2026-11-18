@@ -1,5 +1,6 @@
 use super::*;
 
+// The listed vehicle and pedestrian kinds retain their lowercase external labels.
 #[test]
 fn test_agent_to_string() {
     assert_eq!(AgentType::Car.to_string(), "car");
@@ -9,6 +10,8 @@ fn test_agent_to_string() {
     assert_eq!(AgentType::Pedestrian.to_string(), "pedestrian");
 }
 
+// Every sampled random agent kind is defined. This checks the output domain, not the
+// sampling distribution.
 #[test]
 fn test_random_agent() {
     for _ in 0..100 {
@@ -17,6 +20,8 @@ fn test_random_agent() {
     }
 }
 
+// Default tails exclude the head: cars, taxis and pedestrians have zero cells, buses and
+// trucks one, and large buses two.
 #[test]
 fn test_tail_size_default() {
     assert_eq!(AgentType::Undefined.tail_size_default(), 0);

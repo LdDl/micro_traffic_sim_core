@@ -2,8 +2,13 @@ use super::*;
 use crate::traffic_lights::groups::TrafficLightGroup;
 use crate::traffic_lights::signals::SignalType;
 
+// Phase timers advance through durations 2, 3, and 10, reset on each transition, and wrap
+// from the last phase to the first.
 #[test]
-fn test_traffic_light() {
+fn test_phase_timers_reset_and_wrap() {
+    // elapsed ticks: 0  1  2  3  4  5 ... 14 15
+    // phase:         0  0  1  1  1  2 ...  2  0
+    // phase timer:   0  1  0  1  2  0 ...  9  0
     let groups = vec![
         TrafficLightGroup::new(1)
             .with_label("Group 1".to_string())

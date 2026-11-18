@@ -1,6 +1,8 @@
 use super::*;
 use std::thread::sleep;
 
+// A custom session TTL overrides the storage default, access renews it, and a sufficiently
+// long idle interval makes the session inaccessible.
 #[test]
 fn test_storage_timers() {
     // Create storage with default expiration 2s and purge cadence 5s
@@ -20,7 +22,7 @@ fn test_storage_timers() {
     let exists = storage.with_session_mut(&object_id, |_s| {}).is_some();
     assert!(exists, "session should exist after first sleep (~3s)");
 
-    // Another ~3s; access should extend the expiration based on time since last update
+    // Another ~3s. Access should extend the expiration based on time since last update
     sleep(Duration::from_secs(3));
     let exists = storage.with_session_mut(&object_id, |_s| {}).is_some();
     assert!(
@@ -34,6 +36,8 @@ fn test_storage_timers() {
     assert!(!exists, "session should be expired after final sleep");
 }
 
+// Removal returns the stored session, updates the count, and makes subsequent removal and
+// access return None.
 #[test]
 fn test_remove_session() {
     let mut storage = SessionsStorage::new();

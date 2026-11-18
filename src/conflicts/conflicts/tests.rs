@@ -8,6 +8,8 @@ use crate::intentions::{CellIntention, IntentionType, Intentions};
 use crate::maneuver::LaneChangeType;
 use std::collections::HashMap;
 
+// For two edges sharing a target, the legacy zone lookup returns the source of the
+// configured winning edge.
 #[test]
 fn test_find_zone_conflict_for_two_intentions() {
     // Case 1: Both edges have the same target cell
@@ -33,6 +35,8 @@ fn test_find_zone_conflict_for_two_intentions() {
     assert_eq!(winner, Some(correct_winner), "Conflict winner is incorrect");
 }
 
+// A left-changing vehicle without the required right-side connection produces no crossing
+// conflict.
 #[test]
 fn test_find_cross_trajectories_no_right_maneuver() {
     // Case: Vehicle at cell with no right maneuver should return None
@@ -63,6 +67,8 @@ fn test_find_cross_trajectories_no_right_maneuver() {
     assert!(result.unwrap().is_none());
 }
 
+// Without a forward connection from the requesting vehicle's cell, no crossing trajectory
+// can be matched.
 #[test]
 fn test_find_cross_trajectories_no_forward_cell() {
     // Case: Vehicle at cell with no forward node should return None
@@ -98,6 +104,8 @@ fn test_find_cross_trajectories_no_forward_cell() {
     assert!(result.unwrap().is_none());
 }
 
+// Two same-direction lane changes do not form the opposing-diagonal crossing tested by
+// this detector.
 #[test]
 fn test_find_cross_trajectories_no_conflict_same_direction() {
     // Test case where both vehicles go in same direction - no conflict
@@ -158,6 +166,8 @@ fn test_find_cross_trajectories_no_conflict_same_direction() {
     );
 }
 
+// Opposing lane-change diagonals produce a CrossLaneChange conflict with the left-changing
+// vehicle as the priority participant.
 #[test]
 fn test_find_cross_trajectories_conflict_naive() {
     // A        B
@@ -253,10 +263,8 @@ fn test_find_cross_trajectories_conflict_naive() {
     );
 }
 
-/// Plain CrossLaneChange: a CUT-IN aggressor (aggressive_level > AGGRESSOR_CUT_IN_THRESHOLD, strictly more aggressive)
-/// gets priority over the left maneuver - the gradient `aggressor_advantage` now covers crossings,
-/// not just the old enum check.
-/// Same X/A/Y/B grid as the test above, vehicle 1 = ChangeRight.
+// On the same crossing fixture, a right-changing cut-in aggressor takes priority over the
+// less aggressive left-changing vehicle.
 #[test]
 fn test_cross_lane_change_aggressor_gets_priority() {
     let mut net = GridRoads::new();
@@ -316,6 +324,8 @@ fn test_cross_lane_change_aggressor_gets_priority() {
     );
 }
 
+// The paired cases check tail protection, zone priority, lane-change direction, and driver
+// aggression when classifying a conflict.
 #[test]
 fn test_find_conflict_type() {
     // Test 1: Tail vs Transit conflict - Tail should win
@@ -535,6 +545,8 @@ fn test_find_conflict_type() {
     );
 }
 
+// Two forward target claims produce a MergeForward conflict containing both vehicles and
+// nominating the more aggressive participant.
 #[test]
 fn test_new_conflict_multiple_basic() {
     let mut vehicle1 = Vehicle::new(1)
@@ -595,11 +607,8 @@ fn test_new_conflict_multiple_basic() {
     assert_eq!(*priority_vehicle, 1);
 }
 
-/// Order-invariance of the full-tie tie-break in a 3-vehicle merge: three vehicles with
-/// EQUAL speed and EQUAL cooperativity all contend the same cell.
-/// The winner (priority participant) must be the LOWEST id regardless of the order the intentions are folded in
-/// `new_conflict_multiple` - proving the coin-flip-free tie-break is order-invariant (closes
-/// the "participant order must not matter" concern at the last resolution step).
+// All six permutations of three equal-speed, equal-cooperativity forward claims nominate
+// the lowest vehicle ID.
 #[test]
 fn test_full_tie_winner_is_order_invariant() {
     let build = |id: u64, cell: CellID| {
@@ -648,6 +657,8 @@ fn test_full_tie_winner_is_order_invariant() {
     }
 }
 
+// Target and Transit claims from the same vehicle are classified as SelfTail rather than a
+// conflict between different vehicles.
 #[test]
 fn test_new_conflict_multiple_deduplication() {
     let vehicle1 = Vehicle::new(1).with_cell(10).build();

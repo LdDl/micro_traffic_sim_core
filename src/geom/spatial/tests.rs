@@ -2,6 +2,8 @@ use crate::geom::math::gc_distance;
 use crate::geom::point::{Point, PointType, SRID, new_point};
 
 use super::*;
+
+// A short geographic displacement matches the signed reference bearing in degrees.
 #[test]
 fn test_get_bearing() {
     let pt_from = new_point(35.90434, 56.89028, Some(SRID::WGS84));
@@ -17,6 +19,9 @@ fn test_get_bearing() {
         bearing
     );
 }
+
+// Point and two-point line coordinates match the EPSG:3857 references and recover their
+// EPSG:4326 inputs after inverse conversion.
 #[test]
 fn test_epsg_converter() {
     let precision = 10e-5;
@@ -42,7 +47,7 @@ fn test_epsg_converter() {
         ans_point_3857.1
     );
 
-    // // Reverse the conversion back to EPSG:4326
+    // Reverse the conversion back to EPSG:4326
     let ans_reversed_point_4326 = convert_epsg3857_to_4326(ans_point_3857.0, ans_point_3857.1);
 
     // Check if the reverse conversion to EPSG:4326 is correct
@@ -124,6 +129,9 @@ fn test_epsg_converter() {
         );
     }
 }
+
+// The scalar and point-based great-circle functions match the same distance reference in
+// meters.
 #[test]
 fn test_gc_distance() {
     let correct_distance = 634430.92026;

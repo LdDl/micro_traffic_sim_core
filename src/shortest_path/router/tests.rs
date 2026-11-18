@@ -3,8 +3,12 @@ use crate::geom::new_point;
 use crate::grid::zones::ZoneType;
 use crate::utils::generators::generate_one_lane_cells;
 
+// Following A* parent links returns vertices and maneuvers in forward order, with the
+// final node's accumulated cost.
 #[test]
 fn test_reconstruct_path() {
+    // 1 --forward--> 33 --left--> 22
+    // Parent links point backward. The returned route follows the arrows.
     let cell1 = Cell::new(1).build();
     let cell2 = Cell::new(33).build();
     let cell3 = Cell::new(22).build();
@@ -76,8 +80,10 @@ fn test_reconstruct_path() {
     );
 }
 
+// Routing across the generated two-lane road matches the reference travel-time cost,
+// including one diagonal lane change.
 #[test]
-fn test_big_router() {
+fn test_generated_two_lane_route_cost() {
     let cells_data = generate_one_lane_cells(5000.0, 4.5, 2);
     let mut grid = GridRoads::new();
     for cell in &cells_data {
@@ -92,8 +98,8 @@ fn test_big_router() {
         path_result.err()
     );
     let path = path_result.unwrap();
-    // Cost is now travel TIME = distance / speed. The one-lane generator uses
-    // speed_limit 3, so the time cost is the former distance cost (1111.414...) / 3.
+    // Travel-time cost is (1110 + sqrt(2)) / 3: unit forward edges,
+    // one diagonal lane change, and speed limit 3 throughout the fixture.
     let correct_cost = 370.4714045207875;
     assert!(
         (path.cost() - correct_cost).abs() < 0.001,
@@ -102,8 +108,13 @@ fn test_big_router() {
         path.cost()
     );
 }
+
+// The two-road fixture selects the expected route, maneuver sequence, and cost from cell 7
+// to cell 15.
 #[test]
-fn test_shortest_path() {
+fn test_route_vertices_maneuvers_and_cost_across_two_roads() {
+    // Expected route: 7 -> 8 -> 9 -> 10 -> 11 -> 12 -> 17 -> 14 -> 15
+    // Only 17 -> 14 is a lane change. All other listed edges are forward.
     let mut grid = GridRoads::new();
     grid.add_cell(
         Cell::new(1)
@@ -389,8 +400,10 @@ fn test_shortest_path() {
     }
 }
 
+// A five-step forward traversal wraps around a four-cell directed ring and includes the
+// starting cell.
 #[test]
-fn test_spath_no_goal_circle() {
+fn test_forward_path_wraps_around_ring() {
     use crate::geom::new_point;
     use crate::grid::cell::Cell;
     use crate::grid::road_network::GridRoads;

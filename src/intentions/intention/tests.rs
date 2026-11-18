@@ -2,8 +2,14 @@ use super::*;
 use crate::geom::new_point;
 use crate::grid::cell::Cell;
 use crate::utils::test_grids::create_pretty_simple_grid;
+
+// Rear safety counts steps to the merge cell, including the final step, and compares that
+// distance with rear speed plus the requested margin.
 #[test]
 fn lane_change_rear_margin_counts_distance_to_merge_cell() {
+    // 8(rear body) -> 9(empty) -> 10(merge cell)
+    // D = 2 steps. The moving rear needs D >= 1 + margin.
+    // The stopped rear needs D >= margin.
     let mut net = GridRoads::new();
     for id in 1..=12 {
         net.add_cell(
@@ -54,8 +60,13 @@ fn lane_change_rear_margin_counts_distance_to_merge_cell() {
     ));
 }
 
+// The shared road fixture checks single- and multi-cell movement, stopping before a
+// maneuver or occupied cell, and ending at the destination.
 #[test]
-fn test_intention() {
+fn test_forward_intention_respects_path_obstacles_and_destination() {
+    // Forward route: 101 -> 1 -> 2 -> 3 -> 7
+    // Destination 8 requires a maneuver after 3. Obstacles are placed at
+    // 1 or 3. Reaching destination 2 or 7 must not overshoot it.
     let net = create_pretty_simple_grid();
 
     // Case 1: basics
@@ -229,8 +240,15 @@ fn test_intention() {
     };
     assert_eq!(intention, correct_intention);
 }
+
+// A blocked vehicle changes right when that lane reaches its destination, and stays put
+// when the destination is disconnected or the side cell is occupied.
 #[test]
-fn test_alternate_intention() {
+fn test_alternate_intention_requires_reachable_unoccupied_lane() {
+    // 1 -> 2(V) -> 3(blocker) -> 4 -> 5 -> 6
+    //      | right
+    // 7 -> 8    -> 9          -> 10 -> 11 -> 12(goal)
+    // 500 is disconnected. The last case also occupies cell 8.
     let speed_limit = 4;
     let mut net = GridRoads::new();
     net.add_cell(
@@ -243,7 +261,8 @@ fn test_alternate_intention() {
     net.add_cell(
         Cell::new(2)
             .with_speed_limit(speed_limit)
-            .with_right_node(8) /* Maneuver allowed */
+            // Right lane-change connection.
+            .with_right_node(8)
             .with_forward_node(3)
             .with_point(new_point(1.0, 0.0, None))
             .build(),
@@ -591,14 +610,14 @@ fn test_alternate_intention() {
     }
 }
 
-/// The forward-roll reachability guard must honour the SAME bound the per-tick reconnect
-/// uses (`reconnect_max_depth`), not a separate hard-coded constant. A roll whose rejoin
-/// point sits at BFS depth 2 is authorized only when the bound is >= 2; otherwise the
-/// guard would green-light a roll that next tick's reconnect (same bound) cannot follow,
-/// forcing a needless full A*. Fast paths (route continues straight / forward is the
-/// destination) bypass the BFS and ignore the bound entirely.
+// A detour rejoining the cached route at depth 2 is accepted only with enough search
+// depth. Direct route continuation and destination shortcuts need no search.
 #[test]
 fn test_forward_guard_uses_reconnect_depth_bound() {
+    // cache:  1 -> 2 -> 3
+    //              ^
+    // detour: 10 -> 11
+    // The detour reaches cached cell 2 in two forward steps.
     let sl = 3;
     let mut net = GridRoads::new();
     // Cached route 1 -> 2 -> 3. The vehicle sits at route[0]=1.
@@ -663,14 +682,14 @@ fn test_forward_guard_uses_reconnect_depth_bound() {
     );
 }
 
-/// Regression (lost-for-tailed): an off-cache vehicle whose only route to the destination
-/// needs a lane change that is momentarily on cooldown (tail mid-maneuver, modelled here by
-/// `timer_non_maneuvers > 0`) must NOT latch `confusion`. The maneuvers-disabled A* fails,
-/// but the destination is still reachable WITH a maneuver, so the vehicle rolls forward and
-/// stays un-confused (recoverable) instead of being written off as lost. Confusion must
-/// still latch when the destination is genuinely unreachable even with maneuvers.
+// A temporary maneuver cooldown does not mark a reachable destination as lost. a
+// disconnected destination still sets confusion.
 #[test]
 fn test_offcache_cooldown_reachable_via_maneuver_does_not_confuse() {
+    // 1 -> 2(dead end)       500(disconnected)
+    // | right
+    // 3 -> 4(goal)
+    // The cooldown prevents the turn this tick, not route reachability.
     let sl = 3;
     let mut net = GridRoads::new();
     // From cell 1 the ONLY route to 4 is the lane change 1 -(right)-> 3 -> 4.

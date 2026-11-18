@@ -1,6 +1,18 @@
 use super::*;
+
+// Path observation returns the expected forward prefix when limited by a maneuver, another
+// vehicle, speed, or a banned cell.
 #[test]
-fn test_observable_path() {
+fn test_observable_path_stops_at_maneuver_obstacle_speed_or_signal() {
+    // Base route: 1 -> 2 -> 3 -> 4 -(left)-> 5
+    // case                    checked forward prefix
+    // free                    [2, 3, 4]
+    // vehicle at 4            [2, 3]
+    // left maneuver at 2      [2]
+    // left maneuver at 1      []
+    // speed limited to 1      [2]
+    // cell 3 banned           [2], last observed state Banned
+    // Only the fields asserted below are checked in each case.
     let speed_limit = 4;
     let cell1 = Cell::new(1).with_speed_limit(speed_limit).build();
     let cell2 = Cell::new(2).with_speed_limit(speed_limit).build();

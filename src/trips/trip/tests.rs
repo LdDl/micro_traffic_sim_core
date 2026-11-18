@@ -2,6 +2,8 @@ use super::*;
 use crate::agents_types::AgentType;
 use crate::behaviour::BehaviourType;
 
+// An unspecified trip tail size follows the selected vehicle kind's default, excluding its
+// head cell.
 #[test]
 fn test_tail_size_auto_resolution() {
     // Car should have tail_size = 0
@@ -29,6 +31,7 @@ fn test_tail_size_auto_resolution() {
     assert_eq!(large_bus_trip.vehicle_tail_size, 2);
 }
 
+// An explicit trip tail size overrides the vehicle kind's default.
 #[test]
 fn test_tail_size_explicit_override() {
     // Explicit tail size should not be overridden
@@ -39,6 +42,7 @@ fn test_tail_size_explicit_override() {
     assert_eq!(trip.vehicle_tail_size, 5);
 }
 
+// An unspecified trip speed limit retains the -1 sentinel.
 #[test]
 fn test_speed_limit_default() {
     // Default speed_limit should be -1
@@ -46,6 +50,7 @@ fn test_speed_limit_default() {
     assert_eq!(trip.speed_limit, -1);
 }
 
+// An explicit trip speed limit is retained by the builder.
 #[test]
 fn test_speed_limit_explicit() {
     // Explicit speed_limit should be set
@@ -55,6 +60,7 @@ fn test_speed_limit_explicit() {
     assert_eq!(trip.speed_limit, 5);
 }
 
+// Setting the speed limit after the behaviour preserves the explicit limit.
 #[test]
 fn test_speed_limit_with_behaviour_first() {
     // Speed limit set after behaviour should still apply
@@ -65,6 +71,7 @@ fn test_speed_limit_with_behaviour_first() {
     assert_eq!(trip.speed_limit, 3);
 }
 
+// Setting the behaviour after the speed limit also preserves the explicit limit.
 #[test]
 fn test_speed_limit_before_behaviour() {
     // Speed limit set before behaviour should still apply

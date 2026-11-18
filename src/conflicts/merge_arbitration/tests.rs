@@ -49,15 +49,26 @@ fn fresh_sample(mode: u8) -> (Option<VehicleID>, Vec<u64>) {
     std::thread::spawn(move || sample(mode)).join().unwrap()
 }
 
+// A zone with an absent approach leaves the merge unregulated and preserves the random
+// stream used by the no-arbitration control.
 #[test]
 fn unrelated_merge_does_not_consume_randomness() {
     assert_eq!(fresh_sample(0), fresh_sample(1));
 }
 
+// Two claims from the same approach share one zone-priority draw. The winner and following
+// random values match a single-draw reference.
 #[test]
 fn equal_priority_uses_one_draw_for_every_participant_on_an_approach() {
+    // 100(vehicle 1)     200(vehicles 2 and 3)
+    //        \             /
+    //                 900
+    // The synthetic duplicate approach tests arbitration, not body placement.
     assert_eq!(fresh_sample(2), fresh_sample(3));
 }
+
+// Pair and group arbitration agree on decisions and subsequent random values across the
+// enumerated incoming paths and zone-priority combinations.
 #[test]
 fn pair_fast_path_matches_group_constraints_and_random_stream() {
     fn decision_id(d: MergeDecision<'_>) -> (u8, VehicleID) {

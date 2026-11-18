@@ -24,11 +24,13 @@ fn create_test_vehicle(
     vehicle
 }
 
+// Winning a tail conflict protects a stopped truck's body without moving its head to the
+// contested tail cell.
 #[test]
 fn test_block_winner_stays_in_place() {
     // Truck: 8(tail) 9(tail) 10(head, stopped)
     // Another vehicle requests cell 9. Winning a Tail conflict protects
-    // the truck's body; it must leave the head at 10 with zero speed.
+    // the truck's body. It must leave the head at 10 with zero speed.
     let mut truck = Vehicle::new(1)
         .with_behaviour(BehaviourType::Undefined)
         .with_cell(10)
@@ -64,6 +66,7 @@ fn test_block_winner_stays_in_place() {
     );
 }
 
+// An empty conflict list and vehicle store resolve successfully.
 #[test]
 fn test_solve_conflicts_empty_conflicts_list() {
     let conflicts: Vec<CellConflict> = vec![];
@@ -75,6 +78,7 @@ fn test_solve_conflicts_empty_conflicts_list() {
     );
 }
 
+// A one-participant conflict returns InsufficientParticipants with the contested cell ID.
 #[test]
 fn test_solve_conflicts_insufficient_participants() {
     let vehicle = create_test_vehicle(1, 2, LaneChangeType::NoChange, 5);
@@ -102,6 +106,8 @@ fn test_solve_conflicts_insufficient_participants() {
     }
 }
 
+// An out-of-range priority index returns the cell ID, invalid index, and participant
+// count.
 #[test]
 fn test_solve_conflicts_invalid_priority_index() {
     let vehicle1 = create_test_vehicle(1, 2, LaneChangeType::NoChange, 5);
@@ -134,6 +140,8 @@ fn test_solve_conflicts_invalid_priority_index() {
     }
 }
 
+// The nominated lane changer receives a one-cell move to the contested target while the
+// forward-moving opponent stops.
 #[test]
 fn test_solve_conflicts_common_conflict() {
     let priority_vehicle = create_test_vehicle(1, 3, LaneChangeType::ChangeLeft, 5);
@@ -174,6 +182,8 @@ fn test_solve_conflicts_common_conflict() {
     );
 }
 
+// For the supplied crossing constraint, the nominated left changer proceeds one cell and
+// the right changer stops.
 #[test]
 fn test_solve_conflicts_trajectories_conflict() {
     let left_vehicle = create_test_vehicle(1, 2, LaneChangeType::ChangeLeft, 5);
@@ -210,9 +220,8 @@ fn test_solve_conflicts_trajectories_conflict() {
     );
 }
 
-/// CrossLaneChange where the RIGHT maneuver is the precomputed priority winner (a cut-in
-/// aggressor). The solver must HONOR priority_participant_index - letting the right win and
-/// blocking the left - rather than unconditionally giving the cell to the left maneuver.
+// The solver honors a supplied right-changing priority winner. Aggression selection
+// belongs to the earlier conflict calculation.
 #[test]
 fn test_solve_conflicts_cross_lane_aggressor_priority() {
     let left_vehicle = create_test_vehicle(1, 2, LaneChangeType::ChangeLeft, 5);
@@ -241,6 +250,8 @@ fn test_solve_conflicts_cross_lane_aggressor_priority() {
     );
 }
 
+// The yielding vehicle's intention returns to its current cell with zero speed and no
+// intermediate cells.
 #[test]
 fn test_solve_conflicts_conflict_zone() {
     let priority_vehicle = create_test_vehicle(1, 2, LaneChangeType::NoChange, 5);
@@ -270,6 +281,8 @@ fn test_solve_conflicts_conflict_zone() {
     assert!(blocked.intention.intermediate_cells.is_empty());
 }
 
+// Two independent contested targets retain their respective priority winners and stop the
+// other participants.
 #[test]
 fn test_solve_conflicts_multiple_conflicts() {
     let vehicle1 = create_test_vehicle(1, 2, LaneChangeType::ChangeLeft, 5);
@@ -335,13 +348,14 @@ fn test_solve_conflicts_multiple_conflicts() {
     );
 }
 
-/// Sweep-through guard (one-occupant-per-cell): a NORMAL multi-cell priority winner must
-/// NOT drive through a cell already reserved by a desperate winner this tick. Vehicle 1
-/// (desperate) reserves cell 20; vehicle 3 is the normal priority winner of a separate
-/// conflict, but its 2-cell move (-> 11 -> 20) would sweep into the reserved cell 20. It
-/// must be clamped to a single step (stop at 11) instead of sweeping through.
+// A desperate winner reserves cell 20 first. The normal winner's two-cell path is
+// shortened to cell 11 before that reservation.
 #[test]
 fn test_normal_multicell_winner_does_not_sweep_claimed_cell() {
+    // desperate grant:              20
+    // normal requested prefix: 11 -> 20
+    // normal granted prefix:   11
+    // The input lists the normal conflict first.
     let log = LocalLogger::none();
     let mut vehicles = VehiclesStorage::new();
 
