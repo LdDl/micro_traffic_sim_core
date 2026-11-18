@@ -1,4 +1,4 @@
-use super::*;
+use crate::conflicts::*;
 use crate::agents::{TailIntentionManeuver, Vehicle, VehicleIntention};
 use crate::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone};
 use crate::grid::cell::Cell;

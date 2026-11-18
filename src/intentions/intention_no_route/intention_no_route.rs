@@ -78,34 +78,11 @@ pub fn process_no_route_found<'a>(
         vec![current_cell, destination_cell],
         // Maneuvers is a slice of maneuvers between cells, so it's len = len(Vertices) - 1
         vec![maneuver],
-        edge_time(current_cell, destination_cell), // travel-time cost for the single step
+        // travel-time cost for the single step
+        edge_time(current_cell, destination_cell),
     ))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::grid::cell::Cell;
-    use crate::grid::road_network::GridRoads;
-
-    #[test]
-    fn test_process_no_route_found_deadend() {
-        // Create a cell with no exits
-        let cell = Cell::new(1)
-            .with_forward_node(-1)
-            .with_right_node(-1)
-            .with_left_node(-1)
-            .build();
-        let mut net = GridRoads::new();
-        net.add_cell(cell.clone());
-
-        // Should return DeadEndReached error
-        let result = process_no_route_found(&cell, &net);
-        match result {
-            Err(NoRouteError::DeadEndReached { cell_id }) => {
-                assert_eq!(cell_id, cell.get_id());
-            }
-            other => panic!("Expected DeadEndReached error, got {:?}", other),
-        }
-    }
-}
+#[path = "tests.rs"]
+mod tests;

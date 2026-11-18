@@ -1,60 +1,64 @@
-//! Optional sessions management for server-side scenarios.
-//!
-//! This module provides a lightweight, in-memory storage for multiple
-//! simulation [`session::Session`](crate::simulation::session::Session) objects keyed by `Uuid`.
-//! Each session has a time-to-live (TTL) that is extended on access; expired
-//! sessions are dropped. No background threads are used; purging is performed
-//! on demand and throttled by a configurable interval.
-//!
-//! Key features:
-//! - Manage many sessions by ID, no cloning (mutate in place via closures)
-//! - Time-based expiration with on-access extension
-//! - Manual purge with throttling
-//! - Structured logging via the crate’s `verbose` API
-//!
-//! Basic usage:
-//! ```rust
-//! use micro_traffic_sim_core::simulation::sessions_storage::SessionsStorage;
-//! use micro_traffic_sim_core::simulation::session::Session;
-//! use micro_traffic_sim_core::verbose::VerboseLevel;
-//! use uuid::Uuid;
-//! use std::time::Duration;
-//!
-//! let mut store = SessionsStorage::new()
-//!     .with_session_exp_time(Duration::from_secs(300))  // default TTL per session
-//!     .with_purge_every(Duration::from_secs(30))        // purge throttle
-//!     .with_storage_verbose(VerboseLevel::Main);        // log create/expire events
-//!
-//! let session = Session::default(None);
-//! let sid = session.get_id();
-//! let created = store.register_session(sid, session, None);
-//! assert!(created);
-//!
-//! // Access extends expiration and lets you mutate the session in place
-//! let ok = store.with_session_mut(&sid, |sess| {
-//!     // e.g., run one step
-//!     let _ = sess.get_steps();
-//! }).is_some();
-//! assert!(ok);
-//!
-//! // Manual purge (optional). A throttled purge also happens on access.
-//! store.purge_expired();
-//! ```
-//!
-//! Thread-safety: wrap the storage in `Arc<Mutex<...>>` (or `RwLock`) when sharing it
-//! across threads in a server; this type itself is not `Send`/`Sync`.
-//!
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::verbose::{VerboseLevel, LocalLogger, EVENT_SESSION_CREATE, EVENT_SESSION_EXPIRED};
-use super::session::Session;
+use crate::simulation::session::Session;
 
-const DEFAULT_EXP_SECS: u64 = 300; // 5 minutes
+// 5 minutes
+const DEFAULT_EXP_SECS: u64 = 300;
 
 /// In-memory storage for multiple [`Session`]s with TTL-based expiration and
 /// on-access extension. Intended for optional server-side use.
+/// Optional sessions management for server-side scenarios.
+///
+/// This module provides a lightweight, in-memory storage for multiple
+/// simulation [`session::Session`](crate::simulation::session::Session) objects keyed by `Uuid`.
+/// Each session has a time-to-live (TTL) that is extended on access; expired
+/// sessions are dropped. No background threads are used; purging is performed
+/// on demand and throttled by a configurable interval.
+///
+/// Key features:
+/// - Manage many sessions by ID, no cloning (mutate in place via closures)
+/// - Time-based expiration with on-access extension
+/// - Manual purge with throttling
+/// - Structured logging via the crate's `verbose` API
+///
+/// Basic usage:
+/// ```rust
+/// use micro_traffic_sim_core::simulation::sessions_storage::SessionsStorage;
+/// use micro_traffic_sim_core::simulation::session::Session;
+/// use micro_traffic_sim_core::verbose::VerboseLevel;
+/// use uuid::Uuid;
+/// use std::time::Duration;
+///
+/// let mut store = SessionsStorage::new()
+///     // default TTL per session
+///     .with_session_exp_time(Duration::from_secs(300))
+///     // purge throttle
+///     .with_purge_every(Duration::from_secs(30))
+///     // log create/expire events
+///     .with_storage_verbose(VerboseLevel::Main);
+///
+/// let session = Session::default(None);
+/// let sid = session.get_id();
+/// let created = store.register_session(sid, session, None);
+/// assert!(created);
+///
+/// // Access extends expiration and lets you mutate the session in place
+/// let ok = store.with_session_mut(&sid, |sess| {
+///     // e.g., run one step
+///     let _ = sess.get_steps();
+/// }).is_some();
+/// assert!(ok);
+///
+/// // Manual purge (optional). A throttled purge also happens on access.
+/// store.purge_expired();
+/// ```
+///
+/// Thread-safety: wrap the storage in `Arc<Mutex<...>>` (or `RwLock`) when sharing it
+/// across threads in a server; this type itself is not `Send`/`Sync`.
+///
 pub struct SessionsStorage {
     store: HashMap<Uuid, Session>,
     default_exp_duration: Duration,
@@ -86,7 +90,7 @@ impl SessionsStorage {
         self
     }
 
-    /// Sets the storage’s own logger level (not per-session). Used to emit
+    /// Sets the storage's own logger level (not per-session). Used to emit
     /// `session_create` and `session_expired` events through the verbose API.
     pub fn with_storage_verbose(mut self, v: VerboseLevel) -> Self {
         self.logger.set_level(v);
@@ -102,7 +106,7 @@ impl SessionsStorage {
     }
 
     /// Returns the number of sessions currently stored. Note that this may
-    /// include items that will expire on next access if purge hasn’t run yet.
+    /// include items that will expire on next access if purge hasn't run yet.
     pub fn sessions_num(&self) -> usize {
         self.store.len()
     }
@@ -152,8 +156,8 @@ impl SessionsStorage {
     }
 
     /// Retrieves a mutable handle to a live session and applies the provided
-    /// closure to it. Extends the session’s expiration by the time elapsed
-    /// since the last update. Returns `None` if the session doesn’t exist or
+    /// closure to it. Extends the session's expiration by the time elapsed
+    /// since the last update. Returns `None` if the session doesn't exist or
     /// has expired.
     ///
     /// Also performs a throttled purge on access.
@@ -226,58 +230,5 @@ fn now_ns() -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::thread::sleep;
-
-    #[test]
-    fn test_storage_timers() {
-        // Create storage with default expiration 2s and purge cadence 5s
-        let mut storage = SessionsStorage::new()
-            .with_session_exp_time(Duration::from_secs(2))
-            .with_purge_every(Duration::from_secs(5))
-            .with_storage_verbose(VerboseLevel::None);
-
-        // New session with custom expiration of 4s (overrides default 2s)
-        let session = crate::simulation::session::Session::default(None);
-        let object_id = session.get_id();
-        let registered = storage.register_session(object_id, session, Some(Duration::from_secs(4)));
-        assert!(registered, "session should be registered");
-
-        // After ~3s the session should still exist
-        sleep(Duration::from_secs(3));
-        let exists = storage.with_session_mut(&object_id, |_s| {}).is_some();
-        assert!(exists, "session should exist after first sleep (~3s)");
-
-        // Another ~3s; access should extend the expiration based on time since last update
-        sleep(Duration::from_secs(3));
-        let exists = storage.with_session_mut(&object_id, |_s| {}).is_some();
-        assert!(exists, "session should still exist after second sleep (~6s total) due to extension");
-
-        // Sleep long enough to surpass the extended expiration and confirm it is gone
-        sleep(Duration::from_secs(4));
-        let exists = storage.with_session_mut(&object_id, |_s| {}).is_some();
-        assert!(!exists, "session should be expired after final sleep");
-    }
-
-    #[test]
-    fn test_remove_session() {
-        let mut storage = SessionsStorage::new();
-        let session = crate::simulation::session::Session::default(None);
-        let id = session.get_id();
-        assert!(storage.register_session(id, session, None));
-        assert_eq!(storage.sessions_num(), 1);
-
-        // Explicit removal hands back the owned session and drops it from the store.
-        let removed = storage.remove_session(&id);
-        assert!(removed.is_some(), "remove should return the session");
-        assert_eq!(removed.unwrap().get_id(), id);
-        assert_eq!(storage.sessions_num(), 0);
-
-        // Removing again is a no-op.
-        assert!(storage.remove_session(&id).is_none());
-
-        // After removal the session is no longer accessible.
-        assert!(storage.with_session_mut(&id, |_s| {}).is_none());
-    }
-}
+#[path = "tests.rs"]
+mod tests;

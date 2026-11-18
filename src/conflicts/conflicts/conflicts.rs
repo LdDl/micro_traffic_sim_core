@@ -1,7 +1,9 @@
-use super::merge_arbitration::{self, MergeDecision, intention_traverses_edge};
+use crate::conflicts::merge_arbitration::{self, MergeDecision, intention_traverses_edge};
 use crate::agents::{VehicleID, Vehicle};
 use crate::conflict_zones::{ConflictWinnerType, ConflictZone, ConflictZoneID};
-use crate::conflicts::{resolve_simple_rules, aggressor_advantage, CrossingZoneIndex};
+use crate::conflicts::conflict_rule::{resolve_simple_rules, aggressor_advantage};
+use crate::conflicts::conflict_zone_index::CrossingZoneIndex;
+use crate::conflicts::conflict_types::{CellConflict, ConflictError, ConflictType, TrajectoryConflictInfo};
 use crate::grid::cell::{Cell, CellID};
 use crate::grid::road_network::GridRoads;
 use crate::maneuver::LaneChangeType;
@@ -11,158 +13,7 @@ use crate::verbose::LocalLogger;
 
 use std::collections::{HashMap, HashSet};
 use indexmap::IndexMap;
-use std::{fmt, vec};
-
-/// Describes the type of conflict detected between vehicles trying to move to the same cell or whose paths intersect.
-///
-/// Used to classify and resolve different traffic situations, such as merges, lane changes, tail blocking, and conflict zones.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConflictType {
-    /// Just undefined conflict
-    Undefined,
-    /// One vehicle is going to move forward, another vehicle is going to change lane.
-    ForwardLaneChange,
-    /// One vehicle is going to change lane, another vehicle is simply stopped and can't move.
-    BlockLaneChange,
-    /// Both vehicles are going to move forward to the same cell without lane change.
-    /// E.g. two roads are merging into one.
-    MergeForward,
-    /// Both vehicles are going to change lane to the same cell.
-    /// It happens when three or more lane road becomes narrow in some point and merges in single lane.
-    MergeLaneChange,
-    /// Both vehicles are going to change lane to the same cell in conflict zone.
-    MergeForwardConflictZone,
-    /// Every contender must yield under the applicable merge-zone priorities.
-    /// Its nominated source-cycle candidate may proceed after its own cycle delay.
-    MutualYield,
-    /// Both vehicles are going to change lane but theirs trajectories are going to intersect.
-    CrossLaneChange,
-    /// Both vehicles are going to change lane but theirs trajectories are going to intersect in conflict zone.
-    CrossConflictZone,
-    /// This type of the conflict could be caused by any other coflict.
-    /// Any vehicle should wait until there is no other vehicle's tails ahead.
-    Tail,
-    /// This type of the conflict occurs when vehicle moving with speed > 1
-    /// and both tail and transit intentions happen
-    SelfTail,
-    /// Physical crossing with a vehicle body, through lane changes or declared zone edges.
-    /// The body owner has precedence regardless of patience or behavioral priority.
-    TailCrossLaneChange,
-}
-
-impl fmt::Display for ConflictType {
-    /// Formats the conflict type for display.
-    /// 
-    /// Returns a short, lowercase string representation suitable for
-    /// logging, debugging, and user interfaces.
-    /// 
-    /// # Examples
-    /// 
-    /// ```rust
-    /// use micro_traffic_sim_core::conflicts::ConflictType;
-    ///
-    /// assert_eq!(format!("{}", ConflictType::Undefined), "undefined");
-    /// assert_eq!(format!("{}", ConflictType::ForwardLaneChange), "forward+lane_change");
-    /// assert_eq!(format!("{}", ConflictType::BlockLaneChange), "block+lane_change");
-    /// assert_eq!(format!("{}", ConflictType::MergeForward), "merge+forward");
-    /// assert_eq!(format!("{}", ConflictType::MergeLaneChange), "merge+lane_change");
-    /// assert_eq!(format!("{}", ConflictType::MergeForwardConflictZone), "merge+forward+conflict_zone");
-    /// assert_eq!(format!("{}", ConflictType::CrossLaneChange), "cross+lane_change");
-    /// assert_eq!(format!("{}", ConflictType::CrossConflictZone), "cross+conflict_zone");
-    /// assert_eq!(format!("{}", ConflictType::Tail), "tail");
-    /// assert_eq!(format!("{}", ConflictType::SelfTail), "self_tail");
-    /// assert_eq!(format!("{}", ConflictType::TailCrossLaneChange), "tail+cross+lane_change");
-    /// ```
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let as_str = match self {
-            ConflictType::Undefined => "undefined",
-            ConflictType::ForwardLaneChange => "forward+lane_change",
-            ConflictType::BlockLaneChange => "block+lane_change",
-            ConflictType::MergeForward => "merge+forward",
-            ConflictType::MergeLaneChange => "merge+lane_change",
-            ConflictType::MergeForwardConflictZone => "merge+forward+conflict_zone",
-            ConflictType::MutualYield => "mutual_yield",
-            ConflictType::CrossLaneChange => "cross+lane_change",
-            ConflictType::CrossConflictZone => "cross+conflict_zone",
-            ConflictType::Tail => "tail",
-            ConflictType::SelfTail => "self_tail",
-            ConflictType::TailCrossLaneChange => "tail+cross+lane_change",
-        };
-        write!(f, "{}", as_str)
-    }
-}
-
-/// Represents a conflict between vehicles for a specific cell or trajectory.
-///
-/// Contains the cell where the conflict occurs, the involved vehicles, which vehicle has priority, and the conflict type.
-/// Used for further resolution and movement decision.
-#[derive(Debug)]
-pub struct CellConflict {
-    /// Cell ID where the conflict occurs
-    pub cell_id: CellID,
-    /// Agents that are involved in the conflict
-    pub participants: Vec<VehicleID>,
-    /// Priority participant, or the nominated cycle-break candidate for MutualYield.
-    /// A cycle candidate must complete its own delay before receiving a grant.
-    pub priority_participant_index: usize,
-    /// Type of the conflict
-    pub conflict_type: ConflictType,
-}
-
-impl fmt::Display for CellConflict {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let participants: Vec<String> =
-            self.participants.iter().map(|p| p.to_string()).collect();
-        let priority_participant_id = self.participants.get(self.priority_participant_index)
-            .map_or("None".to_string(), |p| p.to_string());
-        let priority_label = if self.conflict_type == ConflictType::MutualYield {
-            "Cycle candidate"
-        } else {
-            "Priority participant"
-        };
-        let cell_id = self.cell_id.to_string();
-        write!(
-            f,
-            "CellConflict{{CellID: {}, Type: {}, Participants: ({:?}), {}: {}}}",
-            cell_id, self.conflict_type, participants, priority_label, priority_participant_id
-        )
-    }
-}
-
-/// Errors that can occur during conflict detection or resolution.
-///
-/// - `CellNotFound`: A referenced cell does not exist in the grid network.
-/// - `InvalidVehicle`: A vehicle reference is invalid or inconsistent (e.g., missing tail).
-#[derive(Debug, Clone)]
-pub enum ConflictError {
-    /// The specified cell does not exist in the grid.
-    CellNotFound(CellID),
-    /// The vehicle reference is invalid or inconsistent.
-    InvalidVehicle(String),
-}
-
-impl std::fmt::Display for ConflictError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::CellNotFound(cell_id) => write!(f, "Cell {} not found in network", cell_id),
-            Self::InvalidVehicle(msg) => write!(f, "Invalid vehicle: {}", msg),
-        }
-    }
-}
-
-/// Represents information about a detected trajectory conflict between two vehicles.
-///
-/// Used to avoid borrow checker issues when reporting crossing or tail conflicts.#[derive(Debug)]
-pub struct TrajectoryConflictInfo {
-    /// ID of the vehicle initiating the conflict
-    pub vehicle_id: u64,
-    /// ID of the vehicle on the side
-    pub side_vehicle_id: u64,
-    /// Type of the conflict detected
-    pub conflict_type: ConflictType,
-    /// ID of the vehicle that has priority in the conflict
-    pub priority_vehicle_id: u64,
-}
+use std::vec;
 
 /// Scans for crossing trajectory conflicts between a vehicle's intention and others.
 ///
@@ -297,14 +148,17 @@ impl CellConflict {
         // Participants are ordered by priority and priority_index is always 0
         // So we need to put the priority vehicle FIRST in the participants array
         let participants = if info.priority_vehicle_id == vehicle_id {
-            vec![vehicle_id, side_vehicle_id]      // Current vehicle has priority, put it first
+            // Current vehicle has priority, put it first
+            vec![vehicle_id, side_vehicle_id]
         } else {
-            vec![side_vehicle_id, vehicle_id]      // Side vehicle has priority, put it first (MATCHING GO!)
+            // Side vehicle has priority, put it first (MATCHING GO!)
+            vec![side_vehicle_id, vehicle_id]
         };
         // Priority participant is always at index 0
         let priority_index = 0;
         CellConflict {
-            cell_id: -1, // No specific cell for trajectory conflicts
+            // No specific cell for trajectory conflicts
+            cell_id: -1,
             participants,
             priority_participant_index: priority_index,
             conflict_type: info.conflict_type,
@@ -352,7 +206,8 @@ pub fn find_zone_conflict_for_two_intentions(
         }
         return Some(second_edge.source);
     }
-    None // No conflict detected
+    // No conflict detected
+    None
 }
 
 
@@ -389,12 +244,14 @@ pub fn find_conflicts_in_conflict_zones(
     // Check if intention cell is part of any conflict zones
     let cell_b_conflict_zone_id = match cells_conflicts_zones.get(&cell_b) {
         Some(zone_id) => *zone_id,
-        None => return Ok(None), // Not part of any conflict zone
+        // Not part of any conflict zone
+        None => return Ok(None),
     };
 
     // Check if this conflict zone has already been explored
     if explored_conflict_zones.contains(&cell_b_conflict_zone_id) {
-        return Ok(None); // Zone already processed
+        // Zone already processed
+        return Ok(None);
     }
 
     // Get the conflict zone
@@ -412,7 +269,8 @@ pub fn find_conflicts_in_conflict_zones(
     } else if first_edge.target != cell_b && second_edge.target == cell_b {
         (first_edge.target, first_edge.source)
     } else {
-        return Ok(None); // No valid conflict zone configuration
+        // No valid conflict zone configuration
+        return Ok(None);
     };
 
     let first_vehicle = vehicles.get(&vehicle_id).ok_or(
@@ -429,7 +287,8 @@ pub fn find_conflicts_in_conflict_zones(
     // Get intentions for cell A
     let cell_a_intentions = match collected_intentions.get(&cell_a) {
         Some(intentions) => intentions,
-        None => return Ok(None), // No other intentions in conflict zone
+        // No other intentions in conflict zone
+        None => return Ok(None),
     };
 
     // Find a vehicle traversing the other edge during this tick.
@@ -448,14 +307,16 @@ pub fn find_conflicts_in_conflict_zones(
 
     let second_cell_intention = match second_cell_intention {
         Some(intention) => intention,
-        None => return Ok(None), // No conflicts
+        // No conflicts
+        None => return Ok(None),
     };
 
     let second_vehicle = vehicles.get(&second_cell_intention.get_vehicle_id()).ok_or(
         ConflictError::InvalidVehicle(format!("Vehicle {} not found", second_cell_intention.get_vehicle_id()))
     )?;
     if second_vehicle.is_conflict_participant {
-        return Ok(None); // Vehicle already in another conflict
+        // Vehicle already in another conflict
+        return Ok(None);
     }
 
     // Determine priority and create participants
@@ -508,7 +369,8 @@ pub fn find_conflicts_in_conflict_zones(
     };
 
     let conflict = CellConflict {
-        cell_id: -1, // Conflict zones don't have specific target cells
+        // Conflict zones don't have specific target cells
+        cell_id: -1,
         participants,
         priority_participant_index: priority_index,
         conflict_type: if cell_intention.int_type == IntentionType::Tail
@@ -773,6 +635,19 @@ fn collect_cross_zone_constraints(
 /// Collects all conflicts from the current set of vehicle intentions for this simulation step.
 ///
 /// Iterates over all intentions, detects conflicts (including merges, crossings, and tails), and returns a list of CellConflict records for resolution.
+///
+/// # Simulation integration
+///
+/// ```rust
+/// use micro_traffic_sim_core::simulation::session::Session;
+/// 
+/// let mut session = Session::default(None);
+/// // ... set up grid, trips, vehicles ...
+/// 
+/// // This internally calls conflicts::collect_conflicts
+/// // and conflicts_solver::solve_conflicts sequentially.
+/// let result = session.step();
+/// ```
 pub fn collect_conflicts(
     collected_intentions: &Intentions,
     net: &GridRoads,
@@ -1025,3 +900,7 @@ fn collect_conflicts_for_zones(
     }
     Ok(conflicts_data)
 }
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;

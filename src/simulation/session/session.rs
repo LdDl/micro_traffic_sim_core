@@ -127,6 +127,63 @@ impl From<MovementError> for SessionError {
 }
 
 /// Session - representation of session for Cellular Automata with Traffic lights control management
+///
+/// # Example
+///
+/// ```rust
+/// use micro_traffic_sim_core::grid::road_network::GridRoads;
+/// use micro_traffic_sim_core::agents::Vehicle;
+/// use micro_traffic_sim_core::trips::trip::Trip;
+/// use micro_traffic_sim_core::traffic_lights::lights::{TrafficLight, TrafficLightID};
+/// use micro_traffic_sim_core::simulation::session::Session;
+/// use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
+/// use micro_traffic_sim_core::verbose::VerboseLevel;
+/// use std::collections::HashMap;
+///
+/// let mut grid = GridRoads::new();
+/// // Populate grid with cells
+/// // ...
+/// let vehicles: Vec<Vehicle> = vec![/* ... vehicles ... */];
+/// // Prepare vehicles or use generator
+/// // ...
+/// let trips: Vec<Trip> = vec![/* ... trips ... */];
+/// // Prepare trips
+/// // ...
+/// let tls: HashMap<TrafficLightID, TrafficLight> = HashMap::new();
+/// // Prepare traffic lights
+/// // ...
+/// let grids_storage = GridsStorage::new()
+///     .with_vehicles_net(grid)
+///     .with_tls(tls)
+///     .build();
+/// let mut session = Session::new(grids_storage, None);
+/// session.set_verbose_level(VerboseLevel::Main);
+/// session.add_vehicles(vehicles);
+/// for trip in trips.iter() {
+///     session.add_trip(trip.clone());
+/// }
+/// let steps = 10;
+/// for step in 0..steps {
+///     match session.step() {
+///          Ok(automata_state) => {
+///             for v in automata_state.vehicles {
+///                 println!(
+///                     "{};{};{};{};{:.5};{}",
+///                     step,
+///                     v.id,
+///                     v.vehicle_type,
+///                     v.last_speed,
+///                     v.last_angle,
+///                     v.last_cell,
+///                 );
+///             }
+///          }
+///          Err(e) => {
+///            eprintln!("Error during simulation step {}: {:?}", step, e);
+///          }
+///     };
+/// }
+/// ```
 pub struct Session {
     /// Local longitudinal reserve policy for all vehicles in this session.
     longitudinal_clearance: LongitudinalClearance,
@@ -619,7 +676,8 @@ impl Session {
             .with_destination(target_node)
             .with_trip_destination(final_destination)
             .with_trip(trip_id)
-            .with_tail_size(trip.vehicle_tail_size, vec![]) // Empty tail cells initially
+            // Empty tail cells initially
+            .with_tail_size(trip.vehicle_tail_size, vec![])
             .with_transit_cells(trip.transit_cells.clone())
             .with_relax_time(trip.relax_time)
             .build()
@@ -815,7 +873,8 @@ impl Session {
 
             let vehicle_id = generated_vehicle.id;
             self.vehicles.insert(vehicle_id, generated_vehicle);
-            self.last_vehicle_id = vehicle_id + 1; // Increment for next vehicle
+            // Increment for next vehicle
+            self.last_vehicle_id = vehicle_id + 1;
         }
     }
 
