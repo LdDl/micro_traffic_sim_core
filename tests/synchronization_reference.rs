@@ -21,10 +21,10 @@ fn kkw_noise_order_matches_straight_road_reference() {
         );
     }
     let logger = LocalLogger::none();
-    for speed in 0_i32..=8 {
-        for gap in 0_i32..=15 {
-            for leader in 0_i32..=8 {
-                for k in [1.5_f64, 2.55] {
+    for speed in 0..=8 {
+        for gap in 0..=15 {
+            for leader in 0..=8 {
+                for k in [1.5, 2.55] {
                     for noise in [-1, 0, 1] {
                         let pb = if noise == -1 { 1.0 } else { 0.0 };
                         let pa = if noise == 1 { 1.0 } else { 0.0 };

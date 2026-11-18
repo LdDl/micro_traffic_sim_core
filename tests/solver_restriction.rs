@@ -127,13 +127,15 @@ fn restriction_sequences_preserve_paths_speed_and_materialized_bodies() {
         LaneChangeType::ChangeLeft,
         LaneChangeType::ChangeRight,
     ];
+    let max_path_length: usize = 6;
+    let operation_word_count: usize = 216;
     let mut sequences = 0;
     for maneuver in maneuvers {
-        for length in 0..=6usize {
+        for length in 0..=max_path_length {
             if maneuver != LaneChangeType::NoChange && length > 1 {
                 continue;
             }
-            for tail_size in 0..=3usize {
+            for tail_size in 0..=3 {
                 let tail: Vec<i64> = (20..20 + tail_size as i64).collect();
                 let make_vehicle = || {
                     let mut original = Vehicle::new(1)
@@ -155,7 +157,7 @@ fn restriction_sequences_preserve_paths_speed_and_materialized_bodies() {
                     });
                     original
                 };
-                for word in 0..216usize {
+                for word in 0..operation_word_count {
                     let mut v = make_vehicle();
                     let mut operations = word;
                     for _ in 0..3 {

@@ -171,7 +171,7 @@ impl LandmarkTable {
         while landmarks.len() < k && landmarks.len() < cell_ids.len() {
             // Next landmark = cell maximizing its minimum distance from chosen landmarks.
             let mut best: Option<CellID> = None;
-            let mut best_score = -1.0_f64;
+            let mut best_score = -1.0;
             for &v in &cell_ids {
                 if landmarks.contains(&v) {
                     continue;

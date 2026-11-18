@@ -375,6 +375,7 @@ fn overlapping_constraints_only_shorten_initial_paths() {
     use micro_traffic_sim_core::maneuver::LaneChangeType;
     use micro_traffic_sim_core::verbose::LocalLogger;
     use std::collections::{BTreeMap, HashMap};
+    let speed_levels: usize = 3;
     let mut cases = 0;
     for shift in 0..4 {
         for reversed in [false, true] {
@@ -410,7 +411,7 @@ fn overlapping_constraints_only_shorten_initial_paths() {
                             order.reverse();
                         }
                         for id in order {
-                            let length = 1 + speeds / 3_usize.pow((id - 1) as u32) % 3;
+                            let length = 1 + speeds / speed_levels.pow((id - 1) as u32) % 3;
                             let base = if id <= 2 { 100 } else { 200 };
                             let path: Vec<_> = (base..base + length as i64).collect();
                             let mut v = Vehicle::new(id)

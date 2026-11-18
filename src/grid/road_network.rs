@@ -108,7 +108,7 @@ impl GridRoads {
         // Snapshot neighbour points first (immutable), then write costs back.
         let points: HashMap<CellID, PointType> =
             self.cells.iter().map(|(id, c)| (*id, *c.get_point())).collect();
-        let mut max_speed = 1.0_f64;
+        let mut max_speed = 1.0;
         for cell in self.cells.values_mut() {
             let here = *cell.get_point();
             let speed = (cell.get_speed_limit() as f64).max(1.0);

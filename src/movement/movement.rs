@@ -153,8 +153,8 @@ pub fn movement(
 
     // Collect vehicles to remove (to avoid borrowing issues during iteration)
     let mut vehicles_to_remove = Vec::new();
-    let mut vehicles_completed = 0i32;
-    let mut vehicles_lost = 0i32;
+    let mut vehicles_completed = 0;
+    let mut vehicles_lost = 0;
 
     for (vehicle_id, vehicle) in vehicles.iter_mut() {
         
@@ -407,7 +407,7 @@ mod tests {
     fn test_dwelling_tailed_vehicle_tail_does_not_advance() {
         // Linear road 1 -> 2 -> 3 -> 4.
         let mut net = GridRoads::new();
-        for (id, fwd, x) in [(1i64, 2i64, 0.0), (2, 3, 1.0), (3, 4, 2.0), (4, -1, 3.0)] {
+        for (id, fwd, x) in [(1, 2, 0.0), (2, 3, 1.0), (3, 4, 2.0), (4, -1, 3.0)] {
             net.add_cell(
                 Cell::new(id)
                     .with_point(new_point(x, 0.0, None))

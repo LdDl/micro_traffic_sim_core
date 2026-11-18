@@ -695,7 +695,7 @@ impl Session {
 
             // Collect the trips that want to spawn this tick, with their selection weight.
             let mut candidates: Vec<(TripID, f64)> = Vec::new();
-            let mut total_weight = 0.0f64;
+            let mut total_weight = 0.0;
             for &tid in &trip_ids {
                 // Read the Copy fields and drop the trips_data borrow before touching spawn_rng.
                 let (in_bounds, ttype, ttime, prob) = match self.trips_data.get(&tid) {
@@ -1021,7 +1021,7 @@ impl Session {
             for (id, cell) in net.iter() {
                 let free_flow = (cell.get_speed_limit() as f64).max(1.0);
                 let mut sum = 0.0;
-                let mut cnt = 0u32;
+                let mut cnt: u32 = 0;
                 let mut c = *id;
                 for _ in 0..=window {
                     if let Some(&sp) = occ.get(&c) {

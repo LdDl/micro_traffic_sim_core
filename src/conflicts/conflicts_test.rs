@@ -126,7 +126,7 @@ mod tests {
     let intention_cell = Cell::new(2).build();
     let mut vehicles = VehiclesStorage::new();
         vehicles.insert(vehicle1.id, vehicle1);
-        let v2_id = 2u64;
+        let v2_id = 2;
         vehicles.insert(v2_id, vehicle2);
 
         let result = find_cross_trajectories_conflict_naive(
@@ -538,7 +538,7 @@ mod tests {
         vehicles.insert(3, build(3, 12));
 
         // Every fold order of the intention list must yield the same winner: vehicle 1 (lowest id).
-        for order in [[1u64, 2, 3], [3, 2, 1], [2, 3, 1], [3, 1, 2]] {
+        for order in [[1, 2, 3], [3, 2, 1], [2, 3, 1], [3, 1, 2]] {
             let intentions: Vec<CellIntention> = order
                 .iter()
                 .map(|&id| CellIntention::new(id, IntentionType::Target))

@@ -201,7 +201,7 @@ mod tests {
             CellConflict { cell_id: 30, participants: vec![3, 4], priority_participant_index: 0, conflict_type: ConflictType::MergeForward },
         ];
         solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
-        let movers: Vec<u64> = [1u64, 2, 3, 4].into_iter().filter(|&id| speed(&vehicles, id) > 0).collect();
+        let movers: Vec<u64> = [1, 2, 3, 4].into_iter().filter(|&id| speed(&vehicles, id) > 0).collect();
         assert_eq!(movers, vec![1], "exactly one vehicle (the first desperate winner) enters cell 30; the second desperate vehicle is deduped");
     }
 
@@ -308,7 +308,7 @@ mod tests {
             CellConflict { cell_id: 30, participants: vec![1, 2], priority_participant_index: 0, conflict_type: ConflictType::MergeForward },
         ];
         solve_conflicts(conflicts, &mut vehicles, &log).unwrap();
-        let movers: Vec<u64> = [1u64, 2, 3, 4].into_iter().filter(|&id| speed(&vehicles, id) > 0).collect();
+        let movers: Vec<u64> = [1, 2, 3, 4].into_iter().filter(|&id| speed(&vehicles, id) > 0).collect();
         assert_eq!(movers, vec![1], "only the desperate vehicle enters cell 30; the normal winner of the other conflict is blocked");
     }
 
