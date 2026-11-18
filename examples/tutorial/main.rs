@@ -1,17 +1,17 @@
-use micro_traffic_sim_core::geom::{Point, new_point};
-use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads, zones::ZoneType};
-use micro_traffic_sim_core::conflict_zones::{ConflictWinnerType, ConflictEdge, ConflictZone};
-use micro_traffic_sim_core::traffic_lights::lights::TrafficLight;
-use micro_traffic_sim_core::traffic_lights::groups::TrafficLightGroup;
-use micro_traffic_sim_core::traffic_lights::signals::SignalType;
 use micro_traffic_sim_core::agents::Vehicle;
 use micro_traffic_sim_core::agents_types::AgentType;
 use micro_traffic_sim_core::behaviour::BehaviourType;
-use micro_traffic_sim_core::trips::trip::{Trip, TripType};
-use micro_traffic_sim_core::simulation::session::Session;
+use micro_traffic_sim_core::conflict_zones::{ConflictEdge, ConflictWinnerType, ConflictZone};
+use micro_traffic_sim_core::geom::{Point, new_point};
+use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads, zones::ZoneType};
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
-use micro_traffic_sim_core::verbose::init_logger;
+use micro_traffic_sim_core::simulation::session::Session;
+use micro_traffic_sim_core::traffic_lights::groups::TrafficLightGroup;
+use micro_traffic_sim_core::traffic_lights::lights::TrafficLight;
+use micro_traffic_sim_core::traffic_lights::signals::SignalType;
+use micro_traffic_sim_core::trips::trip::{Trip, TripType};
 use micro_traffic_sim_core::verbose::VerboseLevel;
+use micro_traffic_sim_core::verbose::init_logger;
 use std::collections::HashMap;
 
 fn main() {
@@ -25,7 +25,7 @@ fn main() {
     //          |                 |
     //    H ----+-----------------+---- H (horizontal)
     //          |                 |
-    //          
+    //
     // Horizontal road cells: 0-9 (y=3.5, x=0..9)
     // Vertical road 1 cells: 10-19 (y=0..4, x=3.0)
     // Vertical road 2 cells: 20-29 (y=0..4, x=7.0)
@@ -119,19 +119,19 @@ fn main() {
     // ==============================================================
     let mut conflict_zones = vec![];
     let conflict_zone = ConflictZone::new(
-            1,
-            ConflictEdge {
-                source: 3,
-                target: 4,
-            },
-            ConflictEdge {
-                source: 13,
-                target: 14,
-            },
-        )
-        // V1 has priority over H
-        .with_winner_type(ConflictWinnerType::Second)
-        .build();
+        1,
+        ConflictEdge {
+            source: 3,
+            target: 4,
+        },
+        ConflictEdge {
+            source: 13,
+            target: 14,
+        },
+    )
+    // V1 has priority over H
+    .with_winner_type(ConflictWinnerType::Second)
+    .build();
     conflict_zones.push(conflict_zone);
 
     // ==============================================================
@@ -155,7 +155,7 @@ fn main() {
         .with_groups(vec![group_h, group_v2])
         .build();
     tls.insert(tl.get_id(), tl);
-    
+
     // ==============================================================
     // STEP 4: Add vehicles statically (via initial positions)
     // ==============================================================
@@ -204,7 +204,7 @@ fn main() {
     for cz in conflict_zones {
         session.add_conflict_zone(cz);
     }
-    
+
     // ==============================================================
     // STEP 7: Run simulation
     // and STEP 8: Collect data
@@ -244,7 +244,8 @@ fn main() {
                         (f64::NAN, f64::NAN)
                     };
                     // Join intermediate cells as comma-separated string
-                    let intermediate_cells = v.last_intermediate_cells
+                    let intermediate_cells = v
+                        .last_intermediate_cells
                         .iter()
                         .map(|cell| cell.to_string())
                         .collect::<Vec<_>>()
@@ -278,8 +279,30 @@ fn main() {
         }
     }
     println!("step;vehicle_id;vehicle_type;last_speed;last_angle;intermediate_cells;last_cell;x;y");
-    for (step, vehicle_id, vehicle_type, last_speed, last_angle, intermediate_cells, last_cell, x, y) in vehicles_states {
-        println!("{};{};{};{:.5};{:.5};{};{};{:.5};{:.5}", step, vehicle_id, vehicle_type, last_speed, last_angle, intermediate_cells, last_cell, x, y);
+    for (
+        step,
+        vehicle_id,
+        vehicle_type,
+        last_speed,
+        last_angle,
+        intermediate_cells,
+        last_cell,
+        x,
+        y,
+    ) in vehicles_states
+    {
+        println!(
+            "{};{};{};{:.5};{:.5};{};{};{:.5};{:.5}",
+            step,
+            vehicle_id,
+            vehicle_type,
+            last_speed,
+            last_angle,
+            intermediate_cells,
+            last_cell,
+            x,
+            y
+        );
     }
     println!("tl_step;tl_id;group_id;cell_id;x;y;signal");
     let tls_ref = session.get_tls_ref();
@@ -288,13 +311,22 @@ fn main() {
         // Find group
         for groups in tl_ref.get_groups() {
             if groups.get_id() != group_id {
-               continue;
+                continue;
             }
             let cells_ids = groups.get_cells_ids();
             for &cell_id in cells_ids {
                 let cell = session.get_cell(&cell_id).unwrap();
                 let pt = cell.get_point();
-                println!("{};{};{};{};{:.5};{:.5};{}", step, tl_id, group_id, cell_id, pt.x(), pt.y(), signal);
+                println!(
+                    "{};{};{};{};{:.5};{:.5};{}",
+                    step,
+                    tl_id,
+                    group_id,
+                    cell_id,
+                    pt.x(),
+                    pt.y(),
+                    signal
+                );
             }
         }
     }
@@ -316,7 +348,13 @@ pub fn print_grid_tls(grid: &GridRoads, tls: &HashMap<i64, TrafficLight>) {
             for &cell_id in cells_ids {
                 if let Some(cell) = grid.get_cell(&cell_id) {
                     let cell_pt = cell.get_point();
-                    println!("{};{};{:.5};{:.5}", tl.get_id(), cell_id, cell_pt.x(), cell_pt.y());
+                    println!(
+                        "{};{};{:.5};{:.5}",
+                        tl.get_id(),
+                        cell_id,
+                        cell_pt.x(),
+                        cell_pt.y()
+                    );
                 }
             }
         }
@@ -325,7 +363,15 @@ pub fn print_grid_tls(grid: &GridRoads, tls: &HashMap<i64, TrafficLight>) {
     // First, print all cells (without connections) - this ensures all cells are visible
     for (cell_id, cell) in grid.iter() {
         let pt = cell.get_point();
-        println!("{};{:.5};{:.5};{:.5};{:.5};cell;{}", cell_id, pt.x(), pt.y(), pt.x(), pt.y(), cell.get_zone_type());
+        println!(
+            "{};{:.5};{:.5};{:.5};{:.5};cell;{}",
+            cell_id,
+            pt.x(),
+            pt.y(),
+            pt.x(),
+            pt.y(),
+            cell.get_zone_type()
+        );
     }
     // Then, print connections (arrows) only if they exist
     for (cell_id, cell) in grid.iter() {
@@ -335,7 +381,15 @@ pub fn print_grid_tls(grid: &GridRoads, tls: &HashMap<i64, TrafficLight>) {
         if fwd_id != -1 {
             if let Some(fwd_cell) = grid.get_cell(&fwd_id) {
                 let fwd_pt = fwd_cell.get_point();
-                println!("{};{:.5};{:.5};{:.5};{:.5};forward;{}", cell_id, pt.x(), pt.y(), fwd_pt.x(), fwd_pt.y(), fwd_cell.get_zone_type());
+                println!(
+                    "{};{:.5};{:.5};{:.5};{:.5};forward;{}",
+                    cell_id,
+                    pt.x(),
+                    pt.y(),
+                    fwd_pt.x(),
+                    fwd_pt.y(),
+                    fwd_cell.get_zone_type()
+                );
             }
         }
         // Left connection (only if it exists)
@@ -343,7 +397,15 @@ pub fn print_grid_tls(grid: &GridRoads, tls: &HashMap<i64, TrafficLight>) {
         if left_id != -1 {
             if let Some(left_cell) = grid.get_cell(&left_id) {
                 let left_pt = left_cell.get_point();
-                println!("{};{:.5};{:.5};{:.5};{:.5};left;{}", cell_id, pt.x(), pt.y(), left_pt.x(), left_pt.y(), left_cell.get_zone_type());
+                println!(
+                    "{};{:.5};{:.5};{:.5};{:.5};left;{}",
+                    cell_id,
+                    pt.x(),
+                    pt.y(),
+                    left_pt.x(),
+                    left_pt.y(),
+                    left_cell.get_zone_type()
+                );
             }
         }
         // Right connection (only if it exists)
@@ -351,7 +413,15 @@ pub fn print_grid_tls(grid: &GridRoads, tls: &HashMap<i64, TrafficLight>) {
         if right_id != -1 {
             if let Some(right_cell) = grid.get_cell(&right_id) {
                 let right_pt = right_cell.get_point();
-                println!("{};{:.5};{:.5};{:.5};{:.5};right;{}", cell_id, pt.x(), pt.y(), right_pt.x(), right_pt.y(), right_cell.get_zone_type());
+                println!(
+                    "{};{:.5};{:.5};{:.5};{:.5};right;{}",
+                    cell_id,
+                    pt.x(),
+                    pt.y(),
+                    right_pt.x(),
+                    right_pt.y(),
+                    right_cell.get_zone_type()
+                );
             }
         }
     }
