@@ -1,4 +1,4 @@
-use crate::agents::{Vehicle, VehicleID};
+use crate::agents::vehicle::{Vehicle, VehicleID};
 use indexmap::IndexMap;
 use std::ops::{Deref, DerefMut};
 

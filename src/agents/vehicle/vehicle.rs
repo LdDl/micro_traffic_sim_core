@@ -1,8 +1,7 @@
-use super::SynchronizationParameters;
-use crate::behaviour::BehaviourType;
+use crate::behaviour::{BehaviourType, RelativeRandomization, SynchronizationParameters};
 
 use crate::agents_types::AgentType;
-use crate::agents::{VehicleIntention, TailIntentionManeuver};
+use crate::agents::vehicle_intention::{VehicleIntention, TailIntentionManeuver};
 use crate::grid::cell::CellID;
 use crate::maneuver::LaneChangeType;
 use crate::grid::road_network::GridRoads;
@@ -84,6 +83,21 @@ pub const AGGRESSOR_CUT_IN_THRESHOLD: f64 = 0.8;
 /// real cell id, 0 included, is a valid tail position.
 pub const TAIL_PLACEHOLDER: CellID = -1;
 
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
+/// use micro_traffic_sim_core::agents_types::AgentType;
+///
+/// // Create a basic vehicle
+/// let vehicle = Vehicle::new(1)
+///     .with_cell(10)
+///     .with_type(AgentType::Car)
+///     .with_destination(100)
+///     .build();
+/// ```
+///
 #[derive(Debug)]
 pub struct Vehicle {
     /// Unique identifier
@@ -1438,186 +1452,5 @@ impl VehicleBuilder {
     /// A reference to the `Vehicle` object.
     pub fn build_ref(self) -> VehicleRef {
         Rc::new(RefCell::new(self.vehicle))
-    }
-}
-
-/// Randomization relative to the leader and the stop time threshold: the three phase layer of
-/// the longitudinal rule.
-///
-/// Uses the stop-time threshold and speed-difference-dependent randomization of Gao, Jiang, Hu, Wang and Wu (2007), doi:10.1103/PhysRevE.76.026105, eqs (1) to (4), with the following modifications:
-///
-/// - Update order: the core accelerates, applies random slowdown, then clamps the candidate to the available path. Gao brakes to the gap before randomization. These orders can produce different speeds when the gap is binding.
-/// - Interaction range: the nearest leader is probed along the forward chain within `lookahead` cells (15 cells, 67.5 m, in `KKW`). Without a leader in that range, the core uses `decel_equal`. Gao's original rule uses the preceding vehicle without this finite cutoff.
-/// - Calibration: `KKW` selects a stop threshold of 5 ticks and decelerations 0, 1, 1 on the project's 4.5 m grid. In particular, `decel_faster = 1` omits the stronger random deceleration tested in the project's over-deceleration experiments. These values are project choices, not a reproduction of Gao's published parameter set.
-/// - Network integration: the speed comparison uses the follower's current speed clipped to its local speed limit and the leader's start-of-tick snapshot. Acceleration and slowdown timers, claimed cells, conflict resolution and the separate standstill-gap rule also affect the executed movement.
-/// - VDR boundary case: `p0` requires both zero speed and a standing count at least equal to the threshold. Setting the threshold to zero therefore selects `p0` only for stopped vehicles and `p` for moving ones, explicitly defining the VDR reduction.
-///
-/// The separate standstill-gap calibration gives an average jam spacing of about 7.5 m when two thirds of one-cell cars keep one empty cell. This does not change the 4.5 m cell size. The calibrated `p0` and driver-style `p` are supplied by behaviour parameters or trip overrides, not by this struct.
-///
-/// With threshold 0 and unit decelerations, the longitudinal randomization reduces to the core's VDR order. This does not assert equivalence to textbook NaSch's update order, Gao's complete model or the full network behaviour of an older core version.
-///
-/// Project benches reproduce ring hysteresis, low-speed flow near a bottleneck and wide moving jams emerging predominantly in that region under the operational phase classifier. These are measurements of this variant; they do not establish all properties of Gao's model or a persistent two-dimensional region of synchronized states.
-///
-/// Used while synchronization is disabled. An enabled SynchronizationParameters
-/// configuration supplies its own stochastic correction and restart threshold.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RelativeRandomization {
-    /// Consecutive ticks of standing after which the slow to start probability `p0` applies; a
-    /// shorter stop randomizes with the moving probability `p` (t_c of Gao 2007). 0 applies `p0`
-    /// to every stopped vehicle (VDR).
-    pub stop_time_threshold: i32,
-    /// Deceleration in cells per tick of the random slowdown when the vehicle is slower than its
-    /// leader (b_- of Gao 2007). 0 means no slowdown while catching up.
-    pub decel_slower: i32,
-    /// Deceleration when the vehicle is as fast as its leader or has no leader within
-    /// `lookahead` cells (b_0). 1 is the NaSch dawdle.
-    pub decel_equal: i32,
-    /// Deceleration when the vehicle is faster than its leader (b_+, b_+ >= b_-).
-    pub decel_faster: i32,
-    /// Cells ahead searched for the leader whose speed selects the deceleration; 0 skips the
-    /// search and uses `decel_equal`.
-    pub lookahead: i32,
-}
-
-impl RelativeRandomization {
-    /// The plain NaSch and VDR rule: `p0` for every stopped vehicle, deceleration 1, no leader
-    /// search needed for the speed result. This reduces the longitudinal randomization to VDR;
-    /// it does not imply equivalence of the entire network to older core versions.
-    pub const VDR: RelativeRandomization = RelativeRandomization {
-        stop_time_threshold: 0,
-        decel_slower: 1,
-        decel_equal: 1,
-        decel_faster: 1,
-        lookahead: 15,
-    };
-    /// The three phase values of the behaviour presets: no slowdown while catching up with a
-    /// faster leader, slow to start after 5 ticks of standing, leader search over 15 cells (67 m).
-    pub const KKW: RelativeRandomization = RelativeRandomization {
-        stop_time_threshold: 5,
-        decel_slower: 0,
-        decel_equal: 1,
-        decel_faster: 1,
-        lookahead: 15,
-    };
-
-    /// Clamps every field to its admissible range (non negative, decelerations at most the
-    /// maximum speed are not enforced, the executed speed is clamped by the rule itself).
-    pub fn clamped(self) -> Self {
-        RelativeRandomization {
-            stop_time_threshold: self.stop_time_threshold.max(0),
-            decel_slower: self.decel_slower.max(0),
-            decel_equal: self.decel_equal.max(0),
-            decel_faster: self.decel_faster.max(0),
-            lookahead: self.lookahead.max(0),
-        }
-    }
-}
-
-impl Default for RelativeRandomization {
-    fn default() -> Self {
-        RelativeRandomization::VDR
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_slow_to_start_for_length() {
-        // A one cell vehicle keeps the behaviour value.
-        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 0), 0.425);
-        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 1), 0.425);
-        for &(p0, len, gap) in &[(0.425, 2, 0), (0.425, 2, 1), (0.425, 3, 1), (0.6, 3, 0), (0.0, 2, 1)] {
-            let p = Vehicle::slow_to_start_for_length(p0, len, gap);
-            // Space per escape delay equals that of a one cell vehicle: (L + g)(1 - p) = (1 + g)(1 - p0).
-            let lhs = (len as f64 + gap as f64) * (1.0 - p);
-            let rhs = (1.0 + gap as f64) * (1.0 - p0);
-            assert!((lhs - rhs).abs() < 1e-12, "invariance for {p0} {len} {gap}");
-            assert!(p >= p0 && p < 1.0, "a longer vehicle departs later but eventually departs");
-        }
-        // Longer vehicles depart later.
-        assert!(Vehicle::slow_to_start_for_length(0.425, 3, 1) > Vehicle::slow_to_start_for_length(0.425, 2, 1));
-        // Out of range inputs.
-        assert_eq!(Vehicle::slow_to_start_for_length(1.5, 1, 0), 1.0);
-        assert_eq!(Vehicle::slow_to_start_for_length(0.425, 2, -3), Vehicle::slow_to_start_for_length(0.425, 2, 0));
-    }
-
-    #[test]
-    fn test_trim_forward_intention() {
-        let mut vehicle = Vehicle::new(1).with_cell(3).with_speed(3).build();
-        vehicle.set_intention(VehicleIntention {
-            intention_maneuver: LaneChangeType::NoChange,
-            intention_cell_id: 6,
-            intermediate_cells: vec![4, 5],
-            intention_speed: 3,
-            ..Default::default()
-        });
-        vehicle.trim_forward_intention(5);
-        assert_eq!(vehicle.intention.intention_cell_id, 6, "a longer length keeps the move");
-        vehicle.trim_forward_intention(2);
-        assert_eq!(vehicle.intention.intention_cell_id, 5);
-        assert_eq!(vehicle.intention.intermediate_cells, vec![4]);
-        assert_eq!(vehicle.intention.intention_speed, 2);
-        vehicle.trim_forward_intention(0);
-        assert_eq!(vehicle.intention.intention_cell_id, 3, "length 0 keeps the vehicle in place");
-        assert!(vehicle.intention.intermediate_cells.is_empty());
-        assert_eq!(vehicle.intention.intention_speed, 0);
-    }
-
-    #[test]
-    fn test_trim_forward_intention_moves_tail() {
-        let mut truck = Vehicle::new(1).with_cell(3).with_tail_size(2, vec![1, 2]).with_speed(2).build();
-        truck.set_intention(VehicleIntention {
-            intention_maneuver: LaneChangeType::NoChange,
-            intention_cell_id: 5,
-            intermediate_cells: vec![4],
-            intention_speed: 2,
-            ..Default::default()
-        });
-        truck.trim_forward_intention(1);
-        assert_eq!(truck.intention.intention_cell_id, 4);
-        assert_eq!(truck.intention.tail_intention_cells, vec![2, 3]);
-        // Staying in place follows the intention storage convention for a vehicle that does not
-        // move; movement applies the tail intention only when the head moves, so the body stays.
-        truck.trim_forward_intention(0);
-        assert_eq!(truck.intention.intention_cell_id, 3);
-        assert_eq!(truck.intention.tail_intention_cells, vec![2, 3]);
-    }
-
-    #[test]
-    fn test_relaxation_countdown() {
-        let relax_time = 9;
-        let sim_steps = 3;
-        let mut vehicle = Vehicle::new(1)
-            .with_cell(3)
-            .with_destination(100)
-            .with_type(AgentType::Car)
-            .with_transit_cells(vec![3, 8])
-            .with_relax_time(relax_time)
-            .build();
-        for _ in 0..sim_steps {
-            vehicle.relax_countdown_dec();
-        }
-        assert_eq!(
-            relax_time - sim_steps,
-            vehicle.get_relax_countdown(),
-            "Incorrect countdown after specified number of steps"
-        );
-        vehicle.relax_countdown_reset();
-        assert_eq!(
-            relax_time,
-            vehicle.get_relax_countdown(),
-            "Incorrect countdown after reset"
-        );
-    }
-    #[test]
-    fn test_cooperative_level() {
-        let coop_level = 0.75;
-        let aggr_level = 1.0 - coop_level;
-        let vehicle = Vehicle::new(1).with_aggressive_level(aggr_level).build();
-        assert_eq!(
-            coop_level, vehicle.cooperativity,
-            "Incorrect cooperativity level"
-        )
     }
 }
