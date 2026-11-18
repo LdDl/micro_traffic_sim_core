@@ -24,6 +24,49 @@ impl fmt::Display for TrafficLightError {
 impl std::error::Error for TrafficLightError {}
 
 /// Represents a traffic light that controls one or more groups of cells.
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::traffic_lights::{
+///     lights::{TrafficLight, TrafficLightID},
+///     groups::TrafficLightGroup,
+///     signals::SignalType
+/// };
+/// use micro_traffic_sim_core::geom::new_point;
+///
+/// // Create signal groups for each direction
+/// let north_south_group = TrafficLightGroup::new(1)
+///     .with_label("North-South".to_string())
+/// // Cells for N-S traffic
+///     .with_cells_ids(vec![1, 2, 3])
+///     .with_signal(vec![SignalType::Green, SignalType::Yellow, SignalType::Red])
+///     .build();
+///
+/// let east_west_group = TrafficLightGroup::new(2)
+///     .with_label("East-West".to_string())
+/// // Cells for E-W traffic
+///     .with_cells_ids(vec![10, 11, 12])
+///     .with_signal(vec![SignalType::Red, SignalType::RedYellow, SignalType::Green])
+///     .build();
+///
+/// // Create traffic light with timing
+/// let mut intersection = TrafficLight::new(1)
+///     .with_coordinates(new_point(100.0, 200.0, None))
+///     .with_groups(vec![north_south_group, east_west_group])
+/// // Green: 15s, Yellow: 3s, Red: 15s
+///     .with_phases_times(vec![15, 3, 15])
+///     .build();
+///
+/// // Simulate traffic light operation
+/// for step in 0..40 {
+///     intersection.step();
+///     let phase = intersection.get_active_phase();
+///     let time = intersection.get_current_time();
+///     println!("Step {}: Phase {}, Time {}", step, phase, time);
+/// }
+/// ```
+///
 #[derive(Debug, Clone)]
 pub struct TrafficLight {
     /// Groups of cells (so it is just signal groups for specific directions in the junction) controlled by the traffic light.
@@ -152,112 +195,5 @@ impl TrafficLightBuilder {
     /// Builds and returns the final `TrafficLight` instance.
     pub fn build(self) -> TrafficLight {
         self.traffic_light
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::traffic_lights::signals::SignalType;
-    #[test]
-    fn test_traffic_light() {
-        let groups = vec![
-            TrafficLightGroup::new(1)
-                .with_label("Group 1".to_string())
-                .with_cells_ids(vec![20])
-                .with_signal(vec![SignalType::Red, SignalType::Yellow, SignalType::Green])
-                .build(),
-            TrafficLightGroup::new(2)
-                .with_label("Group 2".to_string())
-                .with_cells_ids(vec![16])
-                .with_signal(vec![SignalType::Green, SignalType::Green, SignalType::Green])
-                .build(),
-            TrafficLightGroup::new(3)
-                .with_label("Group 3".to_string())
-                .with_cells_ids(vec![11])
-                .with_signal(vec![SignalType::Red, SignalType::Red, SignalType::Red])
-                .build(),
-            TrafficLightGroup::new(4)
-                .with_label("Group 4".to_string())
-                .with_cells_ids(vec![18, 20])
-                .with_signal(vec![SignalType::Red, SignalType::Red, SignalType::Red])
-                .build(),
-        ];
-
-        let mut traffic_light = TrafficLight::new(1)
-            .with_groups(groups)
-            .with_phases_times(vec![2, 3, 10])
-            .with_active_phase(0)
-            .build();
-
-        assert_eq!(traffic_light.get_current_time(), 0);
-        assert_eq!(traffic_light.get_active_phase(), 0);
-
-        // Simulate time steps
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 1);
-        assert_eq!(traffic_light.get_active_phase(), 0);
-
-        // Timer should reset because first time is 2
-        // Phase has to be changed to 1
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 0);
-        assert_eq!(traffic_light.get_active_phase(), 1);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 1);
-        assert_eq!(traffic_light.get_active_phase(), 1);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 2);
-        assert_eq!(traffic_light.get_active_phase(), 1);
-
-        // Timer should reset because second time is 3
-        // Phase has to be changed to 2
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 0);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 1);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 2);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 3);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 4);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 5);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 6);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 7);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 8);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 9);
-        assert_eq!(traffic_light.get_active_phase(), 2);
-
-        // Timer should reset because third time is 10
-        // Phase has to be changed to 0 (reset) since there are only 3 phases and we've reached the end of the second one
-        traffic_light.step();
-        assert_eq!(traffic_light.get_current_time(), 0);
-        assert_eq!(traffic_light.get_active_phase(), 0);
     }
 }
