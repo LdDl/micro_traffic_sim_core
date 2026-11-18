@@ -27,6 +27,9 @@ use rand::rngs::StdRng;
 /// run-to-run (replaces the previous unseeded thread-local RNG).
 const SPAWN_SEED: u64 = 0x00C0_FFEE;
 
+// The deterministic gap-share sample uses increments of 0.0001.
+const GAP_SHARE_RESOLUTION: u64 = 10_000;
+
 /// Custom error types for `Session`.
 #[derive(Debug, Clone)]
 pub enum SessionError {
@@ -552,7 +555,11 @@ impl Session {
         let standstill_gap = if let Some(share) = trip.standstill_gap_share {
             // 0x9E3779B97F4A7C15 - use a golden-ratio-based multiplier to assign standstill gaps deterministically
             // from vehicle IDs without consuming RNG draws. The requested share is approximate.
-            i32::from((self.last_vehicle_id.wrapping_mul(0x9E3779B97F4A7C15) % 10000) as f64 / 10000.0 < share)
+            i32::from(
+                (self.last_vehicle_id.wrapping_mul(0x9E3779B97F4A7C15) % GAP_SHARE_RESOLUTION) as f64
+                    / (GAP_SHARE_RESOLUTION as f64)
+                    < share,
+            )
         } else if trip.standstill_gap >= 0 {
             trip.standstill_gap
         } else {

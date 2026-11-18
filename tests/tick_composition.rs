@@ -427,7 +427,7 @@ fn overlapping_constraints_only_shorten_initial_paths() {
                             v.wait_steps = if waits & (1 << (id - 1)) == 0 {
                                 0
                             } else {
-                                10000
+                                v.patience() + 1
                             };
                             v.yield_cycle_wait_steps = 4;
                             v.set_intention(VehicleIntention {
