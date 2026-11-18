@@ -128,7 +128,9 @@ fn restriction_sequences_preserve_paths_speed_and_materialized_bodies() {
         LaneChangeType::ChangeRight,
     ];
     let max_path_length: usize = 6;
-    let operation_word_count: usize = 216;
+    let operation_variants: usize = 6;
+    let operations_per_sequence = 3;
+    let operation_word_count = operation_variants * operation_variants * operation_variants;
     let mut sequences = 0;
     for maneuver in maneuvers {
         for length in 0..=max_path_length {
@@ -160,10 +162,10 @@ fn restriction_sequences_preserve_paths_speed_and_materialized_bodies() {
                 for word in 0..operation_word_count {
                     let mut v = make_vehicle();
                     let mut operations = word;
-                    for _ in 0..3 {
+                    for _ in 0..operations_per_sequence {
                         let before = entered(&v);
                         let speed_before = v.intention.intention_speed;
-                        match operations % 6 {
+                        match operations % operation_variants {
                             0 => v.block_with_speed(0),
                             1 => v.restrict_intention_to_first_step(),
                             2 => v.trim_forward_intention(0),
@@ -171,7 +173,7 @@ fn restriction_sequences_preserve_paths_speed_and_materialized_bodies() {
                             4 => v.trim_forward_intention(2),
                             _ => v.trim_forward_intention(7),
                         }
-                        operations /= 6;
+                        operations /= operation_variants;
                         let after = entered(&v);
                         assert!(before.starts_with(&after));
                         assert!(v.intention.intention_speed <= speed_before);

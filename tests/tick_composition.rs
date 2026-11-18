@@ -376,11 +376,14 @@ fn overlapping_constraints_only_shorten_initial_paths() {
     use micro_traffic_sim_core::verbose::LocalLogger;
     use std::collections::{BTreeMap, HashMap};
     let speed_levels: usize = 3;
+    let vehicle_count = 4;
+    let speed_combinations = speed_levels * speed_levels * speed_levels * speed_levels;
+    let wait_combinations = 1 << vehicle_count;
     let mut cases = 0;
-    for shift in 0..4 {
+    for shift in 0..vehicle_count {
         for reversed in [false, true] {
-            for speeds in 0..81 {
-                for waits in 0..16 {
+            for speeds in 0..speed_combinations {
+                for waits in 0..wait_combinations {
                     for cyclic in [false, true] {
                         let mut net = GridRoads::new();
                         for (id, next) in [
@@ -398,26 +401,27 @@ fn overlapping_constraints_only_shorten_initial_paths() {
                             net.add_cell(
                                 Cell::new(id)
                                     .with_forward_node(next)
-                                    .with_speed_limit(3)
+                                    .with_speed_limit(speed_levels as i32)
                                     .build(),
                             );
                         }
                         let mut cars = IndexMap::new();
                         let mut claims = Intentions::new();
                         let mut initial = BTreeMap::new();
-                        let mut order: Vec<u64> =
-                            (0..4).map(|i| ((i + shift) % 4 + 1) as u64).collect();
+                        let mut order: Vec<u64> = (0..vehicle_count)
+                            .map(|i| ((i + shift) % vehicle_count + 1) as u64)
+                            .collect();
                         if reversed {
                             order.reverse();
                         }
                         for id in order {
-                            let length = 1 + speeds / speed_levels.pow((id - 1) as u32) % 3;
+                            let length = 1 + speeds / speed_levels.pow((id - 1) as u32) % speed_levels;
                             let base = if id <= 2 { 100 } else { 200 };
                             let path: Vec<_> = (base..base + length as i64).collect();
                             let mut v = Vehicle::new(id)
                                 .with_cell(id as i64 * 10)
                                 .with_speed(length as i32)
-                                .with_speed_limit(3)
+                                .with_speed_limit(speed_levels as i32)
                                 .with_cooperative_level(1.0)
                                 .build();
                             v.wait_steps = if waits & (1 << (id - 1)) == 0 {
