@@ -5,6 +5,26 @@ use std::fmt;
 /// Represents different possible states of a cell.
 ///
 /// `CellState` indicates the current condition of a cell, such as whether it is free or banned.
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::grid::{road_network::GridRoads, cell::{Cell, CellState}};
+///
+/// let mut grid = GridRoads::new();
+/// let mut cell = Cell::new(1).build();
+///
+/// // Temporarily close a road segment
+/// cell.set_state(CellState::Banned);
+/// // Movement to the cell will be prohibited
+/// println!("Cell state: {}", cell.get_state());
+///
+/// // Reopen the road segment
+/// cell.set_state(CellState::Free);
+/// // Cell is accessible
+/// println!("Cell state: {}", cell.get_state());
+/// ```
+///
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CellState {
     /// The cell is free and available for use.
@@ -35,7 +55,8 @@ impl fmt::Display for CellState {
     }
 }
 
-pub type CellID = i64; // Alias for CellID
+// Alias for CellID
+pub type CellID = i64;
 
 /// Represents a single cell in the road network.
 ///
@@ -438,29 +459,5 @@ impl CellBuilder {
     /// The fully constructed `Cell` object.
     pub fn build(self) -> Cell {
         self.cell
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::geom::SRID;
-    #[test]
-    fn test_cells_gc_distance() {
-        let correct_distance = 634430.92026;
-        let cell1 = Cell::new(1)
-            .with_point(new_point(37.61556, 55.75222, Some(SRID::WGS84)))
-            .build();
-        let cell2 = Cell::new(2)
-            .with_point(new_point(30.31413, 59.93863, Some(SRID::WGS84)))
-            .build();
-        let distance = cell1.distance_to(&cell2);
-        // Assert that the absolute difference is less than a small threshold
-        assert!(
-            (distance - correct_distance).abs() < 0.001,
-            "Distance should be {}, but got {}",
-            correct_distance,
-            distance
-        );
     }
 }

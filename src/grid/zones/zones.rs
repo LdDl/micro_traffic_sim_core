@@ -1,6 +1,33 @@
 use std::fmt;
 
 /// ZoneType gives meaning to the cell in terms of its application.
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::grid::zones::ZoneType;
+///
+/// // Core traffic zones
+/// // Vehicle spawn points
+/// let zt = ZoneType::Birth;
+/// // Vehicle despawn points
+/// let zt = ZoneType::Death;
+/// // Regular road segments
+/// let zt = ZoneType::Common;
+/// // Junction/intersection cells
+/// let zt = ZoneType::Coordination;
+///
+/// // Specialized zones (future use)
+/// // Dedicated bus lanes
+/// let zt = ZoneType::LaneForBus;
+/// // Public transport stops
+/// let zt = ZoneType::Transit;
+/// // Pedestrian crossings
+/// let zt = ZoneType::Crosswalk;
+/// // Disconnected cells
+/// let zt = ZoneType::Isolated;
+/// ```
+///
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ZoneType {
     // Default uninitialized state

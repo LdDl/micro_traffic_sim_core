@@ -6,6 +6,80 @@ use crate::grid::cell::{CellID, Cell};
 ///
 /// This struct is used to store, retrieve, and manipulate individual cells
 ///
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::grid::{
+///     road_network::GridRoads,
+///     cell::Cell,
+///     zones::ZoneType
+/// };
+/// use micro_traffic_sim_core::geom::new_point;
+///
+/// let mut grid = GridRoads::new();
+///
+/// // Create a simple 3-cell road
+/// let start_cell = Cell::new(1)
+///     .with_point(new_point(0.0, 0.0, None))
+///     .with_zone_type(ZoneType::Birth)
+///     .with_speed_limit(3)
+///     .with_forward_node(2)
+///     .build();
+///
+/// let middle_cell = Cell::new(2)
+///     .with_point(new_point(1.0, 0.0, None))
+///     .with_zone_type(ZoneType::Common)
+///     .with_speed_limit(3)
+///     .with_forward_node(3)
+///     .build();
+///
+/// let end_cell = Cell::new(3)
+///     .with_point(new_point(2.0, 0.0, None))
+///     .with_zone_type(ZoneType::Death)
+///     .with_speed_limit(3)
+/// // No forward connection
+///     .with_forward_node(-1)
+///     .build();
+///
+/// grid.add_cell(start_cell);
+/// grid.add_cell(middle_cell);
+/// grid.add_cell(end_cell);
+///
+/// // Access cells
+/// if let Some(cell) = grid.get_cell(&1) {
+///     println!("Cell 1 at: {:?}", cell.get_point());
+/// }
+/// ```
+///
+/// ```rust
+/// use micro_traffic_sim_core::grid::{road_network::GridRoads, cell::Cell, zones::ZoneType};
+/// use micro_traffic_sim_core::geom::new_point;
+///
+/// let mut grid = GridRoads::new();
+///
+/// // Lane 1 (bottom lane)
+/// let lane1_cell = Cell::new(1)
+///     .with_point(new_point(0.0, 1.0, None))
+///     .with_zone_type(ZoneType::Birth)
+///     .with_forward_node(2)
+/// // Can change to upper/left lane
+///     .with_left_node(3)
+///     .build();
+///
+/// // Lane 2 (upper lane)
+/// let lane2_cell = Cell::new(3)
+///     .with_point(new_point(0.0, 2.0, None))
+///     .with_zone_type(ZoneType::Birth)
+///     .with_forward_node(4)
+/// // Can change to lower/right lane
+///     .with_right_node(1)
+///     .build();
+///
+/// grid.add_cell(lane1_cell);
+/// grid.add_cell(lane2_cell);
+/// ```
+///
 #[derive(Debug)]
 pub struct GridRoads {
     // A `HashMap` mapping each `CellID` to its corresponding `Cell` object.
