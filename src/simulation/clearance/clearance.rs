@@ -23,7 +23,12 @@ pub enum LongitudinalClearance {
     /// leader supplies zero even if it starts during this tick. Follower motion
     /// is bounded by its original grant and max(d + lower - g, 0). The grant itself
     /// is at most d, so the initial leader cell remains unreachable this tick.
-    /// This project-specific extension has separate experimental validation;
-    /// enabling it does not certify a physical traffic phase or network domain.
+    ///
+    /// # Experimental
+    ///
+    /// Physical traffic-flow validation of this policy is limited to the tested
+    /// configurations. Its model semantics may change with validation across
+    /// driver behaviours and mixtures. The initial-occupancy and reserve
+    /// constraints above apply independently of that physical calibration.
     MovingLeader,
 }

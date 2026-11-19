@@ -142,8 +142,8 @@ impl BehaviourParameters {
     ///   stop bumper to bumper, so a mixed flow with about two thirds of careful drivers gets the
     ///   7.5 m jam spacing of the line J calibration (133 veh/km).
     ///
-    /// Every preset uses `RelativeRandomization::KKW` (see `agents::RelativeRandomization`), the
-    /// three phase layer; `Block` never moves, so its value does not matter. `with_relative_randomization`
+    /// Every preset uses the experimental [`RelativeRandomization::KKW`] calibration.
+    /// `Block` never moves, so its value does not matter. `with_relative_randomization`
     /// switches a preset back to the plain VDR rule.
     ///
     /// The concrete per-type values are the `match` arms below (the single source of truth).

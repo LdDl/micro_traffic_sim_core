@@ -1,5 +1,4 @@
-/// Randomization relative to the leader and the stop time threshold: the three phase layer of
-/// the longitudinal rule.
+/// Leader-relative randomization with a configurable stop-time threshold.
 ///
 /// Uses the stop-time threshold and speed-difference-dependent randomization of Gao, Jiang, Hu, Wang and Wu (2007), doi:10.1103/PhysRevE.76.026105, eqs (1) to (4), with the following modifications:
 ///
@@ -47,8 +46,16 @@ impl RelativeRandomization {
         decel_faster: 1,
         lookahead: 15,
     };
-    /// The three phase values of the behaviour presets: no slowdown while catching up with a
-    /// faster leader, slow to start after 5 ticks of standing, leader search over 15 cells (67 m).
+    /// Experimental Gao-inspired values used by the behaviour presets.
+    ///
+    /// No slowdown while catching up with a faster leader, slow to start after
+    /// 5 ticks of standing, leader search over 15 cells (67.5 m at 4.5 m per cell).
+    ///
+    /// # Experimental
+    ///
+    /// The name does not imply a literal KKW model or complete three-phase
+    /// validation. These project-specific rules and calibration may change
+    /// with physical validation. The [`Self::VDR`] reduction is a separate contract.
     pub const KKW: RelativeRandomization = RelativeRandomization {
         stop_time_threshold: 5,
         decel_slower: 0,

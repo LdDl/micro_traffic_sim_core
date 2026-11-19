@@ -155,8 +155,9 @@ pub struct Vehicle {
     /// jam also makes jam fronts too slow. The gap keeps the cell at the physical vehicle length
     /// and adds the jam spacing explicitly: one empty cell gives 9 m per vehicle in a jam.
     pub standstill_gap: i32,
-    /// Randomization relative to the leader and the stop time threshold (three phase layer);
-    /// the default is the plain VDR rule, the behaviour presets use `RelativeRandomization::KKW`.
+    /// Randomization relative to the leader and the stop-time threshold.
+    /// The default is VDR, while behaviour presets use the experimental
+    /// [`RelativeRandomization::KKW`] calibration.
     pub relative_randomization: RelativeRandomization,
     /// Speed adaptation and stochastic corrections within a synchronization distance.
     /// Disabled by default. When enabled, these corrections replace relative randomization.
