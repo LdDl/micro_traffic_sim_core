@@ -269,6 +269,16 @@ fn main() {
 }
 ```
 
+### Experimental traffic-model extensions
+
+The API documentation marks the following model choices as `Experimental`. Their physical validation is limited to the tested configurations, so their rules or calibration may change.
+
+- `RelativeRandomization::KKW` is the project's Gao-inspired calibration used by behaviour presets. Its name does not imply a literal KKW implementation or complete three-phase validation. `RelativeRandomization::VDR` retains its separate longitudinal reduction contract.
+- Enabled `SynchronizationParameters` and the `COARSE_GRID` calibration configure optional speed adaptation and stochastic corrections. Synchronization is disabled in `Vehicle::new` and all behaviour presets. `COARSE_GRID` describes a tested one-cell population at 4.5 m and one-second ticks.
+- `LongitudinalClearance::MovingLeader` is an optional reserve policy with limited physical traffic-flow validation. `Conservative` remains the default. Both policies enforce the initial-occupancy and reserve contracts below.
+
+These choices do not establish three-phase behaviour across all driver populations and mixtures, or invariant propagation of the same jam front through free and synchronized traffic.
+
 ### Spacing and interaction distances
 
 The following parameters serve different decisions. Distances use cells, speeds use cells per tick, and all movement decisions read the initial occupancy of the tick. Public field and builder names remain compatible with existing callers.
