@@ -1,8 +1,10 @@
 // src/verbose/verbose.rs
 use std::fmt;
 use std::sync::OnceLock;
-use tracing::{info, debug, trace, Level};
-use tracing_subscriber::{fmt as tracing_fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, reload};
+use tracing::{Level, debug, info, trace};
+use tracing_subscriber::{
+    EnvFilter, fmt as tracing_fmt, layer::SubscriberExt, reload, util::SubscriberInitExt,
+};
 
 /// Hierarchical logging levels for simulation debugging.
 ///
@@ -13,10 +15,10 @@ use tracing_subscriber::{fmt as tracing_fmt, layer::SubscriberExt, util::Subscri
 ///
 /// ```rust
 /// use micro_traffic_sim_core::verbose::{VerboseLevel, set_verbose_level};
-/// 
+///
 /// // Set logging level
 /// set_verbose_level(VerboseLevel::Main);
-/// 
+///
 /// // Check current level
 /// if VerboseLevel::Main.is_at_least(VerboseLevel::Additional) {
 ///     println!("Will log additional details");
@@ -39,15 +41,15 @@ pub enum VerboseLevel {
 
 impl fmt::Display for VerboseLevel {
     /// Formats the verbosity level for display.
-    /// 
+    ///
     /// Returns a short, lowercase string representation suitable for
     /// logging, debugging, and user interfaces.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use micro_traffic_sim_core::verbose::VerboseLevel;
-    /// 
+    ///
     /// assert_eq!(format!("{}", VerboseLevel::None), "none");
     /// assert_eq!(format!("{}", VerboseLevel::Main), "main");
     /// assert_eq!(format!("{}", VerboseLevel::Additional), "additional");
@@ -109,6 +111,7 @@ pub const EVENT_MOVEMENT_VEHICLE: &str = "movement_vehicle";
 pub const EVENT_MOVEMENT_DEAD_END: &str = "movement_dead_end";
 pub const EVENT_MOVEMENT_DESTINATION: &str = "movement_destination";
 pub const EVENT_ROUTING_STATS: &str = "routing_stats";
+pub const EVENT_ROUTING_CONFIG: &str = "routing_config";
 pub const EVENT_STEP_COMPLETE: &str = "step_complete";
 pub const EVENT_SESSION_CREATE: &str = "session_create";
 pub const EVENT_SESSION_EXPIRED: &str = "session_expired";
@@ -117,14 +120,16 @@ pub const EVENT_SESSION_EXTRACT_STATES: &str = "session_extract";
 // Global verbose level storage
 static VERBOSE_LEVEL: OnceLock<VerboseLevel> = OnceLock::new();
 static LOGGER_INITIALIZED: OnceLock<bool> = OnceLock::new();
-static RELOAD_HANDLE: OnceLock<reload::Handle<EnvFilter, tracing_subscriber::Registry>> = OnceLock::new();
+static RELOAD_HANDLE: OnceLock<reload::Handle<EnvFilter, tracing_subscriber::Registry>> =
+    OnceLock::new();
 
 /// Initialize the tracing logger once
 pub fn init_logger() {
     if LOGGER_INITIALIZED.set(true).is_ok() {
         // Use env if provided, otherwise fall back to current verbose level (or info)
         let default_level = String::from(*VERBOSE_LEVEL.get().unwrap_or(&VerboseLevel::Main));
-        let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
+        let env_filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
         let (filter_layer, handle) = reload::Layer::new(env_filter);
         let _ = RELOAD_HANDLE.set(handle);
         tracing_subscriber::registry()
@@ -136,7 +141,7 @@ pub fn init_logger() {
                     .with_thread_ids(false)
                     .with_thread_names(false)
                     .with_file(false)
-                    .with_line_number(false)
+                    .with_line_number(false),
             )
             .init();
     }
@@ -191,10 +196,10 @@ pub fn verbose_log(level: VerboseLevel, event: &str, message: &str) {
 
 /// Logs a message with additional fields using global verbose level
 pub fn verbose_log_with_fields(
-    level: VerboseLevel, 
-    event: &str, 
-    message: &str, 
-    fields: &[(&str, &dyn fmt::Display)]
+    level: VerboseLevel,
+    event: &str,
+    message: &str,
+    fields: &[(&str, &dyn fmt::Display)],
 ) {
     if !is_verbose_level(level) {
         return;
@@ -208,32 +213,16 @@ pub fn verbose_log_with_fields(
     match level {
         VerboseLevel::None => {}
         VerboseLevel::Main => {
-            info!(
-                event = event,
-                ?field_map,
-                message
-            );
+            info!(event = event, ?field_map, message);
         }
         VerboseLevel::Additional => {
-            debug!(
-                event = event,
-                ?field_map,
-                message
-            );
+            debug!(event = event, ?field_map, message);
         }
         VerboseLevel::Detailed => {
-            debug!(
-                event = event,
-                ?field_map,
-                message
-            );
+            debug!(event = event, ?field_map, message);
         }
         VerboseLevel::All => {
-            trace!(
-                event = event,
-                ?field_map,
-                message
-            );
+            trace!(event = event, ?field_map, message);
         }
     }
 }
@@ -258,7 +247,9 @@ impl VerboseLevel {
 
     /// Logs a message with fields if the session verbose level allows it
     pub fn log_with_fields(self, event: &str, message: &str, fields: &[(&str, &dyn fmt::Display)]) {
-        if self == VerboseLevel::None { return; }
+        if self == VerboseLevel::None {
+            return;
+        }
         let mut field_map = std::collections::HashMap::new();
         for (key, value) in fields {
             field_map.insert(*key, format!("{}", value));
@@ -288,9 +279,9 @@ macro_rules! verbose_log {
     };
     ($level:expr, $event:expr, $msg:literal, $($key:literal => $value:expr),+) => {
         $crate::verbose::verbose_log_with_fields(
-            $level, 
-            $event, 
-            $msg, 
+            $level,
+            $event,
+            $msg,
             &[$(($key, &$value)),+]
         )
     };

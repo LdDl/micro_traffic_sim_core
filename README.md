@@ -3,11 +3,12 @@
 API may change since project is in early stages.
 
 Table of contents
+
 - [Introduction](#introduction)
 - [Project layout](#project-layout)
 - [Quick start (Rust)](#quick-start-rust)
   - [Run example: NaSch one-lane](#run-example-nasch-one-lane)
-  - [Build release binary for example](#build-release-binary-for-example)
+  - [Build release binary for the example](#build-release-binary-for-the-example)
   - [Benchmark with hyperfine](#benchmark-with-hyperfine)
 - [Complete workflow guide](#complete-workflow-guide)
   - [Add crate to your project](#add-crate-to-your-project)
@@ -15,14 +16,13 @@ Table of contents
   - [Verbose logging](#verbose-logging)
   - [Creating the grid](#creating-the-grid)
   - [Optionally add conflict zones](#optionally-add-conflict-zones)
+  - [Spacing and interaction distances](#spacing-and-interaction-distances)
   - [Creating vehicles statically](#creating-vehicles-statically)
   - [Creating vehicles dynamically via trips](#creating-vehicles-dynamically-via-trips)
   - [Optionally add traffic lights](#optionally-add-traffic-lights)
   - [Setting up the simulation session](#setting-up-the-simulation-session)
-  - [Running the simulation](#running-the-simulation)
-  - [Extracting results](#extracting-results)
+  - [Running the simulation and collecting the data](#running-the-simulation-and-collecting-the-data)
   - [Analyzing results](#analyzing-results)
-  - [Visualization with gnuplot](#visualization-with-gnuplot)
 - [Key modules / API pointers](#key-modules--api-pointers)
 
 ## Introduction
@@ -60,7 +60,7 @@ __Disclaimer__: Repository documentation will have a lot of technical details in
 
 ## Project layout
 
-Top-level modules are exported from [`src/lib.rs`](src/lib.rs).
+Top-level modules are exported from [`src/lib.rs`](src/lib.rs). The main simulation modules use a directory per implementation, with a brief `mod.rs` facade and a same-named Rust implementation file. Unit tests live in adjacent `tests.rs` files. Integration scenarios are grouped under `tests/conflicts`, `tests/longitudinal`, `tests/sources`, `tests/synchronization` and `tests/vehicles`, each with a `main.rs` test entry point.
 
 Examples live under the `examples/` directory. Notable examples:
 - [`examples/nasch-one-lane/main.rs`](examples/nasch-one-lane/main.rs) - minimal one-lane NaSch example
@@ -77,7 +77,7 @@ Benchmarks:
 ## Quick start (Rust)
 
 Prerequisites
-- Rust toolchain (`rustup` + `cargo`)
+- Rust 1.94 or newer (`rustup` + `cargo`)
 - Optionally: `hyperfine` for repeated benchmarking
 
 ### Run example: NaSch one-lane
@@ -94,7 +94,7 @@ Build and run an example (prints CSV-like step output).
     cargo run --example nasch-one-lane > examples/nasch-one-lane/output.txt
     ```
 
-### Build release binary for the example:
+### Build release binary for the example
 ```sh
 cargo build --release --example nasch-one-lane
 ./target/release/examples/nasch-one-lane
@@ -111,7 +111,7 @@ hyperfine -i --shell=none --output=pipe --runs 30 --warmup 2 -n "Rust NaSch vers
 Add to `Cargo.toml`:
 ```toml
 [dependencies]
-micro_traffic_sim_core = "0.1.2"
+micro_traffic_sim_core = "0.1.11"
 ```
 
 ### Basic workflow overview
@@ -139,12 +139,13 @@ Currently supported levels are:
 
 How to set verbose level:
 ```rust
+use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::verbose::VerboseLevel;
 /* ... */
 fn main () {
   /* ... */
-  let mut session = Session::new(grids_storage, None); // Internal session's logger will be set to None automatically
-  session.set_verbose_level(VerboseLevel::Main); // Set desired level here
+  let mut session = Session::default(None);
+  session.set_verbose_level(VerboseLevel::Main);
   /* ... */
 }
 ```
@@ -169,7 +170,7 @@ fn main() {
     .with_forward_node(2)
     .with_left_node(7)
     .with_right_node(-1)
-    .with_meso_link_id(100500)
+    .with_meso_link(100500)
     .build();
   grid.add_cell(cell);
   cell_id += 1;
@@ -187,7 +188,7 @@ fn main() {
   - `Death` - Vehicles despawn here (end of road)  
   - `Common` - Regular road segment
 
-  All types are described in [`zones.rs`](src/grid/zones.rs).
+  All types are described in [`zones.rs`](src/grid/zones/zones.rs).
 - **`speed_limit`**: Maximum velocity in cellular automata units (integer, cells per simulation step)
 - **`left_cell`**: Cell ID for left lane changes (`CellID`, use `-1` if no connection available)
 - **`forward_cell`**: Cell ID for forward movement (`CellID`, use `-1` if no connection available)
@@ -268,6 +269,45 @@ fn main() {
 }
 ```
 
+### Experimental traffic-model extensions
+
+The API documentation marks the following model choices as `Experimental`. Their physical validation is limited to the tested configurations, so their rules or calibration may change.
+
+- `RelativeRandomization::KKW` is the project's Gao-inspired calibration used by behaviour presets. Its name does not imply a literal KKW implementation or complete three-phase validation. `RelativeRandomization::VDR` retains its separate longitudinal reduction contract.
+- Enabled `SynchronizationParameters` and the `COARSE_GRID` calibration configure optional speed adaptation and stochastic corrections. Synchronization is disabled in `Vehicle::new` and all behaviour presets. `COARSE_GRID` describes a tested one-cell population at 4.5 m and one-second ticks.
+- `LongitudinalClearance::MovingLeader` is an optional reserve policy with limited physical traffic-flow validation. `Conservative` remains the default. Both policies enforce the initial-occupancy and reserve contracts below.
+
+These choices do not establish three-phase behaviour across all driver populations and mixtures, or invariant propagation of the same jam front through free and synchronized traffic.
+
+### Spacing and interaction distances
+
+The following parameters serve different decisions. Distances use cells, speeds use cells per tick, and all movement decisions read the initial occupancy of the tick. Public field and builder names remain compatible with existing callers.
+
+| Setting | Meaning | Where it applies |
+|---|---|---|
+| `Vehicle::min_safe_distance` | Additional rear margin chosen by the merging vehicle | Lane-change safety in the target lane |
+| `Vehicle::standstill_gap` | Reserved empty cells ahead during forward motion and at rest | Longitudinal path clipping and source admission |
+| `SynchronizationParameters::time_gap` | Speed-dependent interaction-range coefficient | Adaptation toward a leader's speed when synchronization is enabled |
+| `LongitudinalClearance` | How the longitudinal reserve is enforced | Session policy, not a distance value |
+
+For lane changes, let `D` count steps from the target-lane rear body cell to the proposed merge cell. The rear check is `D >= rear_speed + min_safe_distance`; the margin belongs to the merging vehicle. `D` is not the number of empty cells: a rear vehicle in cell 8 and merge cell 10 give `D = 2`, with cell 9 empty. At rear speed 1, margin 1 passes and margin 2 fails. Cut-in aggressors bypass this rear check; forward safety and conflict handling are separate. `min_safe_distance` does not enforce a forward reserve.
+
+For straight following, let `d` be the initially empty cells before the leader, `g = standstill_gap`, and `u` the granted path length. Initial occupancy already limits `u <= d`. `Conservative`, the default, limits the move to `min(u, max(d - g, 0))`. `MovingLeader` limits it to `min(u, max(d + b - g, 0))`, where `b` is a frozen conservative displacement bound of an already moving one-cell leader on a verified forward path. A stopped or unsupported leader supplies `b = 0`. Neither policy extends `u` or enters another vehicle's initially occupied cell. An initially deficient reserve is not compressed further along the supported forward path.
+
+For example, put a follower in cell 10 and an already moving leader in cell 12, with a one-cell reserve and maximum one-cell movement. If the leader is guaranteed to reach cell 13, Conservative keeps the follower in 10 and MovingLeader permits cell 11, which was already empty. Neither permits cell 12. If the leader starts from rest in this tick, MovingLeader also keeps the follower in 10. If the leader instead begins in cell 11, both policies keep the follower in 10 even when the leader moves away.
+
+A moving vehicle uses `max(floor(time_gap * min(current_speed, effective_limit)), minimum_moving_range)` empty cells as its synchronization range. A nonpositive `time_gap` disables synchronization even when the minimum range is positive. This is an interaction range, not a requirement to keep that many cells empty. Safe path clipping and the longitudinal reserve still apply. Synchronization is disabled by default. Selecting MovingLeader does not enable it.
+
+| Behaviour | Lane-change rear margin | Longitudinal reserve |
+|---|---|---|
+| Block | 0 | 0 |
+| Aggressive | 0 | 0 |
+| Cooperative | 1 | 1 |
+| LimitSpeedByTrip | 1 | 1 |
+| Undefined | 0 | 1 |
+
+Use `with_min_safe_distance` and `with_standstill_gap` on a vehicle for these separate settings. Trips can override the longitudinal reserve with `with_standstill_gap`, or assign an approximate gap-one population share with `with_standstill_gap_share`; the share takes precedence over the fixed reserve. The current Trip API derives the lane-change rear margin from the selected behaviour. Choose the session policy with `set_longitudinal_clearance`.
+
 ### Creating vehicles statically
 
 Create individual vehicles with specific starting positions and routes.
@@ -295,6 +335,8 @@ fn main() {
 Vehicles can occupy multiple cells using `with_tail_size`. The tail follows the head through the road network.
 
 ```rust
+use micro_traffic_sim_core::agents::Vehicle;
+
 // Create a vehicle with head at cell 5 and tail occupying cells 3 and 4
 // Tail order: [furthest from head, ..., closest to head]
 let long_vehicle = Vehicle::new(1)
@@ -409,12 +451,10 @@ for step in 0..steps {
           let group_id = group.group_id;
           let signal = group.last_signal;
           println!(
-            "tl_step;{};{};{};{:.5};{:.5};{}",
+            "tl_step;{};{};{};{}",
             step,
             tl.0,
             group_id,
-            group.last_position.x,
-            group.last_position.y,
             signal
           );
         }
@@ -427,6 +467,8 @@ for step in 0..steps {
 }
 ```
 
+Traffic-light group states contain the group ID and signal. Coordinates are available from the configured traffic light through `session.get_tls_ref()` and `TrafficLight::get_coordinates()`.
+
 ### Analyzing results
 
 You can analyze the output data using various tools.
@@ -435,38 +477,36 @@ In the basic tutorial [`examples/tutorial`](examples/tutorial) states are aggreg
 
 <img src="examples/tutorial/example.gif" alt="Simulation output" width="840px"/>
 
-In the future, I plan to add example with visualization in the browser using gRPC/WebSockets for integration with server-side.
-
 ## Key modules / API pointers
 
 - Library entry: [`src/lib.rs`](src/lib.rs)
 - Geometry and spatial utilities:
-  - Point - [`src/geom/point.rs`](src/geom/point.rs)
-  - Utilities - [`src/geom/spatial.rs`](src/geom/spatial.rs)
+  - Point - [`src/geom/point/point.rs`](src/geom/point/point.rs)
+  - Utilities - [`src/geom/spatial/spatial.rs`](src/geom/spatial/spatial.rs)
 - Grid (road network graph):
-  - Cell unit - [`src/grid/cell.rs`](src/grid/cell.rs)
-  - Road network - [`src/grid/road_network.rs`](src/grid/road_network.rs)
+  - Cell unit - [`src/grid/cell/cell.rs`](src/grid/cell/cell.rs)
+  - Road network - [`src/grid/road_network/road_network.rs`](src/grid/road_network/road_network.rs)
 - Pathfinding:
-  - A* star for grid-based road network graph - [`src/shortest_path/router.rs`](src/shortest_path/router.rs)
+  - A* star for grid-based road network graph - [`src/shortest_path/router/router.rs`](src/shortest_path/router/router.rs)
 - Traffic lights and signals:
-  - Signals - [`src/traffic_lights/signals.rs`](src/traffic_lights/signals.rs)
-  - Signal groups (in context of single junction) - [`src/traffic_lights/groups.rs`](src/traffic_lights/groups.rs)
-  - Traffic light (as single junction) - [`src/traffic_lights/lights.rs`](src/traffic_lights/lights.rs)
+  - Signals - [`src/traffic_lights/signals/signals.rs`](src/traffic_lights/signals/signals.rs)
+  - Signal groups (in context of single junction) - [`src/traffic_lights/groups/groups.rs`](src/traffic_lights/groups/groups.rs)
+  - Traffic light (as single junction) - [`src/traffic_lights/lights/lights.rs`](src/traffic_lights/lights/lights.rs)
 - Agents and related functionality:
-  - Agents' behaviour types - [`src/agents/behaviour.rs`](src/agents/behaviour.rs)
-  - Vehicle agents - [`src/agents/vehicle.rs`](src/agents/vehicle.rs)
-  - Vehicles storage wrapper - [`src/agents/vehicles_storage.rs`](src/agents/vehicles_storage.rs)
+  - Agents' behaviour types - [`src/behaviour/behaviour/behaviour.rs`](src/behaviour/behaviour/behaviour.rs)
+  - Vehicle agents - [`src/agents/vehicle/vehicle.rs`](src/agents/vehicle/vehicle.rs)
+  - Vehicles storage wrapper - [`src/agents/vehicles_storage/vehicles_storage.rs`](src/agents/vehicles_storage/vehicles_storage.rs)
 - Trips
-  - Trips generation - [`src/trips/trip.rs`](src/trips/trip.rs)
+  - Trips generation - [`src/trips/trip/trip.rs`](src/trips/trip/trip.rs)
 - Intentions:
-    - Main utilities - [`src/intentions/intention.rs`](src/intentions/intention.rs)
-    - Intentions storage - [`src/intentions/intentions_datastorage.rs`](src/intentions/intentions_datastorage.rs)
-    - Intentions paths processing - [`src/intentions/intention_path.rs`](src/intentions/intention_path.rs)
+    - Main utilities - [`src/intentions/intention/intention.rs`](src/intentions/intention/intention.rs)
+    - Intentions storage - [`src/intentions/intentions_datastorage/intentions_datastorage.rs`](src/intentions/intentions_datastorage/intentions_datastorage.rs)
+    - Intentions paths processing - [`src/intentions/intention_path/intention_path.rs`](src/intentions/intention_path/intention_path.rs)
 - Conflicts & solvers:
   - Conflicts - [`src/conflicts`](src/conflicts)
   - Conflict zones - [`src/conflict_zones/conflict_zones.rs`](src/conflict_zones/conflict_zones.rs)
 - Movement
-    - Basic movement - [`src/movement/movement.rs`](src/movement/movement.rs)
+    - Basic movement - [`src/movement/movement/movement.rs`](src/movement/movement/movement.rs)
 - Simulation session and runtime:
-  - Grids storage (if future we can have multiple type of grids: for vehicles and for pedestrians) - [`src/simulation/grids_storage.rs`](src/simulation/grids_storage.rs)
-  - Simulation session and steps - [`src/simulation/session.rs`](src/simulation/session.rs)
+  - Grid and traffic-light storage - [`src/simulation/grids_storage/grids_storage.rs`](src/simulation/grids_storage/grids_storage.rs)
+  - Simulation session and steps - [`src/simulation/session/session.rs`](src/simulation/session/session.rs)

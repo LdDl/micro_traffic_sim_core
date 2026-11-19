@@ -1,0 +1,1470 @@
+use crate::behaviour::{BehaviourType, RelativeRandomization, SynchronizationParameters};
+
+use crate::agents::vehicle_intention::{TailIntentionManeuver, VehicleIntention};
+use crate::agents_types::AgentType;
+use crate::grid::cell::CellID;
+use crate::grid::road_network::GridRoads;
+use crate::maneuver::LaneChangeType;
+use crate::trips::trip::TripID;
+use std::cell::RefCell;
+use std::fmt;
+use std::rc::Rc;
+
+/// Errors returned by vehicle-related operations.
+#[derive(Debug, Clone)]
+pub enum VehicleError {
+    /// Indicates that a tail cell with the given ID was not found for the vehicle
+    TailCellNotFound {
+        /// The ID of the tail cell that was not found
+        cell_id: CellID,
+        /// The position (index) of the tail cell in the vehicle's tail cells list
+        position: usize,
+        /// The vehicle's identifier
+        vehicle_id: VehicleID,
+    },
+    /// Indicates that the provided cell ID is invalid
+    InvalidCell(CellID),
+}
+
+impl fmt::Display for VehicleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VehicleError::TailCellNotFound {
+                cell_id,
+                position,
+                vehicle_id,
+            } => {
+                write!(
+                    f,
+                    "Can't find tail cell with ID '{}' at position '{}' for vehicle '{}'",
+                    cell_id, position, vehicle_id
+                )
+            }
+            VehicleError::InvalidCell(cell_id) => {
+                write!(f, "Invalid cell ID '{}'", cell_id)
+            }
+        }
+    }
+}
+
+/// Just a shorthand for vehicle reference type
+/// Obsolete in terms of internal usage (it was used before passing VehiclesStorage
+/// to the simulation engine). Could be useful for external usage.
+pub type VehicleRef = Rc<RefCell<Vehicle>>;
+
+/// Vehicle unique identifier type
+pub type VehicleID = u64;
+
+/// Patience threshold (in steps) for the most aggressive vehicle (cooperativity 0):
+/// how long it loses contested cells before overriding right-of-way. SUMO's
+/// `--time-to-teleport` default is 300 s; we reuse it as the impatient end.
+pub const PATIENCE_MIN: i32 = 300;
+/// Patience threshold (in steps) for the fully cooperative vehicle (cooperativity 1):
+/// the most patient driver waits longer before forcing, but still finite (no permanent
+/// stall). Vehicles in between scale linearly with cooperativity.
+pub const PATIENCE_MAX: i32 = 700;
+
+/// Default completed waiting ticks before resolving a merge-priority cycle.
+/// This is an explicit initial setting, separate from the long patience override.
+pub const DEFAULT_YIELD_CYCLE_DELAY: i32 = 4;
+
+/// Aggression threshold above which a driver becomes a CUT-IN aggressor: it bypasses the
+/// rear-safety gap when changing lane (squeezing in front of a follower, forcing it to
+/// brake - see `check_alternate_direction`) AND wins a contested cell against any less
+/// aggressive vehicle, even one moving straight (see `aggressor_advantage`). It is a STRICT
+/// lower bound (aggressive_level > threshold), and since aggressive_level = 1 - cooperativity
+/// it is equivalent to cooperativity < 0.2. Below it, a driver respects the normal
+/// right-of-way and the full rear gap.
+pub const AGGRESSOR_CUT_IN_THRESHOLD: f64 = 0.8;
+
+/// Represents basic agent in simulation
+/// Id stored in `Vehicle::tail_cells` for a tail cell that has not materialized yet (the vehicle
+/// entered the network head first). Negative ids mean "no cell" everywhere in the core, so every
+/// real cell id, 0 included, is a valid tail position.
+pub const TAIL_PLACEHOLDER: CellID = -1;
+
+///
+/// # Examples
+///
+/// ```rust
+/// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
+/// use micro_traffic_sim_core::agents_types::AgentType;
+///
+/// // Create a basic vehicle
+/// let vehicle = Vehicle::new(1)
+///     .with_cell(10)
+///     .with_type(AgentType::Car)
+///     .with_destination(100)
+///     .build();
+/// ```
+///
+#[derive(Debug)]
+pub struct Vehicle {
+    /// Unique identifier
+    pub id: VehicleID,
+    /// Agent type. See the ref. at `AgentType`
+    pub vehicle_type: AgentType,
+    /// Movement strategy. See the ref. at `BehaviourType`
+    pub strategy_type: BehaviourType,
+
+    /// Currently occupied cell
+    pub cell_id: CellID,
+
+    /// Currently occupied cells by tail (in case when vehicle has size more that one cell)
+    /// Order: [furthest from head, ..., closest to head]
+    /// E.g. grid [1->2->3->4->5], vehicle's head in cell 4, size is 2. Then the tail cells are [2, 3]
+    /// where index 0 (cell 2) is furthest and index 1 (cell 3) is closest to head
+    ///
+    /// NOTE: Gradual Materialization - When a vehicle is spawned from a trip generator, this vector
+    /// starts empty even if tail_size > 0. The tail "materializes" gradually as the vehicle moves:
+    /// each cell the head passes through becomes a tail cell. This models a vehicle "entering" the
+    /// network head-first. During this growth period, len(tail_cells) < tail_size is expected.
+    /// See also: Trip::vehicle_tail_size.
+    pub tail_cells: Vec<CellID>,
+
+    /// Current speed
+    pub speed: i32,
+    /// Maximum speed which can be reached by the vehicle. If value is greater than maximum speed
+    /// in cell then the vehicle will be limited to cell's speed limit
+    pub speed_limit: i32,
+    /// Current bearing (direction angle)
+    pub bearing: f64,
+    /// Additional rear safety margin for this vehicle's lane-change decision, in cells.
+    /// The target-lane rear vehicle must satisfy D >= rear_speed + min_safe_distance,
+    /// where D counts steps from its occupied cell to the proposed merge cell.
+    /// Cut-in aggressors bypass this rear check. Forward spacing uses standstill_gap.
+    pub min_safe_distance: i32,
+    /// Reserved longitudinal clearance (in cells), also enforced during forward motion.
+    /// The session's LongitudinalClearance policy enforces this reserve after path grants.
+    /// Conservative uses the leader's initial position; MovingLeader can credit a frozen
+    /// motion bound for an already moving one-cell leader. Neither extends the granted
+    /// path into a cell initially occupied by another vehicle.
+    /// A valid initial gap remains at least this large after the parallel move.
+    /// An initially smaller gap is not compressed further; this does not move cars backward.
+    /// Close stopped queues also claim the gap as a front occupancy buffer.
+    /// Zero keeps the classic bumper to bumper rule. Lateral moves use conflict handling.
+    /// Forward reserve lookahead ends at a planned route exit when the route cache
+    /// matches the granted path; a queue beyond that exit does not block the turn.
+    ///
+    /// With one vehicle per cell and no gap the jam density is one vehicle per cell length,
+    /// 222 veh/km at 4.5 m. Calibrated CA models use 7.5 m per vehicle in a jam (133 veh/km): the
+    /// cell stands for the space a vehicle occupies in a jam, its length plus the gap ahead
+    /// (Knospe, Santen, Schadschneider, Schreckenberg 2004, doi:10.1103/PhysRevE.70.016115), and
+    /// KKW models use a vehicle length d = 7.5 m that includes that gap (Kerner, Klenov, Wolf 2002,
+    /// doi:10.1088/0305-4470/35/47/303). By conservation of vehicles at the jam front a too dense
+    /// jam also makes jam fronts too slow. The gap keeps the cell at the physical vehicle length
+    /// and adds the jam spacing explicitly: one empty cell gives 9 m per vehicle in a jam.
+    pub standstill_gap: i32,
+    /// Randomization relative to the leader and the stop-time threshold.
+    /// The default is VDR, while behaviour presets use the experimental
+    /// [`RelativeRandomization::KKW`] calibration.
+    pub relative_randomization: RelativeRandomization,
+    /// Speed adaptation and stochastic corrections within a synchronization distance.
+    /// Disabled by default. When enabled, these corrections replace relative randomization.
+    pub synchronization: SynchronizationParameters,
+    /// Consecutive ticks the vehicle has stood, 0 while it moves (t_st of Gao 2007); updated when
+    /// an intention is applied.
+    ///
+    /// This counter alone does not classify synchronized flow or a wide moving jam.
+    /// Keep stopped vehicles in phase measurements; see the phase-observation discussion
+    /// in [`SynchronizationParameters`].
+    pub stop_ticks: i32,
+    /// Final cell for the vehicle's trip
+    pub destination: CellID,
+    /// Final trip destination (immutable, used for completion check; destination may change for transit cells)
+    pub trip_destination: CellID,
+
+    /// A boolean indicating if the vehicle is a confclict participant
+    pub is_conflict_participant: bool,
+    /// Consecutive steps the vehicle has failed to move. Drives the patience-based
+    /// right-of-way override: once `wait_steps` reaches the vehicle's cooperativity-scaled
+    /// patience threshold, the vehicle wins contested cells in conflict resolution
+    /// ("desperate" - see `Vehicle::is_desperate`). Reset to 0 on any actual move.
+    pub wait_steps: i32,
+    /// Completed cycle-related waiting ticks required before this driver may break a cycle.
+    pub yield_cycle_delay: i32,
+    /// Cycle-related waiting accumulated since the last actual movement.
+    /// Unrelated stops pause this counter, and merely losing arbitration does not reset it.
+    pub yield_cycle_wait_steps: i32,
+    /// Whether a cycle decision held this vehicle during the current tick.
+    yield_cycle_held: bool,
+    /// Corresponding trip identifier
+    pub trip: TripID,
+    /// Number of transits have been made by the vehicle
+    transits_made: u64,
+    /// Cells which must be traversed in exact given order by the vehicle
+    pub transit_cells: Vec<CellID>,
+    /// NaSch random-slowdown (dawdle) probability `p`: a MOVING vehicle (speed > 0) decelerates by one
+    /// with this probability each step (`v -> max(v-1, 0)`). This is the canonical
+    /// Nagel-Schreckenberg randomization parameter. In `[0, 1]` (0 = deterministic behaviour).
+    /// The VDR stopped-vehicle counterpart is `p0` (field `slow_to_start_factor_p0`).
+    pub slow_down_factor_p: f64,
+    /// VDR (Velocity-Dependent Randomization) parameter `p0`, (I use "slow-to-start" probability elsewhere):
+    /// the dawdle probability used while the vehicle is STOPPED (speed == 0),
+    /// as opposed to `p` (the moving probability, field `slow_down_factor_p`).
+    /// VDR makes the random-slowdown probability depend on speed (here two levels: `p0` for stopped, `p` for moving).
+    /// When `p0 > p` a stopped vehicle is more reluctant to start than a moving one dawdles,
+    /// so a jam discharges slower than it fills: this yields the realistic capacity drop
+    /// and the metastable / hysteretic flow near the critical density (the VDR signature).
+    /// `p0 == p` disables the asymmetry and the model reduces to plain NaSch.
+    /// In `[0, 1]`.
+    pub slow_to_start_factor_p0: f64,
+    /// Lane-change probability: once the incentive + safety conditions hold, the
+    /// change is taken only with this probability - the canonical stochastic anti-weaving gate.
+    /// `1.0` (default) = always change when conditions hold (= current behaviour, no refusal).
+    /// All vehicle lengths use this configured probability. There is no separate truck P2.
+    /// In (0, 1].
+    pub change_p1: f64,
+    /// Lane-change hysteresis: steps remaining during which a REACTIVE (blocked-escape) lane
+    /// change is suppressed after the vehicle just changed lanes - so a car cannot immediately
+    /// weave back (A->B->A) or hop across lanes step-by-step. Does NOT block route-following
+    /// maneuvers or the forward roll. 0 = free to react.
+    pub timer_reactive_lane_change: i64,
+    /// Lane-change cooldown DURATION (steps): the value `timer_reactive_lane_change` is armed to
+    /// right after a REACTIVE lane change - how many steps another reactive (blocked-escape) change
+    /// stays suppressed (anti-weaving: no A->B->A weave-back / lane-hopping). Route-following
+    /// maneuvers are NOT affected. Per-vehicle / per-driver-type: `0` = changes freely (aggressive),
+    /// larger = more hesitant (cooperative / unsure).
+    /// Could be set from `BehaviourParameters`.
+    pub lc_cooldown: i64,
+    /// A value in (0; 1] representing cooperative behaviour of the vehicle.
+    /// 0 - when behaviour considered to be "aggressive"
+    /// 1 - fully cooperative
+    pub cooperativity: f64,
+    /// Delay time (in time units) between two possible accelerations vehicle can do.
+    /// It could be used to prohibit to the vehicle to do sequential acceleration during simulation.
+    pub timer_non_acceleration: i64,
+    /// Delay time (in time units) between two possible maneuvers vehicle can perform.
+    /// It could be used to prohibit to the vehicle to perform sequential maneuvers during simulation.
+    pub timer_non_maneuvers: i64,
+    /// Delay time (in time units) between two possible slowdowns vehicle can do.
+    /// It could be used to prohibit to the vehicle to do sequential maneuvers during simulation.
+    pub timer_non_slowdown: i64,
+    /// Relaxation time (in time units) in the transit cells (in case when they are set)
+    pub relax_time: i32,
+    // Timer for `relax_time` field
+    relax_countdown: i32,
+
+    /// Travel time (in time units) which vehicle has been in movement state.
+    pub travel_time: i64,
+
+    /// @todo: for further research and development needs
+    pub confusion: bool,
+
+    /// Cached route to the destination as an ordered list of cell IDs
+    /// (origin first, destination last), built by a full A* at spawn / on reroute.
+    /// Per-step the vehicle follows this list cheaply instead of re-running A*.
+    /// Empty means "no cached route" (fall back to per-step routing).
+    pub cached_route: Vec<CellID>,
+    /// Index into `cached_route` of the vehicle's current head cell.
+    pub route_idx: usize,
+    /// Simulation step at which the route was last (re)computed; used to schedule
+    /// the next staggered reroute.
+    pub last_reroute: i32,
+
+    /// Vehicle's intention to perform maneuver and other actions
+    pub intention: VehicleIntention,
+}
+
+impl Vehicle {
+    /// Constructs a new `VehicleBuilder` for building a `Vehicle` object.
+    ///
+    /// # Arguments
+    /// * `id` - A unique identifier for the vehicle.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` struct which is used to configure and build the `Vehicle` object.
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_cell(1)
+    ///     .with_destination(100)
+    ///     .with_type(AgentType::Car)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn new(id: u64) -> VehicleBuilder {
+        VehicleBuilder {
+            vehicle: Vehicle {
+                id,
+                vehicle_type: AgentType::Car,
+                strategy_type: BehaviourType::Aggressive,
+                cell_id: -1,
+                tail_cells: Vec::new(),
+                speed: 1,
+                speed_limit: 4,
+                bearing: 0.0,
+                min_safe_distance: 0,
+                standstill_gap: 0,
+                relative_randomization: RelativeRandomization::VDR,
+                synchronization: SynchronizationParameters::DISABLED,
+                stop_ticks: 0,
+                destination: -1,
+                trip_destination: -1,
+                is_conflict_participant: false,
+                wait_steps: 0,
+                yield_cycle_delay: DEFAULT_YIELD_CYCLE_DELAY,
+                yield_cycle_wait_steps: 0,
+                yield_cycle_held: false,
+                trip: -1,
+                transits_made: 0,
+                transit_cells: Vec::new(),
+                slow_down_factor_p: 0.1,
+                slow_to_start_factor_p0: 0.1,
+                change_p1: 1.0,
+                timer_reactive_lane_change: 0,
+                lc_cooldown: 0,
+                cooperativity: 0.0,
+                timer_non_acceleration: 0,
+                timer_non_maneuvers: 0,
+                timer_non_slowdown: 0,
+                relax_time: 0,
+                relax_countdown: 0,
+                travel_time: 0,
+                confusion: false,
+                cached_route: Vec::new(),
+                route_idx: 0,
+                last_reroute: -1,
+                intention: VehicleIntention::default(),
+            },
+        }
+    }
+
+    /// Advances the cached-route cursor (`route_idx`) so that
+    /// `cached_route[route_idx] == cell_id`, searching forward from the current
+    /// cursor (the vehicle only ever moves forward along its route). No-op if the
+    /// route is empty. Returns `true` if the cursor now points at the current cell,
+    /// `false` if the current cell was not found ahead on the route (the vehicle
+    /// fell off its cached route - the caller falls back to full routing / reconnect).
+    pub fn advance_route_cursor(&mut self) -> bool {
+        if self.cached_route.is_empty() {
+            return false;
+        }
+        let mut i = self.route_idx.min(self.cached_route.len() - 1);
+        while i < self.cached_route.len() {
+            if self.cached_route[i] == self.cell_id {
+                self.route_idx = i;
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// Clears the cached route (e.g. when the destination changes), forcing the
+    /// next step to fall back to full routing.
+    pub fn clear_cached_route(&mut self) {
+        self.cached_route.clear();
+        self.route_idx = 0;
+    }
+
+    /// Increments number of transit have been made by vehicle
+    ///
+    /// # Returns
+    /// Nothing
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(1)
+    ///     .with_destination(100)
+    ///     .with_type(AgentType::Car)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// vehicle.transits_made_inc();
+    /// ```
+    pub fn transits_made_inc(&mut self) {
+        self.transits_made += 1;
+    }
+    /// Returns number of transits have been made by vehicle
+    ///
+    /// # Returns
+    /// Number of transits have been made by vehicle
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(1)
+    ///     .with_destination(100)
+    ///     .with_type(AgentType::Car)
+    ///     .build();
+    /// vehicle.transits_made_inc();
+    /// vehicle.transits_made_inc();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// println!("Transits have been made: {:?}", vehicle.get_transits_made()); // Should output 2
+    /// ```
+    pub fn get_transits_made(&self) -> u64 {
+        self.transits_made
+    }
+    /// Decrements decrements countdown timer for relaxation in occupied transit cell
+    ///
+    /// # Returns
+    /// Nothing
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(3)
+    ///     .with_destination(100)
+    ///     .with_type(AgentType::Car)
+    ///     .with_transit_cells(vec![3, 8])
+    ///     .with_relax_time(9)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// vehicle.relax_countdown_dec();
+    /// ```
+    pub fn relax_countdown_dec(&mut self) {
+        self.relax_countdown -= 1;
+    }
+
+    /// Resets resets countdown timer for relaxation (to a value of `RelaxTime“ field)  in occupied transit cell
+    ///
+    /// # Returns
+    /// Nothing
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(3)
+    ///     .with_destination(100)
+    ///     .with_type(AgentType::Car)
+    ///     .with_transit_cells(vec![3, 8])
+    ///     .with_relax_time(9)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// vehicle.relax_countdown_reset();
+    /// ```
+    pub fn relax_countdown_reset(&mut self) {
+        self.relax_countdown = self.relax_time
+    }
+
+    /// Returns number of time units which is remaining for the vehicle to be in occupied transit cell
+    ///
+    /// # Returns
+    /// Number of time units which is remaining for the vehicle to be in occupied transit cell
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(3)
+    ///     .with_destination(100)
+    ///     .with_type(AgentType::Car)
+    ///     .with_transit_cells(vec![3, 8])
+    ///     .with_relax_time(9)
+    ///     .build();
+    /// vehicle.relax_countdown_dec();
+    /// vehicle.relax_countdown_dec();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// println!("Remaining time units to be in transit cell: {:?}", vehicle.get_relax_countdown()); // Should output 7
+    /// vehicle.relax_countdown_reset();
+    /// println!("Remaining time units to be in transit cell: {:?}", vehicle.get_relax_countdown()); // Should output 9
+    /// ```
+    pub fn get_relax_countdown(&self) -> i32 {
+        self.relax_countdown
+    }
+
+    /// Sets the vehicle's intention
+    ///
+    /// # Arguments
+    /// * `intention` - The vehicle's intention. See the ref. at `VehicleIntention`
+    ///
+    /// # Example
+    /// ```
+    /// use micro_traffic_sim_core::maneuver::LaneChangeType;
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::{Vehicle, VehicleIntention};
+    /// let mut vehicle = Vehicle::new(1)
+    ///   .with_cell(3)
+    ///   .with_destination(100)
+    ///   .with_type(AgentType::Car)
+    ///   .build();
+    /// let mut intention = VehicleIntention::default();
+    /// intention.intention_maneuver = LaneChangeType::ChangeRight;
+    /// intention.intention_cell_id = 10;
+    /// vehicle.set_intention(intention);
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn set_intention(&mut self, intention: VehicleIntention) {
+        self.intention = intention;
+    }
+    /// Blocks the vehicle in its current cell with a specified speed.
+    pub fn block_with_speed(&mut self, speed: i32) {
+        self.intention.intention_cell_id = self.cell_id;
+        self.intention.intention_speed = speed;
+        self.intention.intention_maneuver = LaneChangeType::Block;
+        self.intention.intermediate_cells = vec![];
+    }
+    /// Updates the vehicle's tail maneuver by scanning occupied cells and determining if vehicle is in lane changing process
+    ///
+    /// # Arguments
+    /// * `net` - The road network grid
+    ///
+    /// Returns [`VehicleError::TailCellNotFound`] if a tail cell ID doesn't exist in the grid,
+    /// or [`VehicleError::InvalidCell`] if a cell ID is invalid.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// use micro_traffic_sim_core::grid::road_network::GridRoads;
+    ///
+    /// let net = GridRoads::new();
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(10)
+    ///     .with_tail_size(2, vec![8, 9])
+    ///     .build();
+    /// let tail_maneuver = vehicle.scan_tail_maneuver(&net);
+    /// println!("Tail maneuver: {:?}", tail_maneuver);
+    /// ```
+    pub fn scan_tail_maneuver(
+        &self,
+        net: &GridRoads,
+    ) -> Result<TailIntentionManeuver, VehicleError> {
+        if self.tail_cells.is_empty() {
+            return Ok(TailIntentionManeuver::default());
+        }
+
+        // Scan sequential cells
+        for (idx, window) in self.tail_cells.windows(2).enumerate() {
+            let [from_id, to_id] = window else { continue };
+
+            if *from_id < 0 {
+                continue;
+            }
+
+            let from_cell = net
+                .get_cell(from_id)
+                .ok_or(VehicleError::TailCellNotFound {
+                    cell_id: *from_id,
+                    position: idx,
+                    vehicle_id: self.id,
+                })?;
+
+            match (*to_id, from_cell) {
+                (id, _) if id == from_cell.get_forward_id() => continue,
+                (id, _) if id == from_cell.get_right_id() => {
+                    return Ok(TailIntentionManeuver {
+                        source_cell_maneuver: *from_id,
+                        target_cell_maneuver: *to_id,
+                        intention_maneuver: LaneChangeType::ChangeRight,
+                    });
+                }
+                (id, _) if id == from_cell.get_left_id() => {
+                    return Ok(TailIntentionManeuver {
+                        source_cell_maneuver: *from_id,
+                        target_cell_maneuver: *to_id,
+                        intention_maneuver: LaneChangeType::ChangeLeft,
+                    });
+                }
+                _ => continue,
+            }
+        }
+
+        // Check final cell
+        let last_id = self.tail_cells[self.tail_cells.len() - 1];
+        if last_id >= 0 {
+            let last_cell = net
+                .get_cell(&last_id)
+                .ok_or(VehicleError::TailCellNotFound {
+                    cell_id: last_id,
+                    position: self.tail_cells.len() - 1,
+                    vehicle_id: self.id,
+                })?;
+
+            if self.cell_id == last_cell.get_right_id() {
+                return Ok(TailIntentionManeuver {
+                    source_cell_maneuver: last_id,
+                    target_cell_maneuver: self.cell_id,
+                    intention_maneuver: LaneChangeType::ChangeRight,
+                });
+            }
+            if self.cell_id == last_cell.get_left_id() {
+                return Ok(TailIntentionManeuver {
+                    source_cell_maneuver: last_id,
+                    target_cell_maneuver: self.cell_id,
+                    intention_maneuver: LaneChangeType::ChangeLeft,
+                });
+            }
+        }
+        Ok(TailIntentionManeuver {
+            source_cell_maneuver: self.cell_id,
+            target_cell_maneuver: if self.intention.intention_cell_id < 0 {
+                self.cell_id
+            } else {
+                self.intention.intention_cell_id
+            },
+            intention_maneuver: self.intention.intention_maneuver,
+        })
+    }
+
+    /// Applies vehicle's intention to the vehicle's current state
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// use micro_traffic_sim_core::maneuver::LaneChangeType;
+    ///
+    /// let mut vehicle = Vehicle::new(1)
+    ///     .with_cell(10)
+    ///     .with_destination(100)
+    ///     .with_speed(1)
+    ///     .build();
+    ///
+    /// // Set some intention
+    /// vehicle.intention.intention_speed = 3;
+    /// vehicle.intention.destination = Some(200);
+    /// vehicle.intention.confusion = Some(true);
+    ///
+    /// // Apply the intention
+    /// vehicle.apply_intention();
+    ///
+    /// // Now vehicle state is updated
+    /// assert_eq!(vehicle.speed, 3);
+    /// assert_eq!(vehicle.destination, 200);
+    /// assert_eq!(vehicle.confusion, true);
+    /// ```
+    pub fn apply_intention(&mut self) {
+        // No need to update cell_id. It is done in movement.rs
+        self.speed = self.intention.intention_speed;
+        self.stop_ticks = if self.speed == 0 {
+            self.stop_ticks.saturating_add(1)
+        } else {
+            0
+        };
+        // Apply destination if set in intention
+        if let Some(destination) = self.intention.destination {
+            self.destination = destination;
+        }
+        // Apply confusion state if set in intention
+        if let Some(confusion) = self.intention.confusion {
+            self.confusion = confusion;
+        }
+        // No need to update tails cells. It is done in movement.rs
+    }
+
+    /// Returns the first cell of a currently permitted move, excluding a held intention.
+    pub fn first_motion_cell(&self) -> Option<CellID> {
+        if self.intention.intention_cell_id == self.cell_id
+            || self.intention.intention_maneuver == LaneChangeType::Block
+            || self.intention.intention_speed <= 0
+        {
+            return None;
+        }
+        self.intention
+            .intermediate_cells
+            .first()
+            .copied()
+            .or(Some(self.intention.intention_cell_id))
+            .filter(|&cell| cell >= 0 && cell != self.cell_id)
+    }
+
+    /// Retains at most the first cell of the current move and rebuilds its tail.
+    /// A held intention stays blocked; priority cannot restore an earlier denied move.
+    pub fn restrict_intention_to_first_step(&mut self) {
+        if let Some(first) = self.first_motion_cell() {
+            self.set_single_step_intention(first);
+        } else {
+            self.block_with_speed(0);
+        }
+    }
+
+    /// Rewrites the intention to an explicitly supplied adjacent cell and rebuilds the tail.
+    /// Conflict resolution uses `restrict_intention_to_first_step` to preserve the existing path.
+    ///
+    /// # Arguments
+    /// * `target` - Adjacent destination cell for the replacement intention
+    pub fn set_single_step_intention(&mut self, target: CellID) {
+        self.intention.intention_cell_id = target;
+        self.intention.intermediate_cells.clear();
+        self.intention.intention_speed = 1;
+        self.intention.tail_intention_cells.clear();
+        if !self.tail_cells.is_empty() {
+            // Reuse the intention buffer while dropping the furthest tail cell.
+            self.intention
+                .tail_intention_cells
+                .extend_from_slice(&self.tail_cells[1..]);
+            self.intention.tail_intention_cells.push(self.cell_id);
+        }
+    }
+
+    /// Shortens a forward intention to its first `new_len` cells and keeps the tail intention
+    /// consistent with the shorter move. `new_len == 0` means the vehicle stays in place.
+    /// Used by the standstill gap: the claim up to the leader takes part in conflict resolution,
+    /// the executed move leaves a reserve behind the leader's initial body.
+    ///
+    /// # Arguments
+    /// * `new_len` - Number of cells the vehicle actually moves this tick
+    pub fn trim_forward_intention(&mut self, new_len: usize) {
+        if self.intention.intention_cell_id == self.cell_id {
+            return;
+        }
+        let mut path: Vec<CellID> = self.intention.intermediate_cells.clone();
+        path.push(self.intention.intention_cell_id);
+        if new_len >= path.len() {
+            return;
+        }
+        path.truncate(new_len);
+        if let Some(&last) = path.last() {
+            self.intention.intention_cell_id = last;
+            self.intention.intermediate_cells = path[..path.len() - 1].to_vec();
+        } else {
+            self.intention.intention_cell_id = self.cell_id;
+            self.intention.intermediate_cells.clear();
+        }
+        self.intention.intention_speed = new_len as i32;
+        self.intention.tail_intention_cells = self.tail_intention_for_current();
+    }
+
+    /// Tail cells after executing the current intention, same rules as the intention storage uses.
+    fn tail_intention_for_current(&self) -> Vec<CellID> {
+        let tail_size = self.tail_cells.len();
+        if tail_size == 0 {
+            return vec![];
+        }
+        let mut tail = vec![TAIL_PLACEHOLDER; tail_size];
+        let skip = self.intention.intermediate_cells.len();
+        if self.intention.intention_cell_id != self.cell_id && skip > 0 && skip < tail_size {
+            tail[0..(tail_size - skip - 1)].copy_from_slice(&self.tail_cells[(skip + 1)..]);
+            tail[tail_size - skip - 1] = self.cell_id;
+            tail[(tail_size - skip)..].copy_from_slice(&self.intention.intermediate_cells);
+        } else if self.intention.intention_cell_id != self.cell_id && skip >= tail_size {
+            tail.copy_from_slice(&self.intention.intermediate_cells[skip - tail_size..]);
+        } else {
+            for i in 0..tail_size - 1 {
+                tail[i] = self.tail_cells[i + 1];
+            }
+            tail[tail_size - 1] = self.cell_id;
+        }
+        tail
+    }
+
+    /// Slow to start probability of a vehicle of `length_cells` cells that keeps `standstill_gap`
+    /// empty cells in a jam, derived from the probability `p0` of a one cell vehicle with the same
+    /// behaviour and gap.
+    ///
+    /// A vehicle leaves a jam after the mean escape delay tau / (1 - p0), and each departure moves the
+    /// downstream jam front back by the space the vehicle occupies in the jam, its length plus its
+    /// gap (Kerner, Klenov, Wolf 2002, doi:10.1088/0305-4470/35/47/303, p. 8: v_g = d / tau_del).
+    /// Empirically the velocity of the downstream front of a wide moving jam does not depend on the
+    /// percentage of trucks, while the jam outflow and the jam density do (Kerner 2004, The Physics
+    /// of Traffic, doi:10.1007/978-3-540-40986-1, p. 308, Fig. 11.2). Keeping the space per escape
+    /// delay equal to that of a one cell vehicle gives
+    /// p0(L) = 1 - (1 - p0) * (1 + g) / (L + g),
+    /// so a longer vehicle departs later. For a fixed gap shared by every length class, the ideal
+    /// renewal front speed stays the same for any vehicle mix, and
+    /// lanes with more long vehicles get a lower outflow and a lower jam density, as observed.
+    /// For a heterogeneous gap population, use slow_to_start_for_mean_gap with a common
+    /// class mean; applying this helper to individual gaps does not establish mixture invariance.
+    ///
+    /// # Arguments
+    /// * `p0` - Slow to start probability of a one cell vehicle, clamped to [0, 1].
+    /// * `length_cells` - Cells the vehicle occupies (head plus tail); 1 or less returns `p0`.
+    /// * `standstill_gap` - Longitudinal reserve in cells; its queue value enters this scaling (negative counts as 0).
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// assert_eq!(Vehicle::slow_to_start_for_length(0.425, 1, 1), 0.425);
+    /// // A two cell truck with a one cell gap occupies 3 cells instead of 2.
+    /// let p = Vehicle::slow_to_start_for_length(0.425, 2, 1);
+    /// assert!((p - (1.0 - 0.575 * 2.0 / 3.0)).abs() < 1e-12);
+    /// ```
+    pub fn slow_to_start_for_length(p0: f64, length_cells: i32, standstill_gap: i32) -> f64 {
+        let p0 = p0.clamp(0.0, 1.0);
+        if length_cells <= 1 {
+            return p0;
+        }
+        let gap = standstill_gap.max(0) as f64;
+        1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
+    }
+
+    /// Length-scaled slow-to-start probability for a population with a common mean gap.
+    ///
+    /// Under ready-head renewal assumptions, each length class has mean spacing L+g
+    /// and mean delay 1/(1-p). Using the same mean g for every length class preserves
+    /// their common spacing-to-delay ratio when the length mixture changes.
+    /// Length-dependent gap populations require a separate common-reference calibration.
+    /// This does not prove independence from downstream blocking or tail clearance.
+    ///
+    /// # Arguments
+    ///
+    /// * `p0` - Reference one-cell probability, clamped to `[0,1]`.
+    /// * `length_cells` - Materialized body length including the head; at most one keeps p0.
+    /// * `mean_gap` - Common population mean empty cells; negative or non-finite values use zero.
+    pub fn slow_to_start_for_mean_gap(p0: f64, length_cells: i32, mean_gap: f64) -> f64 {
+        let p0 = p0.clamp(0.0, 1.0);
+        if length_cells <= 1 {
+            return p0;
+        }
+        let gap = if mean_gap.is_finite() {
+            mean_gap.max(0.0)
+        } else {
+            0.0
+        };
+        1.0 - (1.0 - p0) * (1.0 + gap) / (length_cells as f64 + gap)
+    }
+
+    /// Whether this driver has completed its merge-cycle waiting delay.
+    pub fn yield_cycle_ready(&self) -> bool {
+        self.yield_cycle_wait_steps >= self.yield_cycle_delay.max(0)
+    }
+
+    /// Records that a merge-cycle decision held this vehicle in the current tick.
+    /// Repeated marks still count as at most one waiting tick when movement is applied.
+    pub fn hold_for_yield_cycle(&mut self) {
+        self.yield_cycle_held = true;
+    }
+
+    /// Applies the cycle clock once, using actual movement and stop eligibility.
+    ///
+    /// # Arguments
+    /// * `moved` - Actual movement, which clears accumulated cycle waiting.
+    /// * `eligible_wait` - The vehicle stayed put without red-light or dwell restrictions.
+    pub fn update_yield_cycle_wait(&mut self, moved: bool, eligible_wait: bool) {
+        if moved {
+            self.yield_cycle_wait_steps = 0;
+        } else if self.yield_cycle_held && eligible_wait {
+            self.yield_cycle_wait_steps = self.yield_cycle_wait_steps.saturating_add(1);
+        }
+        self.yield_cycle_held = false;
+    }
+
+    /// The ordinary patience threshold; merge cycles use `yield_cycle_delay`.
+    /// It specifies how long the vehicle tolerates losing
+    /// contested cells before overriding right-of-way. Scaled by cooperativity so
+    /// every vehicle eventually forces (the threshold is always finite), but more
+    /// cooperative drivers wait longer: aggressive (cooperativity 0) -> `PATIENCE_MIN`,
+    /// fully cooperative (cooperativity 1) -> `PATIENCE_MAX`.
+    pub fn patience(&self) -> i32 {
+        let coop = self.cooperativity.clamp(0.0, 1.0);
+        PATIENCE_MIN + (coop * (PATIENCE_MAX - PATIENCE_MIN) as f64).round() as i32
+    }
+
+    /// True when the vehicle has been stuck for at least its patience threshold and is
+    /// therefore allowed to win a contested (free) cell in conflict resolution. It only
+    /// ever takes effect inside the conflict solver, which exists solely for free cells,
+    /// so a vehicle blocked by an occupied cell (a queue follower) is never desperate in
+    /// any useful sense; and it never overrides a `Tail` (physical body) conflict.
+    pub fn is_desperate(&self) -> bool {
+        self.wait_steps >= self.patience()
+    }
+
+    /// The vehicle's aggressiveness in [0, 1], the complement of its cooperativity
+    /// (`aggressive_level = 1 - cooperativity`). A single style axis: high aggression =
+    /// low cooperativity. Used by the cut-in rules (see `is_aggressor`).
+    pub fn aggressive_level(&self) -> f64 {
+        1.0 - self.cooperativity
+    }
+
+    /// True when the vehicle is a CUT-IN aggressor: its aggressive_level strictly exceeds
+    /// `AGGRESSOR_CUT_IN_THRESHOLD`. Such a driver squeezes in front of followers (bypassing
+    /// the rear-safety gap on a lane change) and wins contested cells against less aggressive
+    /// vehicles, even ones moving straight - it "cuts in", forcing the other to brake.
+    pub fn is_aggressor(&self) -> bool {
+        self.aggressive_level() > AGGRESSOR_CUT_IN_THRESHOLD
+    }
+}
+
+/// A builder pattern implementation for constructing `Vehicle` objects.
+///
+/// `VehicleBuilder` allows for optional configuration of `Vehicle` fields before building the final `Vehicle` object.
+pub struct VehicleBuilder {
+    vehicle: Vehicle,
+}
+
+impl VehicleBuilder {
+    /// Sets the agent type of the vehicle.
+    ///
+    /// # Arguments
+    /// * `typ` - The type of the agent. See the ref. at `AgentType`
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents_types::AgentType;
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_type(AgentType::Bus)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_type(mut self, typ: AgentType) -> Self {
+        self.vehicle.vehicle_type = typ;
+        self
+    }
+
+    /// Sets the movement strategy for the vehicle.
+    ///
+    /// # Arguments
+    /// * `typ` - The behavior type. See the ref. at `BehaviourType`
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::behaviour::BehaviourType;
+    /// use micro_traffic_sim_core::agents::{Vehicle};
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_behaviour(BehaviourType::Cooperative)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_behaviour(mut self, typ: BehaviourType) -> Self {
+        self.vehicle.strategy_type = typ;
+        self
+    }
+
+    /// Sets the current cell ID where the vehicle is located.
+    ///
+    /// # Arguments
+    /// * `cell` - The ID of the cell where the vehicle is currently positioned.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_cell(10)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_cell(mut self, cell_id: CellID) -> Self {
+        self.vehicle.cell_id = cell_id;
+        self
+    }
+
+    /// Sets currently occupied cells by tail (in case when vehicle has size more that one cell).
+    /// The occupied cells must be provided in order: [furthest from head, ..., closest to head].
+    /// With an empty `cells` list the tail starts as `TAIL_PLACEHOLDER` entries and materializes
+    /// as the head moves.
+    ///
+    /// # Arguments
+    /// * `size` - The size of the vehicle's tail (number of cells behind head).
+    /// * `cells` - A list of cell IDs currently occupied by the tail.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// // For head at cell 13 with tail size 2, cell 11 is furthest, cell 12 is closest
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_cell(13)
+    ///     .with_tail_size(2, vec![11, 12])
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_tail_size(mut self, size: usize, cells: Vec<CellID>) -> Self {
+        self.vehicle.tail_cells = vec![TAIL_PLACEHOLDER; size];
+        if !cells.is_empty() {
+            self.vehicle.tail_cells.copy_from_slice(&cells);
+        }
+        self
+    }
+
+    /// Sets the current speed of the vehicle.
+    ///
+    /// # Arguments
+    /// * `speed` - The speed (in cells per time unit)
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_speed(5)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_speed(mut self, speed: i32) -> Self {
+        self.vehicle.speed = speed;
+        self
+    }
+
+    /// Sets the speed limit for the vehicle, which is the maximum speed it can travel at.
+    ///
+    /// # Arguments
+    /// * `speed_limit` - The speed limit (in cells per time unit)
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_speed_limit(10)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_speed_limit(mut self, speed_limit: i32) -> Self {
+        self.vehicle.speed_limit = speed_limit;
+        self
+    }
+
+    /// Sets the bearing (direction angle) for the vehicle.
+    ///
+    /// # Arguments
+    /// * `bearing` - The bearing in degrees (clockwise angle from the north).
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_bearing(45.0)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_bearing(mut self, bearing: f64) -> Self {
+        self.vehicle.bearing = bearing;
+        self
+    }
+
+    /// Sets this vehicle's rear safety margin for lane changes, in cells.
+    /// This does not set the longitudinal reserve; use with_standstill_gap for that.
+    ///
+    /// # Arguments
+    /// * `min_safe_distance` - Additional nonnegative rear margin in D >= rear_speed + margin.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_min_safe_distance(3)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_min_safe_distance(mut self, min_safe_distance: i32) -> Self {
+        self.vehicle.min_safe_distance = min_safe_distance;
+        self
+    }
+
+    /// Sets the reserved longitudinal clearance (in cells), during motion and at rest
+    ///
+    /// # Arguments
+    /// * `standstill_gap` - Reserved empty cells ahead during forward motion; 0 keeps bumper to bumper
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    pub fn with_standstill_gap(mut self, standstill_gap: i32) -> Self {
+        self.vehicle.standstill_gap = standstill_gap.max(0);
+        self
+    }
+
+    /// Sets the randomization relative to the leader and the stop time threshold (three phase
+    /// layer); `RelativeRandomization::VDR` keeps the plain rule.
+    ///
+    /// # Arguments
+    /// * `randomization` - The parameter set, clamped to non negative values.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::{RelativeRandomization, Vehicle};
+    /// let vehicle = Vehicle::new(1).with_relative_randomization(RelativeRandomization::KKW).build();
+    /// assert_eq!(vehicle.relative_randomization.stop_time_threshold, 5);
+    /// ```
+    pub fn with_relative_randomization(mut self, randomization: RelativeRandomization) -> Self {
+        self.vehicle.relative_randomization = randomization.clamped();
+        self
+    }
+
+    /// Sets speed adaptation and its stochastic corrections.
+    ///
+    /// # Arguments
+    ///
+    /// * `parameters` - Configuration in cells and ticks; DISABLED preserves the legacy rule.
+    pub fn with_synchronization(mut self, parameters: SynchronizationParameters) -> Self {
+        self.vehicle.synchronization = parameters.clamped();
+        self
+    }
+
+    /// Sets final cell for the vehicle's trip
+    ///
+    /// # Arguments
+    /// * `cell_id` - Cell's identifier
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_destination(20)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_destination(mut self, cell_id: CellID) -> Self {
+        self.vehicle.destination = cell_id;
+        self.vehicle.trip_destination = cell_id;
+        self
+    }
+
+    /// Overrides the trip-completion destination independently of the immediate `destination`.
+    ///
+    /// `with_destination` sets both the immediate `destination` and the `trip_destination`
+    /// (where the trip is considered complete) to the same cell. For a multi-stop bus these
+    /// differ: the immediate destination starts at the FIRST transit stop (and is advanced
+    /// stop-by-stop during movement), while the trip only completes at the LAST stop. Call
+    /// this AFTER `with_destination` to set the completion cell separately.
+    ///
+    /// # Arguments
+    /// * `cell_id` - Cell at which the trip is considered complete
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    pub fn with_trip_destination(mut self, cell_id: CellID) -> Self {
+        self.vehicle.trip_destination = cell_id;
+        self
+    }
+
+    /// Establishes source and target cells of maneuver for the vehicle's tail and vehicle's tail intention maneuver (in case when vehicle has size more that one cell)
+    ///
+    /// # Arguments
+    /// * `source_cell` - The ID of the source cell
+    /// * `target_cell` - The ID of the target cell
+    /// * `maneuver` - The type of lane change the vehicle's tail is performing. This can be `Left`, `Right`, or `None`. Should not be 'Undefined' (except initialization). See the ref. at `LaneChangeType`
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// use micro_traffic_sim_core::maneuver::LaneChangeType;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_tail_intention_maneuver(10, 20, LaneChangeType::ChangeRight)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_tail_intention_maneuver(
+        mut self,
+        source_cell: CellID,
+        target_cell: CellID,
+        maneuver: LaneChangeType,
+    ) -> Self {
+        self.vehicle.intention.tail_maneuver.source_cell_maneuver = source_cell;
+        self.vehicle.intention.tail_maneuver.target_cell_maneuver = target_cell;
+        self.vehicle.intention.tail_maneuver.intention_maneuver = maneuver;
+        self
+    }
+
+    /// Sets whether the vehicle is a conflict participant.
+    ///
+    /// # Arguments
+    /// * `is_in_conflict` - A boolean indicating if the vehicle is in a conflict state.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_conflict_participation(true)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_conflict_participation(mut self, is_in_conflict: bool) -> Self {
+        self.vehicle.is_conflict_participant = is_in_conflict;
+        self
+    }
+
+    /// Sets corresponding trip identifier
+    ///
+    /// # Arguments
+    /// * `trip` - The ID of the trip
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_trip(12345)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_trip(mut self, trip_id: TripID) -> Self {
+        self.vehicle.trip = trip_id;
+        self
+    }
+
+    /// Sets the cells IDs list in which each cell must be traversed in exact given order by the vehicle
+    ///
+    /// # Arguments
+    /// * `cells` - A list of IDs of cells
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_transit_cells(vec![3, 50, 77])
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_transit_cells(mut self, cells: Vec<CellID>) -> Self {
+        self.vehicle.transit_cells = cells;
+        self
+    }
+
+    /// Sets the probability of the vehicle slowing down randomly.
+    ///
+    /// # Arguments
+    /// * `p` - A value in (0; 1]. 0 - never slowdowns, 1 - slowdowns every time unit
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_slowdown(0.5)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_slowdown(mut self, p: f64) -> Self {
+        self.vehicle.slow_down_factor_p = p;
+        self
+    }
+
+    /// Sets the VDR slow-to-start probability `p0` used while the vehicle is stopped.
+    /// Should be `>= p` (the moving slowdown) for a capacity drop.
+    /// `p0 == p` disables the VDR asymmetry.
+    pub fn with_slow_to_start(mut self, p0: f64) -> Self {
+        self.vehicle.slow_to_start_factor_p0 = p0;
+        self
+    }
+
+    /// Sets the lane-change probability `p1` stochastic anti-weaving gate).
+    /// `1.0` (default) = always change when incentive + safety hold.
+    /// All vehicle lengths use this configured probability.
+    pub fn with_change_p1(mut self, p: f64) -> Self {
+        self.vehicle.change_p1 = p;
+        self
+    }
+
+    /// Sets the reactive-lane-change cooldown DURATION in steps (see `Vehicle::lc_cooldown`).
+    /// `0` (default) = no cooldown (changes freely);
+    /// larger = more hesitant after a change.
+    pub fn with_lc_cooldown(mut self, steps: i64) -> Self {
+        self.vehicle.lc_cooldown = steps;
+        self
+    }
+
+    /// Sets the merge-cycle delay independently of ordinary right-of-way patience.
+    ///
+    /// # Arguments
+    /// * `steps` - Completed waiting ticks; negative values are clamped to zero.
+    pub fn with_yield_cycle_delay(mut self, steps: i32) -> Self {
+        self.vehicle.yield_cycle_delay = steps.max(0);
+        self
+    }
+
+    /// Sets the level of cooperative behavior for the vehicle.
+    ///
+    /// # Arguments
+    /// * `level` - A value in (0; 1]
+    ///   `0` being non-cooperative (fully aggressive) and `1` being fully cooperative
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_cooperative_level(0.4)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    ///
+    pub fn with_cooperative_level(mut self, level: f64) -> Self {
+        self.vehicle.cooperativity = level;
+        self
+    }
+
+    /// Sets the level of aggressive behavior (which is (1.0 - cooperativity) basically) for the vehicle
+    ///
+    /// # Arguments
+    /// * `level` - A value in (0; 1]
+    ///   `1` being fully agressive and `1` being non-aggressive (fully cooperative).
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_aggressive_level(0.8) // So cooperativity becomes 0.2
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_aggressive_level(mut self, level: f64) -> Self {
+        self.vehicle.cooperativity = 1.0 - level;
+        self
+    }
+
+    /// Sets the delay time between two possible accelerations vehicle can do. Use it when it is needed
+    /// to prohibit to the vehicle to do sequential accelerations during simulation.
+    ///
+    /// # Arguments
+    /// * `delay` - The delay time (in time units)
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_acceleration_delay(3)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_acceleration_delay(mut self, delay: i64) -> Self {
+        self.vehicle.timer_non_acceleration = delay;
+        self
+    }
+
+    /// Sets the delay time between two possible maneuvers vehicle can perform. Use it when it is needed
+    /// to prohibit to the vehicle to perform sequential maneuvers during simulation.
+    ///
+    /// # Arguments
+    /// * `delay` - The delay time (in time units)
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_maneuver_delay(3)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_maneuver_delay(mut self, delay: i64) -> Self {
+        self.vehicle.timer_non_maneuvers = delay;
+        self
+    }
+
+    /// Sets the delay time between two possible slowdowns vehicle can do. Use it when it is needed
+    /// to prohibit to the vehicle to do sequential slowdowns during simulation.
+    ///
+    /// # Arguments
+    /// * `delay` - The delay time (in time units)
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_slowdown_delay(3)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_slowdown_delay(mut self, delay: i64) -> Self {
+        self.vehicle.timer_non_slowdown = delay;
+        self
+    }
+
+    /// Sets the relaxation time (in time units) in transit cells (in case when they are set)
+    ///
+    /// # Arguments
+    /// * `t` - The time (in time units) should be spent at each transit stop.
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_relax_time(5)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_relax_time(mut self, t: i32) -> Self {
+        self.vehicle.relax_time = t;
+        self.vehicle.relax_countdown = t;
+        self
+    }
+
+    /// Sets the travel time (in time units) which vehicle has been in movement state.
+    ///
+    /// # Arguments
+    /// * `t` - The travel time (in time units).
+    ///
+    /// # Returns
+    /// A `VehicleBuilder` instance for further method chaining.
+    ///
+    /// # Example
+    /// ```rust
+    /// use micro_traffic_sim_core::agents::Vehicle;
+    /// let vehicle = Vehicle::new(1)
+    ///     .with_travel_time(30)
+    ///     .build();
+    /// println!("Vehicle: {:?}", vehicle);
+    /// ```
+    pub fn with_travel_time(mut self, t: i64) -> Self {
+        self.vehicle.travel_time = t;
+        self
+    }
+
+    /// Builds the final `Vehicle` object with the configured properties.
+    ///
+    /// # Returns
+    /// The fully constructed `Vehicle` object.
+    pub fn build(self) -> Vehicle {
+        self.vehicle
+    }
+
+    /// Builds a reference to the `Vehicle` object.
+    ///
+    /// Obsolete in terms of internal usage (it was used before passing VehiclesStorage
+    /// to the simulation engine). Could be useful for external usage.
+    ///     
+    /// # Returns
+    /// A reference to the `Vehicle` object.
+    pub fn build_ref(self) -> VehicleRef {
+        Rc::new(RefCell::new(self.vehicle))
+    }
+}

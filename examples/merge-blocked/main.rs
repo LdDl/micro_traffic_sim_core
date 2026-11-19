@@ -90,7 +90,7 @@ fn run_scenario(name: &str, parked_cells: &[i64]) {
     session.add_vehicles(vehicles);
 
     let mut trajectory: Vec<i64> = vec![START_CELL];
-    let mut stuck_ticks = 0usize;
+    let mut stuck_ticks: usize = 0;
     let mut completed = 0;
     let mut lost = 0;
 

@@ -1,10 +1,10 @@
+use micro_traffic_sim_core::agents::Vehicle;
 use micro_traffic_sim_core::geom::{Point, new_point};
 use micro_traffic_sim_core::grid::{cell::Cell, road_network::GridRoads, zones::ZoneType};
-use micro_traffic_sim_core::agents::Vehicle;
-use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::simulation::grids_storage::GridsStorage;
-use micro_traffic_sim_core::verbose::init_logger;
+use micro_traffic_sim_core::simulation::session::Session;
 use micro_traffic_sim_core::verbose::VerboseLevel;
+use micro_traffic_sim_core::verbose::init_logger;
 
 fn main() {
     init_logger();
@@ -37,13 +37,11 @@ fn main() {
 
     // Setup simulation
     print_grid(&grid); // Print grid before borrow
-    let grids_storage = GridsStorage::new()
-        .with_vehicles_net(grid)
-        .build();
+    let grids_storage = GridsStorage::new().with_vehicles_net(grid).build();
     let mut session = Session::new(grids_storage, None);
     session.set_verbose_level(VerboseLevel::None);
     session.add_vehicles(vehicles);
-    
+
     // Run simulation and collect data
     let steps_num = 15;
     let mut vehicles_states = vec![];
@@ -79,7 +77,8 @@ fn main() {
                         (f64::NAN, f64::NAN)
                     };
                     // Join intermediate cells as comma-separated string
-                    let intermediate_cells = v.last_intermediate_cells
+                    let intermediate_cells = v
+                        .last_intermediate_cells
                         .iter()
                         .map(|cell| cell.to_string())
                         .collect::<Vec<_>>()
@@ -104,8 +103,30 @@ fn main() {
         }
     }
     println!("step;vehicle_id;vehicle_type;last_speed;last_angle;intermediate_cells;last_cell;x;y");
-    for (step, vehicle_id, vehicle_type, last_speed, last_angle, intermediate_cells, last_cell, x, y) in vehicles_states {
-        println!("{};{};{};{:.5};{:.5};{};{};{:.5};{:.5}", step, vehicle_id, vehicle_type, last_speed, last_angle, intermediate_cells, last_cell, x, y);
+    for (
+        step,
+        vehicle_id,
+        vehicle_type,
+        last_speed,
+        last_angle,
+        intermediate_cells,
+        last_cell,
+        x,
+        y,
+    ) in vehicles_states
+    {
+        println!(
+            "{};{};{};{:.5};{:.5};{};{};{:.5};{:.5}",
+            step,
+            vehicle_id,
+            vehicle_type,
+            last_speed,
+            last_angle,
+            intermediate_cells,
+            last_cell,
+            x,
+            y
+        );
     }
 }
 
@@ -117,7 +138,14 @@ pub fn print_grid(grid: &GridRoads) {
     // First, print all cells (without connections) - this ensures all cells are visible
     for (cell_id, cell) in grid.iter() {
         let pt = cell.get_point();
-        println!("{};{:.5};{:.5};{:.5};{:.5};cell", cell_id, pt.x(), pt.y(), pt.x(), pt.y());
+        println!(
+            "{};{:.5};{:.5};{:.5};{:.5};cell",
+            cell_id,
+            pt.x(),
+            pt.y(),
+            pt.x(),
+            pt.y()
+        );
     }
     // Then, print connections (arrows) only if they exist
     for (cell_id, cell) in grid.iter() {
@@ -127,7 +155,14 @@ pub fn print_grid(grid: &GridRoads) {
         if fwd_id != -1 {
             if let Some(fwd_cell) = grid.get_cell(&fwd_id) {
                 let fwd_pt = fwd_cell.get_point();
-                println!("{};{:.5};{:.5};{:.5};{:.5};forward", cell_id, pt.x(), pt.y(), fwd_pt.x(), fwd_pt.y());
+                println!(
+                    "{};{:.5};{:.5};{:.5};{:.5};forward",
+                    cell_id,
+                    pt.x(),
+                    pt.y(),
+                    fwd_pt.x(),
+                    fwd_pt.y()
+                );
             }
         }
         // Left connection (only if it exists)
@@ -135,7 +170,14 @@ pub fn print_grid(grid: &GridRoads) {
         if left_id != -1 {
             if let Some(left_cell) = grid.get_cell(&left_id) {
                 let left_pt = left_cell.get_point();
-                println!("{};{:.5};{:.5};{:.5};{:.5};left", cell_id, pt.x(), pt.y(), left_pt.x(), left_pt.y());
+                println!(
+                    "{};{:.5};{:.5};{:.5};{:.5};left",
+                    cell_id,
+                    pt.x(),
+                    pt.y(),
+                    left_pt.x(),
+                    left_pt.y()
+                );
             }
         }
         // Right connection (only if it exists)
@@ -143,7 +185,14 @@ pub fn print_grid(grid: &GridRoads) {
         if right_id != -1 {
             if let Some(right_cell) = grid.get_cell(&right_id) {
                 let right_pt = right_cell.get_point();
-                println!("{};{:.5};{:.5};{:.5};{:.5};right", cell_id, pt.x(), pt.y(), right_pt.x(), right_pt.y());
+                println!(
+                    "{};{:.5};{:.5};{:.5};{:.5};right",
+                    cell_id,
+                    pt.x(),
+                    pt.y(),
+                    right_pt.x(),
+                    right_pt.y()
+                );
             }
         }
     }
