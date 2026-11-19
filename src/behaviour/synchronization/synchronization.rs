@@ -7,6 +7,13 @@
 /// The coarse cell size, standing threshold and network rules differ from that paper.
 /// This configuration describes a KKW-inspired extension, not a literal reproduction.
 ///
+/// # Experimental
+///
+/// Physical validation is limited to the tested configurations. This extension
+/// does not establish three-phase behaviour across driver populations and mixtures,
+/// or invariant jam-front propagation through free and synchronized flow.
+/// Its model rules and calibration may change with physical validation.
+///
 /// These parameters configure vehicle dynamics; they do not classify traffic phases.
 /// A brief stop alone does not identify a wide moving jam. Distinguishing synchronized
 /// flow from wide moving jams requires separate observations of flow interruption
@@ -83,12 +90,18 @@ impl SynchronizationParameters {
         start_delay: 0,
     };
 
-    /// Research calibration for 4.5 m cells and one-second ticks.
+    /// Experimental calibration for 4.5 m cells and one-second ticks.
     ///
     /// Use p0=0.425 and a one-cell standstill gap for about two thirds of cars to
     /// reproduce the tested car population. These remain separate vehicle settings.
     /// The probability values are coarse-grid calibration choices, not direct paper
     /// constants. At the positive effective limit, negative noise is disabled.
+    ///
+    /// # Experimental
+    ///
+    /// These values describe the tested one-cell population, not a universal
+    /// calibration for other driver mixtures, vehicle lengths or discretizations.
+    /// See [`SynchronizationParameters`] for the model validation limits.
     pub const COARSE_GRID: Self = Self {
         time_gap: 2.55,
         minimum_moving_range: 0,
